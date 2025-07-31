@@ -1,0 +1,2 @@
+requests>=2.25.0
+zhconv>=1.4.0 
