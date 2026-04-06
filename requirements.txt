@@ -1,0 +1,4 @@
+# Runtime dependencies for AutoAnimeMv
+# Keep this file limited to project runtime dependencies only.
+requests
+zhconv

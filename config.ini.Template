@@ -1,0 +1,103 @@
+[Settings]
+
+# ===== AI 与外部 API =====
+
+# 是否启用 OpenAI 兼容接口进行名称识别。
+USEOPENAIAPI = True
+# True 时优先走 AI；False 时先走传统回退 API。
+OPENAI_PRIORITY_FIRST = True
+# True 时让 AI 直接识别剧名/季/集；False 时只用 AI 标准化标题。
+OPENAI_IDENTIFY_ALL = True
+# OpenAI 兼容网关基础地址；程序会自动拼接 /v1/chat/completions。
+OPENAI_BASE_URL = https://api.longcat.chat/openai
+# 调用的模型名称，需与所选网关支持的模型一致。
+OPENAI_MODEL = LongCat-Flash-Chat
+# OpenAI 请求超时秒数。
+OPENAI_TIMEOUT_SECONDS = 60
+
+# 推荐只在模板中保留环境变量名，不要写真实 key。
+OPENAI_API_KEY_ENV = OPENAI_API_KEY
+# 本地直填 OpenAI key；仅限本机临时调试，公开仓库必须留空。
+OPENAI_API_KEY =
+# 推荐只在模板中保留环境变量名，不要写真实 token。
+TMDB_BEARER_TOKEN_ENV = TMDB_BEARER_TOKEN
+# 本地直填 TMDB token；仅限本机临时调试，公开仓库必须留空。
+TMDB_BEARER_TOKEN =
+
+# 是否启用 BGM 回退搜索。
+USEBGMAPI = True
+# 是否启用 TMDB 回退搜索。
+USETMDBAPI = True
+# 是否启用 Bangumi 中文优化回退搜索。
+USEBANGUMIAPI = True
+
+# ===== 缓存与网络 =====
+
+# API 持久化缓存目录；建议保持在忽略列表中。
+CACHE_DIR = .cache
+# 缓存有效期，单位秒；86400 约等于 1 天。
+CACHE_TTL_SECONDS = 86400
+# 网络错误后的重试次数；0 表示失败后不重试。
+NETERRRECTRYTIMS = 2
+
+# 是否手动启用代理配置。
+USEPROXY = False
+# True 时优先读取系统代理设置。
+USESYSPROXY = False
+# HTTP 代理地址，例如 http://host:port 。
+HTTPPROXY =
+# HTTPS 代理地址，例如 http://host:port 。
+HTTPSPROXY =
+# 全协议代理地址，例如 socks5://host:port 。
+ALLPROXY =
+
+# ===== 文件整理策略 =====
+
+# True 时优先使用硬链接；适合保种场景。
+USELINK = True
+# True 时硬链接失败不自动降级为移动。
+STRICT_MODE = True
+# True 时硬链接失败后自动改为 move；做种场景通常建议 False。
+LINKFAILSUSEMOVEFLAGS = False
+# True 时目标文件已存在也允许覆盖。
+MANDATORYCOVER = True
+# True 时 episode 文件名带上番剧标题，例如 S01E01.番名。
+USETITLTOEP = True
+# True 时字幕后缀使用 Jellyfin 友好的语言标识，如 .简体中文.chi。
+JELLYFINFORMAT = False
+# 命名风格：default 或 emby。
+NAMING_STYLE = default
+# 单个路径组件的最大长度；过长标题会被截断。
+MAX_FILENAME_LENGTH = 180
+# 可选输出目录；留空表示整理到当前扫描目录；相对路径会基于扫描目录解析。
+OUTPUT_PATH =
+
+# ===== 运行与日志 =====
+
+# True 时只预览不真正 move/link，但会记录操作日志。
+DRY_RUN = False
+# 是否写入操作日志，供审计和 rollback 使用。
+OPERATION_LOG_ENABLE = True
+# 操作日志目录；相对路径通常位于扫描目录下。
+OPERATION_LOG_DIR = logs
+
+# 是否在终端打印运行日志。
+PRINTLOGFLAG = True
+# 自动清理多少天前的日志文件。
+RMLOGSFLAG = 7
+
+# ===== 兼容与扩展 =====
+
+# 预留项：是否启用 Telegram Bot 通知。
+USEBOTFLAG = False
+# 启动后延时处理的秒数；0 表示不延时。
+TIMELAPSE = 0
+# True 时季/集不补零，例如 01 -> 1。
+SEEPSINGLECHARACTER = False
+# True 时 API 搜索只取文件名中的中文部分。
+APIREQUESTSONLYUSECH = False
+# True 时仅处理带 anime tag 的任务。
+USEANIMETAG = False
+
+# 扩展模块排除列表；填写 `Ext` 目录下不想加载的模块名（不带 .py）。
+NOTLOADEXTLIST = []
