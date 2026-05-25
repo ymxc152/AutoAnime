@@ -6,11 +6,13 @@
 
 ## 功能概览
 - 支持 OpenAI 兼容接口优先识别剧名、季、集
-- 支持 `Bangumi`、`BGM`、`TMDB` 作为回退数据源
+- 支持用 AI 罗马音/英文优先查询 `TMDB` 回填中文名，未命中再回退 AI 中文名
+- 支持 `Bangumi`、`BGM`、`TMDB` 作为 AI 失败时的回退数据源
 - 支持视频与字幕联动整理
 - 支持 `default` / `emby` 两种命名风格
 - 支持硬链接、`--dry-run` 预览、操作日志和回滚
 - 支持递归扫描子目录，并可指定独立输出目录
+- 硬链接模式下若目标已存在，默认保留原文件，并缓存新重复资源的识别结果以减少后续重复识别
 
 ## 安装
 ```bash
@@ -50,6 +52,8 @@ python AutoAnimeMv.py rollback --log ".\logs\AutoAnime_operations_xxx.json"
 ```bash
 python AutoAnimeMv.py "%D" "%N" "%C" "%L"
 ```
+
+未完成下载的临时文件（如 `.!qB`、`.part`、`.partial`、`.aria2`、`.crdownload`）会自动跳过，不参与番剧整理。
 
 ## 关键配置
 - `USEOPENAIAPI` / `OPENAI_PRIORITY_FIRST` / `OPENAI_IDENTIFY_ALL`: AI 识别链路开关

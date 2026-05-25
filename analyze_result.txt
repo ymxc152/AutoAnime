@@ -1,0 +1,367 @@
+分析 500 个日志文件
+总记录数: 504
+
+字段: ['timestamp', 'action', 'src', 'dst', 'status', 'message', 'backup']
+
+=== Status 分布 ===
+  success: 363
+  skipped: 137
+  recover: 4
+
+=== Action 分布 ===
+  link: 364
+  skip: 140
+
+=== Message 分布 ===
+  : 363
+  already_organized_show_cache: 136
+  already_organized_show_cache_stale: 4
+  existing_link_kept: 1
+
+=== 分析所有成功/失败记录中的标题识别问题 ===
+
+共识别出 122 个不同的番剧名称
+
+最常出现的番剧名称 (前30):
+  欢迎来到实力至上主义的教室: 21次
+  主播女孩重度依赖: 15次
+  邻家的天使同学: 14次
+  想结束这场“我爱你”的游戏: 12次
+  上伊那牡丹，酒醉身姿似百合花般: 11次
+  最强王者的第二人生: 10次
+  公鸡斗士: 9次
+  杀手青春: 9次
+  又被杀掉了呢，侦探大人: 8次
+  和班上第二可爱的女孩子成为了朋友: 8次
+  婚姻剧毒: 8次
+  Re：从零开始的异世界生活: 8次
+  异兽魔都: 8次
+  加油！中村同学！！: 8次
+  淡岛百景: 8次
+  吞噬魔物的冒险者～只有我能通过吞噬魔物变强～: 8次
+  弱弱老师: 8次
+  黄泉的使者: 8次
+  春夏秋冬代行者 春之舞: 8次
+  勇者之屑: 8次
+  异世界悠闲农家: 7次
+  钢之炼金术师: 7次
+  身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。: 7次
+  女神“异世界转生想成为什么”我“勇者的肋骨”: 7次
+  木头风纪委员和迷你裙JK的故事: 7次
+  女骑士成为蛮族新娘: 7次
+  迦楠大人的白给是恶魔级: 7次
+  出租女友: 6次
+  溜掉的大鱼比不上自己钓到的鱼: 6次
+  关于我转生变成史莱姆这档事: 6次
+
+=== 详细案例分析 (前50条非skip记录) ===
+
+--- 案例 1 ---
+SRC: [Nekomoe kissaten][Shunkashuutou Daikousha - Haru no Mai][05][1080p][JPSC].mp4
+DST: F:\动漫库\猫娘咖啡馆 春之舞\Season00\S00E00.猫娘咖啡馆 春之舞.mp4
+MSG: 
+
+--- 案例 2 ---
+SRC: [Studio GreenTea] Tsue to Tsurugi no Wistoria [15][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+DST: F:\动漫库\钢之炼金术师\Season02\S02E15.钢之炼金术师.mp4
+MSG: 
+
+--- 案例 3 ---
+SRC: [ANi] 我和班上第二可愛的女生成為朋友 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\和班上第二可爱的女孩子成为了朋友\Season01\S01E04.和班上第二可爱的女孩子成为了朋友.mp4
+MSG: 
+
+--- 案例 4 ---
+SRC: [ANi] 複製品的我也會談戀愛 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\他和她的故事\Season01\S01E04.他和她的故事.mp4
+MSG: 
+
+--- 案例 5 ---
+SRC: [ANi] 婚姻劇毒 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\婚姻剧毒\Season01\S01E04.婚姻剧毒.mp4
+MSG: 
+
+--- 案例 6 ---
+SRC: [ANi] 想結束這場「我愛你」的遊戲 - 03 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\想结束这场“我爱你”的游戏\Season01\S01E03.想结束这场“我爱你”的游戏.mp4
+MSG: 
+
+--- 案例 7 ---
+SRC: [ANi] 百鬼夜行抄 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\百鬼夜行抄\Season01\S01E04.百鬼夜行抄.mp4
+MSG: 
+
+--- 案例 8 ---
+SRC: [ANi] 成為悲劇元兇的最強異端，最後頭目女王為了人民犧牲奉獻 第二季 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。\Season02\S02E04.身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。.mp4
+MSG: 
+
+--- 案例 9 ---
+SRC: [ANi] 左撇子艾倫 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\进击的巨人\Season02\S02E04.进击的巨人.mp4
+MSG: 
+
+--- 案例 10 ---
+SRC: [ANi] 我回來了，他又來打擾了！ - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\我回来了，他又来打扰了！\Season01\S01E04.我回来了，他又来打扰了！.mp4
+MSG: 
+
+--- 案例 11 ---
+SRC: [ANi] 女神「異世界轉生想成為什麼」我「勇者的肋骨」 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\女神“异世界转生想成为什么”我“勇者的肋骨”\Season01\S01E04.女神“异世界转生想成为什么”我“勇者的肋骨”.mp4
+MSG: 
+
+--- 案例 12 ---
+SRC: [Studio GreenTea] Niwatori Fighter [04][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+DST: F:\动漫库\公鸡斗士\Season01\S01E04.公鸡斗士.mp4
+MSG: 
+
+--- 案例 13 ---
+SRC: [ANi] 出租女友 第五季 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\出租女友\Season05\S05E04.出租女友.mp4
+MSG: 
+
+--- 案例 14 ---
+SRC: [ANi] 歡迎來到實力至上主義的教室 第四季 2年級篇 第一學期 - 08 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\欢迎来到实力至上主义的教室\Season04\S04E08.欢迎来到实力至上主义的教室.mp4
+MSG: 
+
+--- 案例 15 ---
+SRC: [ANi] 從前從前有隻貓！世界喵童話 - 29 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\会动的！从前从前有只猫 世界喵童话\Season01\S01E29.会动的！从前从前有只猫 世界喵童话.mp4
+MSG: 
+
+--- 案例 16 ---
+SRC: [ANi] Re：從零開始的異世界生活 第四季 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\Re：从零开始的异世界生活\Season04\S04E04.Re：从零开始的异世界生活.mp4
+MSG: 
+
+--- 案例 17 ---
+SRC: [ANi] 異獸魔都 第二季 - 19 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\异兽魔都\Season02\S02E19.异兽魔都.mp4
+MSG: 
+
+--- 案例 18 ---
+SRC: [ANi] 溜掉的大魚比不上自己釣到的魚 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\事与愿违的不死冒险者\Season01\S01E05.事与愿违的不死冒险者.mp4
+MSG: 
+
+--- 案例 19 ---
+SRC: [Sakurato] Mairimashita! Iruma-kun (2026) [04][AVC-8bit 1080P AAC][CHS].mp4
+DST: F:\动漫库\欢迎来到实力至上主义的教室\Season01\S01E04.欢迎来到实力至上主义的教室.mp4
+MSG: 
+
+--- 案例 20 ---
+SRC: [ANi] CANDY CARIES 蛀在糖糖裡 - 03 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\Candy Caries 蛀在糖糖里\Season01\S01E03.Candy Caries 蛀在糖糖里.mp4
+MSG: 
+
+--- 案例 21 ---
+SRC: [ANi] 加油！中村同學！！ - 06 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\加油！中村同学！！\Season01\S01E06.加油！中村同学！！.mp4
+MSG: 
+
+--- 案例 22 ---
+SRC: [ANi] 終末起點 第 2 季 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\最强王者的第二人生\Season02\S02E05.最强王者的第二人生.mp4
+MSG: 
+
+--- 案例 23 ---
+SRC: [LoliHouse] Replica datte, Koi wo Suru. - 04 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+DST: F:\动漫库\约会大作战\Season01\S01E04.约会大作战.mkv
+MSG: 
+
+--- 案例 24 ---
+SRC: [LoliHouse] Nigetsuri - 05 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+DST: F:\动漫库\溜掉的大鱼比不上自己钓到的鱼\Season01\S01E05.溜掉的大鱼比不上自己钓到的鱼.mkv
+MSG: 
+
+--- 案例 25 ---
+SRC: [LoliHouse] Otaku ni Yasashii Gal wa Inai - 04 [WebRip 1080p HEVC-10bit AAC].mkv
+DST: F:\动漫库\哪里有温柔对待阿宅的辣妹！？\Season01\S01E04.哪里有温柔对待阿宅的辣妹！？.mkv
+MSG: 
+
+--- 案例 26 ---
+SRC: [ANi] 想看她一臉嫌惡地露出褲褲 R - 01 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\尼尔：自动人形\Season01\S01E01.尼尔：自动人形.mp4
+MSG: 
+
+--- 案例 27 ---
+SRC: [ANi] 女騎士成為蠻族新娘 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\女骑士成为蛮族新娘\Season01\S01E04.女骑士成为蛮族新娘.mp4
+MSG: 
+
+--- 案例 28 ---
+SRC: [ANi] 輪迴的花瓣 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\轮回的花瓣\Season01\S01E05.轮回的花瓣.mp4
+MSG: 
+
+--- 案例 29 ---
+SRC: [ANi] 霧尾粉絲後援會 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\雾尾粉丝后援会\Season01\S01E05.雾尾粉丝后援会.mp4
+MSG: 
+
+--- 案例 30 ---
+SRC: [ANi] Dr.STONE 新石紀 第四季 - 29 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\石纪元\Season04\S04E29.石纪元.mp4
+MSG: 
+
+--- 案例 31 ---
+SRC: [ANi] 庫吉馬唱歌的家 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\动物合唱团\Season01\S01E04.动物合唱团.mp4
+MSG: 
+
+--- 案例 32 ---
+SRC: [ANi] 淡島百景 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\淡岛百景\Season01\S01E04.淡岛百景.mp4
+MSG: 
+
+--- 案例 33 ---
+SRC: [ANi] 你又被殺了呢，偵探大人 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\又被杀掉了呢，侦探大人\Season01\S01E05.又被杀掉了呢，侦探大人.mp4
+MSG: 
+
+--- 案例 34 ---
+SRC: [ANi] 吞噬魔物的冒險者 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\吞噬魔物的冒险者～只有我能通过吞噬魔物变强～\Season01\S01E05.吞噬魔物的冒险者～只有我能通过吞噬魔物变强～.mp4
+MSG: 
+
+--- 案例 35 ---
+SRC: [LoliHouse] Dorohedoro S2 - 07 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+DST: F:\动漫库\异兽魔都\Season02\S02E07.异兽魔都.mkv
+MSG: 
+
+--- 案例 36 ---
+SRC: [LoliHouse] Mata Korosarete Shimatta no desu ne, Tantei-sama - 05 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+DST: F:\动漫库\又被杀掉了呢，侦探大人\Season01\S01E05.又被杀掉了呢，侦探大人.mkv
+MSG: 
+
+--- 案例 37 ---
+SRC: [Sakurato] Ookii Onnanoko wa Suki Desuka？ [04][AVC-8bit 1080P AAC][CHS].mp4
+DST: F:\动漫库\这样高大的女孩子你喜欢吗？\Season01\S01E04.这样高大的女孩子你喜欢吗？.mp4
+MSG: 
+
+--- 案例 38 ---
+SRC: [hyakuhuyu&LoliHouse] GANSO BanG Dream Chan - 30 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+DST: F:\动漫库\哆啦A梦：大雄的南海大冒险\Season01\S01E30.哆啦A梦：大雄的南海大冒险.mkv
+MSG: 
+
+--- 案例 39 ---
+SRC: [ANi] 關於我在無意間被隔壁的天使變成廢柴這件事 2 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\关于我转生变成史莱姆这档事\Season02\S02E05.关于我转生变成史莱姆这档事.mp4
+MSG: 
+
+--- 案例 40 ---
+SRC: [ANi] 上伊那牡丹，醉姿如百合 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\上伊那牡丹，酒醉身姿似百合花般\Season01\S01E04.上伊那牡丹，酒醉身姿似百合花般.mp4
+MSG: 
+
+--- 案例 41 ---
+SRC: [Nekomoe kissaten][KILL BLUE][03][1080p][JPSC].mp4
+DST: F:\动漫库\杀手青春\Season01\S01E03.杀手青春.mp4
+MSG: 
+
+--- 案例 42 ---
+SRC: [ANi] 神之雫 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\神之水滴\Season01\S01E04.神之水滴.mp4
+MSG: 
+
+--- 案例 43 ---
+SRC: [ANi] 凍結地球 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\冻结地球\Season01\S01E05.冻结地球.mp4
+MSG: 
+
+--- 案例 44 ---
+SRC: [Nekomoe kissaten][Kamiina Botan, Yoeru Sugata wa Yuri no Hana][04][1080p][JPSC].mp4
+DST: F:\动漫库\猫娘咖啡馆\Season00\S00E00.猫娘咖啡馆.mp4
+MSG: 
+
+--- 案例 45 ---
+SRC: [Nekomoe kissaten&LoliHouse] LIAR GAME - 04 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+DST: F:\动漫库\欺诈游戏\Season01\S01E04.欺诈游戏.mkv
+MSG: 
+
+--- 案例 46 ---
+SRC: [ANi] 拉拉熊 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\轻松熊\Season01\S01E05.轻松熊.mp4
+MSG: 
+
+--- 案例 47 ---
+SRC: [LoliHouse] Hokuto no Ken FIST OF THE NORTH STAR - 06 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+DST: F:\动漫库\北斗神拳\Season01\S01E06.北斗神拳.mkv
+MSG: 
+
+--- 案例 48 ---
+SRC: [Studio GreenTea] Niwatori Fighter [05][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+DST: F:\动漫库\公鸡斗士\Season01\S01E05.公鸡斗士.mp4
+MSG: 
+
+--- 案例 49 ---
+SRC: [ANi] 我的英雄學院 FINAL SEASON - 171 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\我的英雄学院\Season04\S04E171.我的英雄学院.mp4
+MSG: 
+
+--- 案例 50 ---
+SRC: [ANi] 入間同學入魔了！第四季 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+DST: F:\动漫库\入间同学入魔了！\Season04\S04E05.入间同学入魔了！.mp4
+MSG: 
+
+=== 分析原始文件名中的发布组/字幕组标记 ===
+
+发布组分布 (前20):
+  [ANi]: 224次
+  [LoliHouse]: 137次
+  [Studio GreenTea]: 47次
+  [Nekomoe kissaten]: 24次
+  [Nekomoe kissaten&LoliHouse]: 23次
+  [Sakurato]: 20次
+  [hyakuhuyu&LoliHouse]: 8次
+  [DMG&SumiSora&LoliHouse]: 6次
+  [Prejudice-Studio]: 6次
+  [Ends with Love&LoliHouse]: 4次
+  [FreesiaSub&LoliHouse]: 3次
+  [SweetSub&LoliHouse]: 2次
+
+=== 可能的识别问题分析 ===
+
+发现 30 个潜在问题案例
+  [long_name] 身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。
+    SRC: [ANi] 成為悲劇元兇的最強異端，最後頭目女王為了人民犧牲奉獻 第二季 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 女神“异世界转生想成为什么”我“勇者的肋骨”
+    SRC: [ANi] 女神「異世界轉生想成為什麼」我「勇者的肋骨」 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 女神“异世界转生想成为什么”我“勇者的肋骨”
+    SRC: [LoliHouse] Yuusha no Rokkotsu de - 04 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  [long_name] 吞噬魔物的冒险者～只有我能通过吞噬魔物变强～
+    SRC: [ANi] 吞噬魔物的冒險者 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 吞噬魔物的冒险者～只有我能通过吞噬魔物变强～
+    SRC: [LoliHouse] Mamonogurai no Boukensha - 05 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  [long_name] 最强的职业不是勇者也不是贤者好像是鉴定士（伪）的样子？
+    SRC: [LoliHouse] Kanteishi (Kari) - 06 [WebRip 1080p HEVC-10bit AAC].mkv
+  [long_name] 身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。
+    SRC: [FreesiaSub&LoliHouse] LasTame S2 - 04 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  [long_name] 身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。
+    SRC: [ANi] 成為悲劇元兇的最強異端，最後頭目女王為了人民犧牲奉獻 第二季 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 女神“异世界转生想成为什么”我“勇者的肋骨”
+    SRC: [ANi] 女神「異世界轉生想成為什麼」我「勇者的肋骨」 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 吞噬魔物的冒险者～只有我能通过吞噬魔物变强～
+    SRC: [ANi] 吞噬魔物的冒險者 - 06 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 吞噬魔物的冒险者～只有我能通过吞噬魔物变强～
+    SRC: [LoliHouse] Mamonogurai no Boukensha - 06 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  [long_name] 爱书的下克上：为了成为图书管理员不择手段！
+    SRC: [ANi] 小書痴的下剋上 為了成為圖書管理員不擇手段！領主的養女 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 最强的职业不是勇者也不是贤者好像是鉴定士（伪）的样子？
+    SRC: [LoliHouse] Kanteishi (Kari) - 07 [WebRip 1080p HEVC-10bit AAC].mkv
+  [long_name] 身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。
+    SRC: [FreesiaSub&LoliHouse] LasTame S2 - 05 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  [long_name] 猫枕咖啡店 17 1080p JPSC.mp4
+    SRC: [Nekomoe kissaten][Tsue to Tsurugi no Wistoria][17][1080p][JPSC].mp4
+  [long_name] 身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。
+    SRC: [ANi] 成為悲劇元兇的最強異端，最後頭目女王為了人民犧牲奉獻 第二季 - 06 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 女神“异世界转生想成为什么”我“勇者的肋骨”
+    SRC: [ANi] 女神「異世界轉生想成為什麼」我「勇者的肋骨」 - 06 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 女神“异世界转生想成为什么”我“勇者的肋骨”
+    SRC: [LoliHouse] Yuusha no Rokkotsu de - 06 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  [long_name] 吞噬魔物的冒险者～只有我能通过吞噬魔物变强～
+    SRC: [ANi] 吞噬魔物的冒險者 - 07 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  [long_name] 吞噬魔物的冒险者～只有我能通过吞噬魔物变强～
+    SRC: [LoliHouse] Mamonogurai no Boukensha - 07 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv

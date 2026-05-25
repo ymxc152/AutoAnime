@@ -1,0 +1,190 @@
+=== 1. 分析同一原文件名/相似文件名是否被识别为不同结果 ===
+
+=== 2. 严重误识别案例分析 ===
+发现 37 个确认的误识别案例:
+
+SRC: [Nekomoe kissaten][Shunkashuutou Daikousha - Haru no Mai][05][1080p][JPSC].mp4
+  → 识别为: 猫娘咖啡馆 春之舞
+
+SRC: [Studio GreenTea] Tsue to Tsurugi no Wistoria [15][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 钢之炼金术师
+
+SRC: [ANi] 複製品的我也會談戀愛 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 他和她的故事
+
+SRC: [ANi] 左撇子艾倫 - 04 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 进击的巨人
+
+SRC: [Studio GreenTea] Niwatori Fighter [04][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 公鸡斗士
+
+SRC: [Sakurato] Mairimashita! Iruma-kun (2026) [04][AVC-8bit 1080P AAC][CHS].mp4
+  → 识别为: 欢迎来到实力至上主义的教室
+
+SRC: [LoliHouse] Replica datte, Koi wo Suru. - 04 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  → 识别为: 约会大作战
+
+SRC: [hyakuhuyu&LoliHouse] GANSO BanG Dream Chan - 30 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  → 识别为: 哆啦A梦：大雄的南海大冒险
+
+SRC: [ANi] 關於我在無意間被隔壁的天使變成廢柴這件事 2 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 关于我转生变成史莱姆这档事
+
+SRC: [Studio GreenTea] Niwatori Fighter [05][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 公鸡斗士
+
+SRC: [LoliHouse] Mairimashita! Iruma-kun S4 - 05 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  → 识别为: 欢迎来到实力至上主义的教室
+
+SRC: [Studio GreenTea] Tsue to Tsurugi no Wistoria [16][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 钢之炼金术师
+
+SRC: [ANi] 複製品的我也會談戀愛 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 他和她的故事
+
+SRC: [ANi] 左撇子艾倫 - 05 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 进击的巨人
+
+SRC: [LoliHouse] Replica datte, Koi wo Suru. - 05 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  → 识别为: 约会大作战
+
+SRC: [ANi] 關於我在無意間被隔壁的天使變成廢柴這件事 2 - 06 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 关于我转生变成史莱姆这档事
+
+SRC: [LoliHouse] Mairimashita! Iruma-kun S4 - 06 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  → 识别为: 欢迎来到实力至上主义的教室
+
+SRC: [Sakurato] Mairimashita! Iruma-kun (2026) [05][AVC-8bit 1080P AAC][CHS].mp4
+  → 识别为: 欢迎来到实力至上主义的教室
+
+SRC: [Nekomoe kissaten&LoliHouse] Tsue to Tsurugi no Wistoria - 16 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  → 识别为: 钢之炼金术师
+
+SRC: [Nekomoe kissaten&LoliHouse] Tsue to Tsurugi no Wistoria - 17 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  → 识别为: 钢之炼金术师
+
+SRC: [Nekomoe kissaten][Shunkashuutou Daikousha - Haru no Mai][06][1080p][JPSC].mp4
+  → 识别为: 猫娘咖啡馆 春之舞
+
+SRC: [ANi] 左撇子艾倫 - 06 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 进击的巨人
+
+SRC: [ANi] 複製品的我也會談戀愛 - 06 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 他和她的故事
+
+SRC: [Studio GreenTea] Tsue to Tsurugi no Wistoria [17][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 钢之炼金术师
+
+SRC: [Sakurato] Mairimashita! Iruma-kun (2026) [06][AVC-8bit 1080P AAC][CHS].mp4
+  → 识别为: 欢迎来到实力至上主义的教室
+
+SRC: [ANi] 關於我在無意間被隔壁的天使變成廢柴這件事 2 - 07 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 关于我转生变成史莱姆这档事
+
+SRC: [LoliHouse] Mairimashita! Iruma-kun S4 - 07 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  → 识别为: 欢迎来到实力至上主义的教室
+
+SRC: [Nekomoe kissaten&LoliHouse] Tsue to Tsurugi no Wistoria - 18 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  → 识别为: 钢之炼金术师
+
+SRC: [LoliHouse] Replica datte, Koi wo Suru. - 06 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv
+  → 识别为: 约会大作战
+
+SRC: [ANi] 複製品的我也會談戀愛 - 07 [1080P][Baha][WEB-DL][AAC AVC][CHT].mp4
+  → 识别为: 他和她的故事
+
+SRC: [Studio GreenTea] Tsue to Tsurugi no Wistoria [18][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 钢之炼金术师
+
+SRC: [Studio GreenTea] Niwatori Fighter [06][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 公鸡斗士
+
+SRC: [Studio GreenTea] Niwatori Fighter [07][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 公鸡斗士
+
+SRC: [Nekomoe kissaten][Shunkashuutou Daikousha - Haru no Mai][08][1080p][JPSC].mp4
+  → 识别为: 猫娘咖啡馆 春之舞 [08
+
+SRC: [Studio GreenTea] Niwatori Fighter [08][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 公鸡斗士
+
+SRC: [Studio GreenTea] Niwatori Fighter [09][WebRip][HEVC-10bit 1080p AAC][JPSC].mp4
+  → 识别为: 公鸡斗士
+
+SRC: [LoliHouse] Mairimashita! Iruma-kun S4 - 08 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv
+  → 识别为: 欢迎来到实力至上主义的教室
+
+=== 3. 同一番剧名的来源多样性分析 (可能暗示缓存污染) ===
+
+番剧: 又被杀掉了呢，侦探大人
+  来源多样性高 (3 种不同文件名):
+    - mata korosarete shimatta no desu ne, tantei-sama [
+    - 你又被殺了呢，偵探大人
+    - mata korosarete shimatta no desu ne, tantei-sama
+
+番剧: 想结束这场“我爱你”的游戏
+  来源多样性高 (3 种不同文件名):
+    - 想結束這場「我愛你」的遊戲
+    - aishiteru game wo owarasetai [
+    - aishiteru game wo owarasetai
+
+番剧: 欢迎来到实力至上主义的教室
+  来源多样性高 (4 种不同文件名):
+    - youkoso jitsuryoku shijou shugi no kyoushitsu e s
+    - mairimashita! iruma-kun s
+    - 歡迎來到實力至上主義的教室 第四季
+    - mairimashita! iruma-kun (
+
+番剧: 邻家的天使同学
+  来源多样性高 (4 种不同文件名):
+    - otonari no tenshi-sama s
+    - otonari no tenshi-sama ni itsunomanika dame ningen ni sareteita ken s
+    - otonari no tenshi-sama ni itsunomanika dame ningen ni sareteita ken
+    - 關於我在無意間被隔壁的天使變成廢柴這件事
+
+番剧: 主播女孩重度依赖
+  来源多样性高 (3 种不同文件名):
+    - 主播女孩重度依賴
+    - needy girl overdose
+    - needy girl overdose [
+
+番剧: 上伊那牡丹，酒醉身姿似百合花般
+  来源多样性高 (4 种不同文件名):
+    - 上伊那牡丹，醉姿如百合
+    - kamiina botan, yoeru sugata wa yuri no hana [
+    - [kamiina botan, yoeru sugata wa yuri no hana][
+    - kamiina botan, yoeru sugata wa yuri no hana
+
+番剧: 杀手青春
+  来源多样性高 (3 种不同文件名):
+    - 殺手青春
+    - kill blue
+    - [kill blue][
+
+番剧: 春夏秋冬代行者 春之舞
+  来源多样性高 (3 种不同文件名):
+    - 春夏秋冬代行者 春之舞
+    - [shunkashuutou daikousha - haru no mai][
+    - shunkashuutou daikousha - haru no mai
+
+番剧: 勇者之屑
+  来源多样性高 (3 种不同文件名):
+    - 勇者之渣
+    - yuusha no rokkotsu de
+    - yuusha no kuzu
+
+=== 4. Season/Episode 异常案例分析 ===
+
+集数不匹配!
+  SRC: [Sakurato] Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken 2 [05][AVC-8bit 1080P AAC][CHS].mp4 (集数: 2)
+  DST: F:\动漫库\邻家的天使同学\Season02\S02E05.邻家的天使同学.mkv (集数: 5)
+
+集数不匹配!
+  SRC: [Sakurato] Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken 2 [06][AVC-8bit 1080P AAC][CHS].mp4 (集数: 2)
+  DST: F:\动漫库\邻家的天使同学\Season01\S01E06.邻家的天使同学.mp4 (集数: 6)
+
+集数不匹配!
+  SRC: [Sakurato] Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken 2 [07][AVC-8bit 1080P AAC][CHS].mp4 (集数: 2)
+  DST: F:\动漫库\邻家的天使同学\Season01\S01E07.邻家的天使同学.mp4 (集数: 7)
+
+=== 5. Season 异常案例分析 ===

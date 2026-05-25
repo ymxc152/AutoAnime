@@ -3,6 +3,8 @@ from unittest.mock import patch
 
 import AutoAnimeMv as aam
 
+from tests.test_refactor_features import _reset_aam_caches
+
 
 class TestIdentification(TestCase):
     def setUp(self):
@@ -10,14 +12,21 @@ class TestIdentification(TestCase):
             aam, "Auxiliary_LoadModule", return_value=None
         ):
             aam.Start_PATH()
+        _reset_aam_caches(aam)
         aam.PRINTLOGFLAG = False
         aam.USELINK = False
         aam.MANDATORYCOVER = True
         aam.CategoryName = ""
 
     def test_processing_identification_extract_episode_and_name(self):
+        """当前 `Processing_Identification` 要求 OpenAI 识别成功，mock 以解耦网络。"""
         file_name = "[LoliHouse] 葬送的芙莉莲 - 03 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"
-        result = aam.Processing_Identification(file_name)
+        with patch.object(
+            aam,
+            "Auxiliary_OpenAIIdentifyFileInfo",
+            return_value=("01", "03", "", "03", "葬送的芙莉莲"),
+        ):
+            result = aam.Processing_Identification(file_name)
         self.assertIsNotNone(result)
 
         se, ep, raw_se, raw_ep, raw_name = result
