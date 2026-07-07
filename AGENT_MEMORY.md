@@ -63,11 +63,29 @@
 - `tests/test_episode_rules.py`（新增）
 
 ## 待办 / 下一步
-- [ ] 全量 dry-run 回归验证（使用最终配置）。
-- [ ] 清理工作区 diff（README/docs 等非代码改动需确认归属）。
+- [x] 全量 dry-run 回归验证（使用最终配置，临时禁用 OpenAI 避免超时）。
+- [x] 清理工作区 diff（已本地提交）。
 - [ ] 配置 TMDB token 后验证 TMDB 路径兼容性。
 - [ ] 继续补充 `_MANUAL_SEASON_LAYOUT` 其他长篇番剧。
 - [ ] 处理 DRY_RUN 模式下 ShowIndex「自愈」反复触发的问题（review_report 遗漏 1）。
+- [ ] 建议用户将 `config.ini` 中 `USEOPENAIAPI` 设为 `False`（当前 API 已过期）。
+
+## 最终回归验证结果（第 6 单元）
+- **测试**：`python -m pytest tests/ -q` → **81 passed**
+- **dry-run**：`python AutoAnimeMv2.py "F:/下载" --output-path "F:/test" --dry-run`（OpenAI 临时禁用）
+  - 完整跑完，末尾 `一切工作已经完成,用时33.47s`
+  - `UnicodeEncodeError`：0 次
+  - `gbk codec`：0 次
+  - `剧名漂移保护：复用已有 CanonicalID`：0 次
+  - `剧名漂移保护拒绝`：170 次
+  - `BangumiApi查询失败`：250 次（网络/代理问题，非代码问题）
+  - `剧名未收敛到中文`：124 次（Bangumi 网络不可达 + TMDB token 未配置）
+  - `OpenAI 识别 + 本地回退 + 传统 API 全部失败`：7 次（剧场版/SP）
+  - `绝对集数映射`：10 次
+
+## git 提交
+- commit: `e7fe0a2` "修复 AutoAnimeMv2 回退链路识别错误"
+- 39 files changed, 1388 insertions(+), 1159 deletions(-)
 
 ## 已知限制
 - 当前环境 Bangumi API 网络不可达，dry-run 中 `BangumiApi查询失败` 为网络错误，非代码问题。
