@@ -6,12 +6,15 @@ English | [简体中文](./README.md)
 
 ## Features
 - OpenAI-compatible title, season, and episode recognition
-- Fallback sources via `Bangumi`, `BGM`, and `TMDB`
+- AI failure fallback to local rules + `Bangumi` / `BGM` / `TMDB`
+- OpenAI circuit breaker for consecutive auth/rate-limit failures
+- Single-file mode with automatic sibling subtitle collection
 - Linked handling for video and subtitle files
 - `default` and `emby` naming styles
 - Hard link support for seeding-friendly workflows
 - `--dry-run`, operation logs, and rollback support
 - Recursive scanning and optional separate output directory
+- Schema v2 multi-subfile persistent cache with incremental dirty flush
 
 ## Installation
 ```bash
@@ -28,32 +31,36 @@ python -m pip install -r requirements.txt
 ```powershell
 $env:OPENAI_API_KEY="your-openai-key"
 $env:TMDB_BEARER_TOKEN="your-tmdb-token"
-python AutoAnimeMv.py "D:\Anime" --dry-run
-python AutoAnimeMv.py "D:\Anime"
+python AutoAnimeMv2.py "D:\Anime" --dry-run
+python AutoAnimeMv2.py "D:\Anime"
 ```
 
 ## Common Commands
 ```bash
-# Local batch processing
-python AutoAnimeMv.py "D:\Anime"
+# Local batch processing (scan directory)
+python AutoAnimeMv2.py "D:\Anime"
+
+# Single-file mode (auto-collects sibling subtitles)
+python AutoAnimeMv2.py "D:\Anime\[Subbers] Anime Name - 01.mkv"
 
 # Emby-style naming
-python AutoAnimeMv.py "D:\Anime" --naming-style emby
+python AutoAnimeMv2.py "D:\Anime" --naming-style emby
 
 # Use a separate output directory
-python AutoAnimeMv.py "D:\Anime" --output-path "D:\AnimeLibrary"
+python AutoAnimeMv2.py "D:\Anime" --output-path "D:\AnimeLibrary"
 
 # Roll back a previous run
-python AutoAnimeMv.py rollback --log ".\logs\AutoAnime_operations_xxx.json"
+python AutoAnimeMv2.py rollback --log ".\logs\AutoAnime_operations_xxx.json"
 ```
 
 ## qBittorrent Callback Example
 ```bash
-python AutoAnimeMv.py "%D" "%N" "%C" "%L"
+python AutoAnimeMv2.py "%D" "%N" 1
 ```
 
 ## Important Configuration
 - `USEOPENAIAPI` / `OPENAI_PRIORITY_FIRST` / `OPENAI_IDENTIFY_ALL`: AI recognition flow
+- `OPENAI_FALLBACK_ON_FAILURE` / `OPENAI_FALLBACK_BREAKER_THRESHOLD`: fallback and circuit breaker when AI fails
 - `OPENAI_API_KEY_ENV` / `TMDB_BEARER_TOKEN_ENV`: credential environment variable names
 - `USELINK` / `STRICT_MODE` / `LINKFAILSUSEMOVEFLAGS`: file handling strategy
 - `NAMING_STYLE` / `OUTPUT_PATH` / `MAX_FILENAME_LENGTH`: naming and output behavior

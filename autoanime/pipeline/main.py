@@ -11,12 +11,18 @@ autoanime Processing_Main（主流水线）
 from os import path
 
 from .. import state
-from ..cache.canonical import Auxiliary_UpsertCanonicalTitle
+from ..cache.canonical import (
+    Auxiliary_GetCanonicalTitleRecord,
+    Auxiliary_ResolveCanonicalTitleByAliases,
+    Auxiliary_UpsertCanonicalTitle,
+)
 from ..cache.show_index import (
     Auxiliary_ShowClearOrganizedEpisode,
     Auxiliary_ShowHasOrganizedEpisode,
     Auxiliary_ShowMarkOrganizedEpisode,
     Auxiliary_FormatOrganizedEpisodeTag,
+    Auxiliary_ShowFindCrossCanonicalEpisode,
+    Auxiliary_ShowClearDuplicateDstPath,
 )
 from ..identification import Processing_Identification
 from ..identification.episode_rules import (
@@ -32,8 +38,59 @@ from ..scanning import Auxiliary_IsIncompleteDownloadFile
 from ..sorting import Sorting_Mv
 from ..sorting.file_ops import Auxiliary_IsSamePhysicalFile
 from ..sorting.subtitles import Auxiliary_IDEASS
-from ..text_utils import Auxiliary_HasChineseText
+from ..text_utils import Auxiliary_HasChineseText, Auxiliary_NormalizeAliasKey
 from .operation_log import Auxiliary_RecordOperation
+
+
+def _CurrentAliasesMatchCanonicalID(CanonicalID, RAWName, ApiName, NameEN='', NameRomaji=''):
+    '''校验当前文件的剧名/别名与已有 CanonicalID 是否属于同一番剧。
+
+    用于「剧名漂移保护」复用 CrossCID 前的安全闸门，避免无关番剧因相同 EP 被错误合并。
+    校验策略：
+    1. 当前别名已直接解析到该 CanonicalID（alias index 命中）；
+    2. 与 CanonicalID 记录的 zh/en/romaji 归一化后精确匹配；
+    3. 子串相似兜底（至少一方长度 >= 4），允许同一番剧的不同拼写/缩写。
+    '''
+    if CanonicalID in [None, '']:
+        return False
+
+    # 1) alias index 直接命中
+    ResolvedZh, ResolvedCID, _ = Auxiliary_ResolveCanonicalTitleByAliases(
+        RAWName, ApiName, NameEN, NameRomaji
+    )
+    if ResolvedCID == CanonicalID:
+        return True
+
+    # 2) 与 canonical 记录的字段做归一化比较
+    Record = Auxiliary_GetCanonicalTitleRecord(CanonicalID)
+    if type(Record) != dict:
+        return False
+
+    CurrentTitles = [RAWName, ApiName, NameEN, NameRomaji]
+    CurrentKeys = {Auxiliary_NormalizeAliasKey(T) for T in CurrentTitles if T not in [None, '']}
+    CurrentKeys.discard('')
+    CrossKeys = {
+        Auxiliary_NormalizeAliasKey(Record.get('zh', '')),
+        Auxiliary_NormalizeAliasKey(Record.get('en', '')),
+        Auxiliary_NormalizeAliasKey(Record.get('romaji', '')),
+    }
+    CrossKeys.discard('')
+
+    if not CurrentKeys or not CrossKeys:
+        return False
+
+    # 精确匹配
+    if CurrentKeys & CrossKeys:
+        return True
+
+    # 子串相似兜底
+    for CK in CurrentKeys:
+        for XK in CrossKeys:
+            if CK in XK or XK in CK:
+                if len(CK) >= 4 or len(XK) >= 4:
+                    return True
+
+    return False
 
 
 def Processing_Main(LorT):
@@ -114,6 +171,21 @@ def Processing_Main(LorT):
         # fix_show_index：ShowOrganizationIndex 盲跳自愈
         if CanonicalID not in [None, '']:
             HasTag, ExpectedDst = Auxiliary_ShowHasOrganizedEpisode(CanonicalID, SE, EP)
+
+            # 方案1：剧名漂移保护 — 若当前CanonicalID无记录，但其他CanonicalID已有同SE/EP的有效目标
+            if not HasTag:
+                CrossCID, CrossDst = Auxiliary_ShowFindCrossCanonicalEpisode(SE, EP)
+                if CrossCID and _CurrentAliasesMatchCanonicalID(CrossCID, RAWName, ApiName, NameEN, NameRomaji):
+                    CanonicalID = CrossCID
+                    HasTag = True
+                    ExpectedDst = CrossDst
+                    Auxiliary_Log(f'剧名漂移保护：复用已有 CanonicalID={CrossCID} (SE={SE}, EP={EP})', 'INFO')
+                elif CrossCID:
+                    Auxiliary_Log(
+                        f'剧名漂移保护拒绝：{RAWName} 与 CanonicalID={CrossCID} 剧名不匹配 (SE={SE}, EP={EP})',
+                        'WARNING',
+                    )
+
             if HasTag == True:
                 TagLabel = Auxiliary_FormatOrganizedEpisodeTag(SE, EP)
                 ShouldSkip = False
@@ -166,6 +238,11 @@ def Processing_Main(LorT):
         DstPath = MainOperationResult.get('dst', '') if type(MainOperationResult) == dict else ''
 
         if Auxiliary_ShouldCacheResolvedFileInfo(MainOperationResult) and CanonicalID not in [None, '']:
+            # 方案2：清理其他 CanonicalID 下指向同一目标路径的旧记录，避免 cache_stale 反复触发
+            if DstPath:
+                Cleared = Auxiliary_ShowClearDuplicateDstPath(DstPath, ExcludeCanonicalID=CanonicalID, ExcludeTag=Auxiliary_FormatOrganizedEpisodeTag(SE, EP))
+                if Cleared:
+                    Auxiliary_Log(f'ShowIndex 去重：已清理其他 CanonicalID 指向同一目标路径 {DstPath} 的旧记录', 'INFO')
             Auxiliary_ShowMarkOrganizedEpisode(CanonicalID, ApiName, NameEN, NameRomaji, SE, EP, DstPath=DstPath)
 
         if EpisodeKey not in [None, '']:

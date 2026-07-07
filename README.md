@@ -29,34 +29,38 @@ python -m pip install -r requirements.txt
 ```powershell
 $env:OPENAI_API_KEY="your-openai-key"
 $env:TMDB_BEARER_TOKEN="your-tmdb-token"
-python AutoAnimeMv.py "D:\Anime" --dry-run
-python AutoAnimeMv.py "D:\Anime"
+python AutoAnimeMv2.py "D:\Anime" --dry-run
+python AutoAnimeMv2.py "D:\Anime"
 ```
 
 ## 常用命令
 ```bash
-# 本地批处理
-python AutoAnimeMv.py "D:\Anime"
+# 本地批处理（扫描目录）
+python AutoAnimeMv2.py "D:\Anime"
+
+# 单文件整理（自动收集同目录字幕）
+python AutoAnimeMv2.py "D:\Anime\[Subbers] 番剧名 第01话.mkv"
 
 # Emby 风格命名
-python AutoAnimeMv.py "D:\Anime" --naming-style emby
+python AutoAnimeMv2.py "D:\Anime" --naming-style emby
 
 # 指定输出目录
-python AutoAnimeMv.py "D:\Anime" --output-path "D:\AnimeLibrary"
+python AutoAnimeMv2.py "D:\Anime" --output-path "D:\AnimeLibrary"
 
 # 回滚最近一次整理
-python AutoAnimeMv.py rollback --log ".\logs\AutoAnime_operations_xxx.json"
+python AutoAnimeMv2.py rollback --log ".\logs\AutoAnime_operations_xxx.json"
 ```
 
 ## qBittorrent 回调示例
 ```bash
-python AutoAnimeMv.py "%D" "%N" "%C" "%L"
+python AutoAnimeMv2.py "%D" "%N" 1
 ```
 
 未完成下载的临时文件（如 `.!qB`、`.part`、`.partial`、`.aria2`、`.crdownload`）会自动跳过，不参与番剧整理。
 
 ## 关键配置
 - `USEOPENAIAPI` / `OPENAI_PRIORITY_FIRST` / `OPENAI_IDENTIFY_ALL`: AI 识别链路开关
+- `OPENAI_FALLBACK_ON_FAILURE` / `OPENAI_FALLBACK_BREAKER_THRESHOLD`: AI 失败时回退本地规则 + 传统 API；连续失败后熔断
 - `OPENAI_API_KEY_ENV` / `TMDB_BEARER_TOKEN_ENV`: 凭据环境变量名
 - `USELINK` / `STRICT_MODE` / `LINKFAILSUSEMOVEFLAGS`: 文件整理策略
 - `NAMING_STYLE` / `OUTPUT_PATH` / `MAX_FILENAME_LENGTH`: 命名与输出控制

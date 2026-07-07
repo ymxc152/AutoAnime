@@ -6,6 +6,7 @@ autoanime 剧集/剧季规则
 - `Auxiliary_NormalizeEpisodeToken`
 - `Auxiliary_CoalesceEpisodeFromParsed` / `Auxiliary_CoalesceSeasonFromParsed`
 - `Auxiliary_RemappedJujutsuKaisenSeasonEpisode`
+- `Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode`
 - `Auxiliary_RemoveEpisodeSuffixFromTitle`
 - `Auxiliary_PreDetectEpisodeHint`
 - `Auxiliary_BuildEpisodeDecisionKey`
@@ -17,6 +18,7 @@ from pathlib import Path as PathlibPath
 from re import I, findall, match, search, sub
 
 from .. import state
+from ..logging_utils import Auxiliary_Log
 from ..naming import (
     Auxiliary_AnimeFileCheck,
     Auxiliary_FormatSEEPToken,
@@ -129,6 +131,162 @@ def Auxiliary_RemoveEpisodeSuffixFromTitle(Title, RawEpisode):
     return Auxiliary_NormalizeApiTitle(Title)
 
 
+_MANUAL_SEASON_LAYOUT = {
+    '葬送的芙莉莲': [(1, 28), (2, None)],
+    'Sousou no Frieren': [(1, 28), (2, None)],
+    '地狱乐': [(1, 13)],
+    'Jigokuraku': [(1, 13)],
+    '咒术回战': [(1, 24), (2, 23), (3, 14)],
+    'Jujutsu Kaisen': [(1, 24), (2, 23), (3, 14)],
+}
+
+# 预计算归一化键，支持大小写/标点不同的别名命中
+_NORMALIZED_MANUAL_SEASON_LAYOUT = {
+    Auxiliary_NormalizeAliasKey(k): v for k, v in _MANUAL_SEASON_LAYOUT.items()
+}
+
+
+def _LookupManualSeasonLayout(NameEN='', NameRomaji='', NameZH=''):
+    '''根据英文/罗马音/中文剧名查找内置 season layout；找不到返回 None。'''
+    for Name in (NameZH, NameEN, NameRomaji):
+        if Name in [None, '']:
+            continue
+        if Name in _MANUAL_SEASON_LAYOUT:
+            return _MANUAL_SEASON_LAYOUT[Name]
+        Key = Auxiliary_NormalizeAliasKey(Name)
+        if Key in _NORMALIZED_MANUAL_SEASON_LAYOUT:
+            return _NORMALIZED_MANUAL_SEASON_LAYOUT[Key]
+    return None
+
+
+def _FormatRemappedSEEPTokens(NewRAWSE, NewRAWEP):
+    '''把原始季/集数字格式化为 SE/EP（受 SEEPSINGLECHARACTER 影响）。'''
+    NewSE = NewRAWSE.zfill(2) if state.SEEPSINGLECHARACTER == False else NewRAWSE.lstrip('0')
+    if NewSE in [None, '']:
+        NewSE = '1' if state.SEEPSINGLECHARACTER == True else '01'
+    NewEP = '0' + NewRAWEP if (len(NewRAWEP) < 2 or ('.' in NewRAWEP and NewRAWEP[0] != '0')) and (state.SEEPSINGLECHARACTER == False) else NewRAWEP
+    if state.SEEPSINGLECHARACTER == True:
+        NewSE = NewSE.lstrip('0')
+        NewEP = NewEP.lstrip('0')
+        NewSE = NewSE if NewSE not in [None, ''] else '0'
+        NewEP = NewEP if NewEP not in [None, ''] else '0'
+    return NewSE, NewEP
+
+
+def Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode(
+    RAWSE, RAWEP, SE, EP, NameEN, NameRomaji, NameZH, SeasonPairs=None
+):
+    '''把长篇/多季番的「绝对集数」映射到「季内集数」。
+
+    例如：葬送的芙莉莲 S1=28 集，绝对集号 38 -> S02E10。
+
+    参数：
+        RAWSE/RAWEP：从文件名解析出的原始季/集字符串。
+        SE/EP：格式化后的季/集字符串。
+        NameEN/NameRomaji/NameZH：剧名线索，用于命中内置/外部 season layout。
+        SeasonPairs：可选，[(season_number, episode_count), ...]；None 时自动查找。
+            其中 episode_count 可为 None，表示该季长度未知（允许向后 extrapolate）。
+
+    返回：
+        (NewRAWSE, NewRAWEP, NewSE, NewEP) 或 None（无需映射 / 越界）。
+    '''
+    FromManual = False
+    if SeasonPairs is None:
+        SeasonPairs = _LookupManualSeasonLayout(NameEN, NameRomaji, NameZH)
+        FromManual = True
+    # 对咒术回战保持与旧函数一致：优先尝试 TMDB layout
+    if not SeasonPairs:
+        from ..cache.canonical import Auxiliary_IsJujutsuKaisenSeries
+        if Auxiliary_IsJujutsuKaisenSeries(NameEN, NameRomaji, NameZH):
+            from ..apis.tmdb import (
+                Auxiliary_GetTMDBTvSeasonLayoutBySeriesId,
+                Auxiliary_MapAbsoluteEpisodeUsingTMDBSeasonLayout,
+                Auxiliary_ResolveTMDBTvIdForJujutsuKaisen,
+            )
+            TvId = Auxiliary_ResolveTMDBTvIdForJujutsuKaisen(NameEN, NameRomaji)
+            if TvId not in [None, '']:
+                SeasonPairs = Auxiliary_GetTMDBTvSeasonLayoutBySeriesId(TvId)
+
+    if not SeasonPairs:
+        return None
+
+    RAWEP = str(RAWEP or '').strip()
+    if RAWEP == '' or RAWEP.split('.')[0].isdigit() == False:
+        return None
+    AbsEp = int(RAWEP.split('.')[0])
+    CurrentSeason = int(str(RAWSE or '1').strip() or '1')
+
+    # 若文件名已显式指定非首季，信任该季号，不再做绝对集数映射
+    if CurrentSeason > 1:
+        return None
+
+    # 计算各季累计边界；None 表示该季长度未知
+    Boundaries = []
+    Cumulative = 0
+    LastFiniteCumulative = 0
+    for SeasonNum, EpCount in SeasonPairs:
+        if EpCount is None:
+            Boundaries.append({'season': int(SeasonNum), 'cumulative': None, 'count': None})
+            continue
+        Cumulative += int(EpCount)
+        Boundaries.append({'season': int(SeasonNum), 'cumulative': Cumulative, 'count': int(EpCount)})
+        LastFiniteCumulative = Cumulative
+
+    # 绝对集号落在首季范围内，无需映射
+    if Boundaries and Boundaries[0]['cumulative'] is not None and AbsEp <= Boundaries[0]['cumulative']:
+        return None
+
+    # 超出已知有限季总集数时：
+    # - manual 表且没有开放季尾巴：越界告警；
+    # - 调用方显式传入 SeasonPairs 且没有开放季尾巴：extrapolate 到下一季；
+    # - 含开放季尾巴：交给下方循环处理。
+    if LastFiniteCumulative and AbsEp > LastFiniteCumulative:
+        HasOpenEndedTail = any(b['cumulative'] is None for b in Boundaries)
+        if FromManual and not HasOpenEndedTail:
+            ShowName = NameZH or NameEN or NameRomaji or '未知番剧'
+            Auxiliary_Log(
+                f'绝对集数映射：{ShowName} EP={AbsEp} 超出已知正片范围（共 {LastFiniteCumulative} 集），放弃映射',
+                'WARNING',
+            )
+            return None
+        if not HasOpenEndedTail:
+            # extrapolate 到已定义最后一季的下一季
+            LastSeasonNum = Boundaries[-1]['season'] if Boundaries else 1
+            NewRAWSE = str(LastSeasonNum + 1)
+            NewRAWEP = str(AbsEp - LastFiniteCumulative)
+            NewSE, NewEP = _FormatRemappedSEEPTokens(NewRAWSE, NewRAWEP)
+            ShowName = NameZH or NameEN or NameRomaji or '未知番剧'
+            Auxiliary_Log(f'绝对集数映射：{ShowName} EP={AbsEp} -> S{NewSE}E{NewEP}', 'INFO')
+            return NewRAWSE, NewRAWEP, NewSE, NewEP
+
+    # 定位 AbsEp 落在哪一季
+    PrevCumulative = 0
+    for Boundary in Boundaries:
+        SeasonNum = Boundary['season']
+        CumulativeEps = Boundary['cumulative']
+        EpCount = Boundary['count']
+        if CumulativeEps is None:
+            # 开放季：从前一季末尾继续累加
+            NewEpInSeason = AbsEp - PrevCumulative
+            NewRAWSE = str(SeasonNum)
+            NewRAWEP = str(int(NewEpInSeason))
+            NewSE, NewEP = _FormatRemappedSEEPTokens(NewRAWSE, NewRAWEP)
+            ShowName = NameZH or NameEN or NameRomaji or '未知番剧'
+            Auxiliary_Log(f'绝对集数映射：{ShowName} EP={AbsEp} -> S{NewSE}E{NewEP}', 'INFO')
+            return NewRAWSE, NewRAWEP, NewSE, NewEP
+        if AbsEp <= CumulativeEps:
+            NewEpInSeason = AbsEp - (CumulativeEps - EpCount)
+            NewRAWSE = str(SeasonNum)
+            NewRAWEP = str(int(NewEpInSeason))
+            NewSE, NewEP = _FormatRemappedSEEPTokens(NewRAWSE, NewRAWEP)
+            ShowName = NameZH or NameEN or NameRomaji or '未知番剧'
+            Auxiliary_Log(f'绝对集数映射：{ShowName} EP={AbsEp} -> S{NewSE}E{NewEP}', 'INFO')
+            return NewRAWSE, NewRAWEP, NewSE, NewEP
+        PrevCumulative = CumulativeEps
+
+    return None
+
+
 def Auxiliary_RemappedJujutsuKaisenSeasonEpisode(RAWSE, RAWEP, SE, EP, NameEN, NameRomaji, NameZH):
     from ..apis.tmdb import (
         Auxiliary_GetTMDBTvSeasonLayoutBySeriesId,
@@ -162,15 +320,7 @@ def Auxiliary_RemappedJujutsuKaisenSeasonEpisode(RAWSE, RAWEP, SE, EP, NameEN, N
         NewSeasonNum, NewEpInSeason = Mapped
         NewRAWSE = str(int(NewSeasonNum))
         NewRAWEP = str(int(NewEpInSeason))
-    NewSE = NewRAWSE.zfill(2) if state.SEEPSINGLECHARACTER == False else NewRAWSE.lstrip('0')
-    if NewSE in [None, '']:
-        NewSE = '1' if state.SEEPSINGLECHARACTER == True else '01'
-    NewEP = '0' + NewRAWEP if (len(NewRAWEP) < 2 or ('.' in NewRAWEP and NewRAWEP[0] != '0')) and (state.SEEPSINGLECHARACTER == False) else NewRAWEP
-    if state.SEEPSINGLECHARACTER == True:
-        NewSE = NewSE.lstrip('0')
-        NewEP = NewEP.lstrip('0')
-        NewSE = NewSE if NewSE not in [None, ''] else '0'
-        NewEP = NewEP if NewEP not in [None, ''] else '0'
+    NewSE, NewEP = _FormatRemappedSEEPTokens(NewRAWSE, NewRAWEP)
     return NewRAWSE, NewRAWEP, NewSE, NewEP
 
 

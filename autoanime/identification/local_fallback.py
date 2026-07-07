@@ -26,6 +26,7 @@ from ..naming import (
     Auxiliary_RMSubtitlingTeam,
     Auxiliary_UniformOTSTR,
 )
+from ..cache.manual_whitelist import Auxiliary_GetManualWhitelistedTitle
 from ..text_utils import (
     Auxiliary_HasChineseText,
     Auxiliary_NormalizeApiTitle,
@@ -133,9 +134,36 @@ def Auxiliary_FallbackLocalRules(File: str):
     return SE, EP, RAWSE, RAWEP, RAWName
 
 
+def _StripSeasonSuffixes(Name):
+    '''剥离常见季号后缀，生成更简洁的 Bangumi/TMDB 查询候选。'''
+    from re import I, sub
+
+    Name = '' if Name in [None, ''] else str(Name).strip()
+    if Name == '':
+        return ''
+    # 先走现有归一化，去掉 "Season X" / "SX" / "第X季" 等
+    Name = Auxiliary_NormalizeApiTitle(Name)
+    # 再补充剥离 "Xnd Season" / "Xst Season" / "Xrd Season" / "Xth Season"
+    # 兼容空格或连字符连接："2nd Season" / "2nd-Season"
+    Name = sub(r'[0-9]{1,3}(st|nd|rd|th)[\s\-]*season$', '', Name, flags=I).strip()
+    # 处理可能残留的 "S X" / "S-X" / "SX" 结尾
+    Name = sub(r'[\s\-]+s[\s\-]*[0-9]{1,3}$', '', Name, flags=I).strip()
+    return Name.strip('- []【】 ')
+
+
 # =========================================================================
 # 本地规则 + 传统 API 三路回退
 # =========================================================================
+def _GenerateQueryNameCandidates(RAWNameLocal):
+    '''生成 Bangumi/TMDB 查询候选列表，优先尝试剥离季号后的名称。'''
+    Candidates = []
+    BaseName = Auxiliary_NormalizeDisplayTitle(RAWNameLocal)
+    if BaseName not in [None, ''] and BaseName not in Candidates:
+        Candidates.append(BaseName)
+    Stripped = _StripSeasonSuffixes(BaseName)
+    if Stripped not in [None, ''] and Stripped not in Candidates:
+        Candidates.insert(0, Stripped)
+    return Candidates
 def Auxiliary_FallbackTraditionalApis(LocalBase):
     '''在本地规则基础上查 BGM -> Bangumi -> TMDB 三路中文标题，取最先命中的。
 
@@ -175,21 +203,25 @@ def Auxiliary_FallbackTraditionalApis(LocalBase):
         SourceTag = 'canonical_cache'
 
     if ChineseTitle in [None, '']:
-        TryChain = [
-            ('BGM', lambda: Auxiliary_QueryBgmChineseTitle(RAWNameLocal, NameEN, NameRomaji)),
-            ('Bangumi', lambda: Auxiliary_QueryBangumiChineseTitle(RAWNameLocal, NameEN, NameRomaji)),
-            ('TMDB', lambda: Auxiliary_QueryTMDBChineseTitle(RAWNameLocal, NameEN, NameRomaji)),
+        QueryCandidates = _GenerateQueryNameCandidates(RAWNameLocal)
+        ApiChain = [
+            ('BGM', lambda q: Auxiliary_QueryBgmChineseTitle(q, NameEN, NameRomaji)),
+            ('Bangumi', lambda q: Auxiliary_QueryBangumiChineseTitle(q, NameEN, NameRomaji)),
+            ('TMDB', lambda q: Auxiliary_QueryTMDBChineseTitle(q, NameEN, NameRomaji)),
         ]
-        for Tag, Fn in TryChain:
-            try:
-                Result = Fn()
-            except Exception as err:
-                Auxiliary_Log(f'回退链路 {Tag} 查询异常（已忽略）：{err}', 'WARNING')
-                continue
-            Result = Auxiliary_NormalizeApiTitle(Result) if Result not in [None, ''] else ''
-            if Result not in [None, ''] and Auxiliary_HasChineseText(Result):
-                ChineseTitle = Result
-                SourceTag = Tag
+        for Tag, Fn in ApiChain:
+            for QueryName in QueryCandidates:
+                try:
+                    Result = Fn(QueryName)
+                except Exception as err:
+                    Auxiliary_Log(f'回退链路 {Tag} 查询异常（已忽略）：{err}', 'WARNING')
+                    break
+                Result = Auxiliary_NormalizeApiTitle(Result) if Result not in [None, ''] else ''
+                if Result not in [None, ''] and Auxiliary_HasChineseText(Result):
+                    ChineseTitle = Result
+                    SourceTag = Tag
+                    break
+            if ChineseTitle not in [None, '']:
                 break
 
     if NameEN in [None, '']:
@@ -198,6 +230,13 @@ def Auxiliary_FallbackTraditionalApis(LocalBase):
         except Exception:
             NameEN = ''
         NameEN = Auxiliary_NormalizeDisplayTitle(NameEN)
+
+    if ChineseTitle in [None, '']:
+        WhitelistTitle = Auxiliary_GetManualWhitelistedTitle(RAWNameLocal, NameEN, NameRomaji)
+        if WhitelistTitle not in [None, '']:
+            ChineseTitle = WhitelistTitle
+            SourceTag = 'manual_whitelist'
+            Auxiliary_Log(f'回退链路命中手工白名单：{RAWNameLocal} -> {ChineseTitle}', 'INFO')
 
     if ChineseTitle in [None, ''] and NameEN in [None, '']:
         return None
@@ -217,6 +256,21 @@ def Auxiliary_FallbackTraditionalApis(LocalBase):
     return SE, EP, RAWSE, RAWEP, FinalName, NameEN, NameRomaji, CanonicalID
 
 
+def _ApplyAbsoluteEpisodeRemap(LocalBase, Chain):
+    '''若 Chain 已拿到中文/英文剧名，尝试把长篇番的绝对集号映射到季内集号。'''
+    if Chain is None:
+        return Chain
+    SE, EP, RAWSE, RAWEP, RAWName, NameEN, NameRomaji, CanonicalID = Chain
+    from .episode_rules import Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode
+    RemapTuple = Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode(
+        RAWSE, RAWEP, SE, EP, NameEN, NameRomaji, RAWName
+    )
+    if RemapTuple is None:
+        return Chain
+    NewRAWSE, NewRAWEP, NewSE, NewEP = RemapTuple
+    return NewSE, NewEP, NewRAWSE, NewRAWEP, RAWName, NameEN, NameRomaji, CanonicalID
+
+
 def Auxiliary_ResolveFileInfoWithFallback(File: str):
     '''对外主入口：AI 失败后的回退识别编排。
 
@@ -233,6 +287,7 @@ def Auxiliary_ResolveFileInfoWithFallback(File: str):
         SE, EP, RAWSE, RAWEP, RAWName = Local
         Meta = {'NameEN': '', 'NameRomaji': '', 'CanonicalID': '', 'CanonicalZh': RAWName, 'Source': 'local_rules_only'}
         return (SE, EP, RAWSE, RAWEP, RAWName), Meta
+    Chain = _ApplyAbsoluteEpisodeRemap(Local, Chain)
     SE, EP, RAWSE, RAWEP, RAWName, NameEN, NameRomaji, CanonicalID = Chain
     Meta = {
         'NameEN': NameEN,

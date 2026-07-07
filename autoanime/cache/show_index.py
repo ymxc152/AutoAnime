@@ -176,6 +176,59 @@ def Auxiliary_ShowSetEpisodeExpectedDst(CanonicalID, SE, EP, DstPath):
     Auxiliary_SetShowOrganizationRecord(CanonicalID, Rec)
 
 
+def Auxiliary_ShowFindCrossCanonicalEpisode(SE, EP):
+    '''遍历所有 ShowOrganizationIndex 记录，查找是否有任何 CanonicalID 已记录同 SE/EP 且 expected_dst 指向的目标文件仍存在。
+    返回 (CanonicalID, ExpectedDstPath) 或 (None, None)。
+    '''
+    Tag = Auxiliary_FormatOrganizedEpisodeTag(SE, EP)
+    for CID, Rec in state.ShowOrganizationIndexDataCache.items():
+        if type(Rec) != dict:
+            continue
+        EpList = Rec.get('organized_episodes', [])
+        if type(EpList) != list or Tag not in EpList:
+            continue
+        LastDstMap = Rec.get('episode_last_dst', {})
+        if type(LastDstMap) != dict:
+            continue
+        DstStr = LastDstMap.get(Tag, '')
+        if DstStr in [None, '']:
+            continue
+        try:
+            DstPath = PathlibPath(DstStr)
+            if DstPath.exists():
+                return CID, DstPath
+        except Exception:
+            continue
+    return None, None
+
+
+def Auxiliary_ShowClearDuplicateDstPath(DstPath, ExcludeCanonicalID=None, ExcludeTag=None):
+    '''清理所有 CanonicalID 的 episode_last_dst 中指向同一 DstPath 的旧记录（可排除指定组合）。'''
+    if DstPath in [None, '']:
+        return False
+    TargetStr = str(DstPath)
+    ChangedAny = False
+    for CID, Rec in list(state.ShowOrganizationIndexDataCache.items()):
+        if type(Rec) != dict:
+            continue
+        LastDstMap = dict(Rec.get('episode_last_dst', {})) if type(Rec.get('episode_last_dst')) == dict else {}
+        TagsToRemove = []
+        for Tag, PathStr in list(LastDstMap.items()):
+            if PathStr == TargetStr:
+                if ExcludeCanonicalID and CID == ExcludeCanonicalID and ExcludeTag and Tag == ExcludeTag:
+                    continue
+                LastDstMap.pop(Tag, None)
+                TagsToRemove.append(Tag)
+                ChangedAny = True
+        if TagsToRemove:
+            EpList = list(Rec.get('organized_episodes', [])) if type(Rec.get('organized_episodes')) == list else []
+            EpList = [E for E in EpList if E not in TagsToRemove]
+            Rec['organized_episodes'] = sorted(EpList)
+            Rec['episode_last_dst'] = LastDstMap
+            Auxiliary_SetShowOrganizationRecord(CID, Rec)
+    return ChangedAny
+
+
 def Auxiliary_ShowMarkOrganizedEpisode(CanonicalID, title_zh, title_en, title_romaji, SE, EP, DstPath=None):
     CanonicalID = '' if CanonicalID in [None, ''] else str(CanonicalID)
     if CanonicalID == '':

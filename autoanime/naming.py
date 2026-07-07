@@ -27,7 +27,7 @@ from . import state
 from .config_loader import Auxiliary_ParseInt
 from .config_model import WINDOWS_RESERVED_NAMES
 from .logging_utils import Auxiliary_Exit, Auxiliary_Log, Auxiliary_FormatListPreview
-from .text_utils import Auxiliary_NormalizeDisplayTitle
+from .text_utils import Auxiliary_HasChineseText, Auxiliary_NormalizeDisplayTitle
 
 
 def Auxiliary_SanitizePathComponent(Name, MaxLen=None):
@@ -35,9 +35,21 @@ def Auxiliary_SanitizePathComponent(Name, MaxLen=None):
     if Name in [None, '']:
         Name = 'Unknown'
     Name = Auxiliary_NormalizeDisplayTitle(Name).replace('\n', ' ').replace('\r', ' ')
+    # 拒绝明显不是标题的文本（解释性回复、空字符串标记等）
+    _REJECT_PATTERNS = ('空字符串', '无法对应', '并非已知', '根据指令', '注经查询', '请提供', '请输入')
+    for _rp in _REJECT_PATTERNS:
+        if _rp in Name:
+            Auxiliary_Log(f'SanitizePathComponent: 检测到非法模式「{_rp}」，回退为 Unknown: {Name[:60]}', 'WARNING')
+            Name = 'Unknown'
+            break
+    if len(Name) > 80 and Auxiliary_HasChineseText(Name):
+        # 中文标题超过 80 字符大概率是 AI 解释性回复
+        Auxiliary_Log(f'SanitizePathComponent: 中文名过长({len(Name)}字符)，疑似解释性文本，回退为 Unknown: {Name[:60]}…', 'WARNING')
+        Name = 'Unknown'
     Name = sub(r'[<>:"/\\|?*\x00-\x1f]', '_', Name)
+    # 注意：全角 ？！。， 等在 Windows 文件名中是合法的，保留
     Name = sub(r'\s+', ' ', Name).strip(' .')
-    if Name == '':
+    if Name == '' or Name in ('_', '__', '___'):
         Name = 'Unknown'
     if Name.upper() in WINDOWS_RESERVED_NAMES:
         Name = f'{Name}_'
@@ -63,7 +75,7 @@ def Auxiliary_UniformOTSTR(File):
     NewFile = convert(File, 'zh-hans')
     NewUSTRFile = sub(r',|，| ', '-', NewFile, flags=I)
     # 保留 ~ 字符（包括全角和半角），不替换成 =
-    NewUSTRFile = sub(r'[^a-z0-9\s&/:：.\-\(\)（）《》\u4e00-\u9fa5\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF°ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ~～]', '=', NewUSTRFile, flags=I)
+    NewUSTRFile = sub(r'[^a-z0-9\s&/:：.\-\(\)（）《》\u4e00-\u9fa5\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF°ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ~～!！]', '=', NewUSTRFile, flags=I)
     # 异种剧集统一
     OtEpisodesMatchData = [r'第(\d{1,4})集', r'(\d{1,4})集', r'第(\d{1,4})话', r'(\d{1,4})END', r'(\d{1,4}) END', r'(\d{1,4})E']
     for i in OtEpisodesMatchData:

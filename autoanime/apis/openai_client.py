@@ -231,6 +231,19 @@ def Auxiliary_OpenAITranslateForeignTitleToChinese(ForeignTitle):
             return None
         if Auxiliary_HasChineseText(ApiTitle) != True:
             return None
+        # ---- 防污染：拒绝过长或含解释性文本的伪标题 ----
+        _INVALID_TITLE_PATTERNS = (
+            '空字符串', '无法对应', '并非已知', '可能是同人', '根据指令',
+            '无法确定', '不是动画', '不是番剧', '无法识别为',
+            '注经查询', '注：', '返回空', '请提供', '请输入',
+        )
+        if len(ApiTitle) > 30:
+            Auxiliary_Log(f'OpenAI 译名结果过长({len(ApiTitle)}字符)，疑似解释性文本，已拒绝: {ApiTitle[:60]}…', 'WARNING')
+            return None
+        for _pat in _INVALID_TITLE_PATTERNS:
+            if _pat in ApiTitle:
+                Auxiliary_Log(f'OpenAI 译名结果含非法模式「{_pat}」，已拒绝: {ApiTitle[:60]}', 'WARNING')
+                return None
         return ApiTitle
     except Exception as err:
         Auxiliary_Log(f'OpenAI 译名失败: {err}', 'WARNING')

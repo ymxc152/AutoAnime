@@ -28,6 +28,17 @@ def Auxiliary_GetManualWhitelistPath() -> PathlibPath:
 def Auxiliary_LoadManualWhitelist(force=False):
     DefaultWhitelist = {
         'mao': '摩绪',
+        'fatestrangefake': '命运：奇异赝品',
+        'fatestrangefakewhispersofdawn': '命运：奇异赝品 黎明低语',
+        'gansobangdreamchan': 'BanG Dream! 元祖小剧场',
+        'bangdreamchan': 'BanG Dream! 元祖小剧场',
+        'medalist': '金牌得主',
+        'medalist2ndseason': '金牌得主',
+        'ganbarenakamurakun': '加油吧！中村君！！',
+        'yuushanokuzu': '勇者之屑',
+        'matoseiheinoslave': '魔都精兵的奴隶',
+        'koorinojouheki': '冰之城墙',
+        'digimonbeatbreak': '数码宝贝 觉醒节拍',
     }
     WhitelistPath = Auxiliary_GetManualWhitelistPath()
     if WhitelistPath.exists() == False:
@@ -65,6 +76,18 @@ def Auxiliary_LoadManualWhitelist(force=False):
             LoadedWhitelist[AliasKey] = TitleValue
         if LoadedWhitelist == {}:
             LoadedWhitelist = DefaultWhitelist.copy()
+        elif len(LoadedWhitelist) < len(DefaultWhitelist):
+            # 旧白名单条目过少时自动合并内置默认条目，避免历史空文件/早期文件无法享受新兜底
+            Merged = DefaultWhitelist.copy()
+            Merged.update(LoadedWhitelist)
+            LoadedWhitelist = Merged
+            try:
+                with open(WhitelistPath, 'w', encoding='UTF-8') as f:
+                    json.dump(LoadedWhitelist, f, ensure_ascii=False, indent=2)
+                FileMTime = float(WhitelistPath.stat().st_mtime)
+                Auxiliary_Log(f'已自动扩展手工白名单文件: {WhitelistPath}', 'INFO')
+            except Exception as err:
+                Auxiliary_Log(f'扩展手工白名单文件失败（仍使用内存合并值）: {err}', 'WARNING')
         state.ManualTitleWhitelistDataCache = LoadedWhitelist
         state.ManualTitleWhitelistMTime = FileMTime
         return state.ManualTitleWhitelistDataCache

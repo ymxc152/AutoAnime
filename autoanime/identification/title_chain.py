@@ -164,7 +164,7 @@ def Auxiliary_ApplyStandardTitleCacheToFileInfoRecord(CacheRecord):
     )
     from .episode_rules import (
         Auxiliary_NormalizeEpisodeToken,
-        Auxiliary_RemappedJujutsuKaisenSeasonEpisode,
+        Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode,
     )
 
     if type(CacheRecord) != dict or all([Key in CacheRecord for Key in ['SE', 'EP', 'RAWSE', 'RAWEP', 'RAWName']]) != True:
@@ -225,7 +225,7 @@ def Auxiliary_ApplyStandardTitleCacheToFileInfoRecord(CacheRecord):
         if ReUpsertZh not in [None, ''] and ReUpsertZh != FixedRecord.get('RAWName'):
             FixedRecord['RAWName'] = ReUpsertZh
             ChangedFlag = True
-    RemapTuple = Auxiliary_RemappedJujutsuKaisenSeasonEpisode(
+    RemapTuple = Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode(
         FixedRecord.get('RAWSE'),
         FixedRecord.get('RAWEP'),
         FixedRecord.get('SE'),

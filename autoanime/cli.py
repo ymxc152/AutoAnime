@@ -15,6 +15,7 @@ autoanime 命令行入口骨架
 import argparse
 
 from os import path
+import sys
 from sys import argv
 from time import time
 
@@ -184,6 +185,15 @@ def main() -> int:
     - rollback 命令 -> `autoanime.pipeline.rollback.Auxiliary_RollbackFromLog`
     - 其他命令     -> `autoanime.pipeline.main.Processing_Main(Processing_Mode(ArgvData))`
     '''
+    # Windows 默认终端编码为 GBK，提前切换为 UTF-8 避免 UnicodeEncodeError
+    if sys.platform == 'win32':
+        try:
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8')
+            if hasattr(sys.stderr, 'reconfigure'):
+                sys.stderr.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
     start = time()
     try:
         Start_PATH()

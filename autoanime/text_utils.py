@@ -123,6 +123,26 @@ def Auxiliary_NormalizeApiTitle(ApiTitle):
     return ApiTitle
 
 
+def _RepairJsonText(Text):
+    '''修复 LLM 返回的常见 JSON 语法错误（双引号、缺引号键名、尾部逗号等）。'''
+    if not Text:
+        return Text
+    T = Text
+    # 1. 修复重复引号 "" → "
+    T = sub(r'""+', '"', T)
+    # 2. 修复无引号键名：在 { 或 , 后紧跟字母/数字/_ 的键名，且后面跟着 : 和合法值开头
+    #    例如 {season:1} → {"season":1} 或 ,anime_name_romaji":" → ,"anime_name_romaji":"
+    for _ in range(5):
+        NewT = sub(r'([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*([truefals0-9"\[\{])', r'\1"\2":\3', T)
+        if NewT == T:
+            break
+        T = NewT
+    # 3. 清理尾部多余逗号
+    T = sub(r',\s*}', '}', T)
+    T = sub(r',\s*\]', ']', T)
+    return T
+
+
 def Auxiliary_ParseJsonFromAIContent(Text):
     Text = '' if Text in [None, ''] else str(Text).strip()
     if Text == '':
@@ -133,9 +153,23 @@ def Auxiliary_ParseJsonFromAIContent(Text):
         return json.loads(Text)
     except Exception:
         pass
+    # 方案3：容错清洗后再次尝试解析
+    Cleaned = _RepairJsonText(Text)
+    if Cleaned and Cleaned != Text:
+        try:
+            return json.loads(Cleaned)
+        except Exception:
+            pass
     if (X := findall(r'\{[\s\S]*\}', Text)) != []:
         try:
             return json.loads(X[0])
         except Exception:
-            return None
+            pass
+        # 对提取出的 JSON 块也尝试清洗
+        CleanedBlock = _RepairJsonText(X[0])
+        if CleanedBlock != X[0]:
+            try:
+                return json.loads(CleanedBlock)
+            except Exception:
+                pass
     return None

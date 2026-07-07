@@ -216,6 +216,21 @@ def Auxiliary_ResolveCanonicalTitleByAliases(*AliasTitleList):
     return None, None, None
 
 
+
+def _Auxiliary_FindNormalizedCanonicalID(ChineseTitle):
+    '''在已有 CanonicalTitleIndex 中查找规范化后精确匹配的条目'''
+    if ChineseTitle in [None, '']:
+        return None
+    NormalizedTarget = Auxiliary_NormalizeAliasKey(ChineseTitle)
+    if NormalizedTarget == '':
+        return None
+    for CID, Record in state.CanonicalTitleIndexDataCache.items():
+        if type(Record) == dict:
+            ExistingZh = Record.get('zh', '')
+            NormalizedExisting = Auxiliary_NormalizeAliasKey(ExistingZh)
+            if NormalizedExisting != '' and NormalizedExisting == NormalizedTarget:
+                return CID
+    return None
 def Auxiliary_UpsertCanonicalTitle(ChineseTitle='', EnglishTitle='', RomajiTitle='', SourceTag='unknown', AliasList=None):
     ChineseTitle = Auxiliary_NormalizeApiTitle(ChineseTitle)
     EnglishTitle = Auxiliary_NormalizeDisplayTitle(EnglishTitle)
@@ -231,11 +246,16 @@ def Auxiliary_UpsertCanonicalTitle(ChineseTitle='', EnglishTitle='', RomajiTitle
             if MatchedCanonicalID not in CandidateCanonicalIDs:
                 CandidateCanonicalIDs.append(MatchedCanonicalID)
     if CandidateCanonicalIDs == []:
-        SeedTitle = ChineseTitle if ChineseTitle not in [None, ''] else (EnglishTitle if EnglishTitle not in [None, ''] else RomajiTitle)
-        CanonicalID = Auxiliary_NormalizeAliasKey(SeedTitle)
-        if CanonicalID in [None, '']:
-            return None, ChineseTitle
-    else:
+        # 规范化精确匹配：查找已有条目中标题规范化后一致的
+        NormalizedCID = _Auxiliary_FindNormalizedCanonicalID(ChineseTitle)
+        if NormalizedCID not in [None, '']:
+            CandidateCanonicalIDs = [NormalizedCID]
+        else:
+            SeedTitle = ChineseTitle if ChineseTitle not in [None, ''] else (EnglishTitle if EnglishTitle not in [None, ''] else RomajiTitle)
+            CanonicalID = Auxiliary_NormalizeAliasKey(SeedTitle)
+            if CanonicalID in [None, '']:
+                return None, ChineseTitle
+    if CandidateCanonicalIDs != []:
         CanonicalID = CandidateCanonicalIDs[0]
         BestRecord = Auxiliary_GetCanonicalTitleRecord(CanonicalID)
         for OneCanonicalID in CandidateCanonicalIDs[1:]:

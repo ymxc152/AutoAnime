@@ -16,7 +16,7 @@ import json
 from os import path
 from pathlib import Path as PathlibPath
 from re import sub
-from time import localtime, strftime, time
+from time import localtime, sleep, strftime, time
 
 from requests import exceptions, post
 
@@ -174,7 +174,9 @@ def Auxiliary_OpenAIIdentifyFileInfo(FileName):
             except exceptions.RequestException as err:
                 Lvl = _OpenAIFailLogLevel()
                 if RetryIndex < RetryTimes:
-                    Auxiliary_Log(f'OpenAI文件识别请求超时/失败，第{RetryIndex+1}/{RetryTimes+1}次重试: {err}', Lvl)
+                    BackoffSeconds = 2 ** RetryIndex
+                    Auxiliary_Log(f'OpenAI文件识别请求超时/失败，第{RetryIndex+1}/{RetryTimes+1}次重试 (退避 {BackoffSeconds}s): {err}', Lvl)
+                    sleep(BackoffSeconds)
                     continue
                 Auxiliary_Log(f'OpenAI文件识别请求失败: {err}', Lvl)
                 Auxiliary_NoteOpenAIIdentifyFailure('http_request_failed', str(err), input_basename=QueryFileName)
@@ -183,7 +185,9 @@ def Auxiliary_OpenAIIdentifyFileInfo(FileName):
                 break
             Lvl = _OpenAIFailLogLevel()
             if RetryIndex < RetryTimes:
-                Auxiliary_Log(f'OpenAI文件识别请求失败,状态码 {HttpData.status_code}，第{RetryIndex+1}/{RetryTimes+1}次重试', Lvl)
+                BackoffSeconds = 2 ** RetryIndex
+                Auxiliary_Log(f'OpenAI文件识别请求失败,状态码 {HttpData.status_code}，第{RetryIndex+1}/{RetryTimes+1}次重试 (退避 {BackoffSeconds}s)', Lvl)
+                sleep(BackoffSeconds)
                 continue
             Auxiliary_Log(f'OpenAI文件识别请求失败,状态码 {HttpData.status_code}', Lvl)
             Auxiliary_NoteOpenAIIdentifyFailure('http_status', f'status={HttpData.status_code}', input_basename=QueryFileName)
@@ -241,6 +245,32 @@ def Auxiliary_OpenAIIdentifyFileInfo(FileName):
             NameRomaji = ''
         if NameZH not in [None, ''] and Auxiliary_HasChineseText(NameZH) == False:
             NameZH = ''
+        # ---- 防污染：拒绝 AI 返回的伪标题 ----
+        _INVALID_TITLE_PATTERNS = (
+            '空字符串', '无法对应', '并非已知', '可能是同人', '根据指令',
+            '无法确定', '不是动画', '不是番剧', '无法识别为',
+            '注经查询', '注：', '返回空', '请提供', '请输入',
+            '这不是动画', '没有对应',
+        )
+        if NameZH not in [None, '']:
+            for _pat in _INVALID_TITLE_PATTERNS:
+                if _pat in NameZH:
+                    Auxiliary_Log(f'OpenAI识别结果含非法模式「{_pat}」，已清空: {NameZH[:60]}', 'WARNING')
+                    NameZH = ''
+                    break
+        if NameZH not in [None, ''] and len(NameZH) > 30:
+            Auxiliary_Log(f'OpenAI识别结果过长({len(NameZH)}字符)，疑似解释性文本，已清空: {NameZH[:60]}…', 'WARNING')
+            NameZH = ''
+        if NameEN not in [None, '']:
+            for _pat in _INVALID_TITLE_PATTERNS:
+                if _pat in NameEN:
+                    NameEN = ''
+                    break
+        if NameRomaji not in [None, '']:
+            for _pat in _INVALID_TITLE_PATTERNS:
+                if _pat in NameRomaji:
+                    NameRomaji = ''
+                    break
         AINameZH = NameZH
 
         RAWEP = Auxiliary_CoalesceEpisodeFromParsed(ParsedData)

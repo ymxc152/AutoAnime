@@ -61,7 +61,7 @@ def Auxiliary_QueryBangumiChineseTitle(QueryName, CandidateEn='', CandidateRomaj
         return CacheValue
 
     BangumiApiData = Auxiliary_Http(
-        f"https://api.bgm.tv/search/subject/{quote(QueryName)}?type=2&responseGroup=medium&max_results=1",
+        f"https://api.bgm.tv/search/subject/{quote(QueryName)}?type=2&responseGroup=medium&max_results=5",
         ResponseType='json',
         Timeout=20,
     )
@@ -69,13 +69,22 @@ def Auxiliary_QueryBangumiChineseTitle(QueryName, CandidateEn='', CandidateRomaj
         Auxiliary_Log(f'BangumiApi查询失败: {QueryName}', 'WARNING')
         return None
     ResultList = BangumiApiData.get('list', [])
-    if type(ResultList) != list or ResultList == [] or type(ResultList[0]) != dict:
+    if type(ResultList) != list or ResultList == []:
         Auxiliary_Log(f'BangumiApi没有检索到关于 {QueryName} 内容', 'WARNING')
         return None
 
-    AnimeData = ResultList[0]
-    ApiTitle = Auxiliary_NormalizeApiTitle(AnimeData.get('name_cn') or AnimeData.get('name') or '')
-    if ApiTitle in [None, ''] or Auxiliary_HasChineseText(ApiTitle) == False:
+    AnimeData = None
+    ApiTitle = ''
+    for Item in ResultList:
+        if type(Item) != dict:
+            continue
+        CandidateTitle = Auxiliary_NormalizeApiTitle(Item.get('name_cn') or Item.get('name') or '')
+        if CandidateTitle not in [None, ''] and Auxiliary_HasChineseText(CandidateTitle):
+            AnimeData = Item
+            ApiTitle = CandidateTitle
+            break
+
+    if AnimeData is None:
         Auxiliary_Log(f'BangumiApi未返回可用中文标题: {QueryName}', 'WARNING')
         return None
 

@@ -15,6 +15,7 @@ autoanime 日志工具
 from datetime import datetime
 from os import makedirs, path, remove
 from re import I, match
+import sys
 from time import localtime, strftime, time
 
 from . import state
@@ -93,7 +94,13 @@ def Auxiliary_Log(Msg: str, MsgFlag='INFO', flag=None, end='\n'):
     for OneMsg in Msg:
         FormattedMsg = f'[{strftime("%Y-%m-%d %H:%M:%S", localtime(time()))}] {MsgFlag}: {OneMsg}'
         if (state.PRINTLOGFLAG == True or flag == 'PRINT') and Auxiliary_ShouldPrintConsoleLog(OneMsg, MsgFlag, flag):
-            print(FormattedMsg, end=end)
+            try:
+                print(FormattedMsg, end=end)
+            except UnicodeEncodeError:
+                # 防御性回退：按当前终端编码替换不可编码字符，避免整段日志中断
+                ConsoleEncoding = getattr(sys.stdout, 'encoding', None) or 'utf-8'
+                SafeMsg = FormattedMsg.encode(ConsoleEncoding, 'replace').decode(ConsoleEncoding, 'replace')
+                print(SafeMsg, end=end)
         state.LogData = state.LogData + '\n' + FormattedMsg if state.LogData not in [None, ''] else FormattedMsg
 
 
