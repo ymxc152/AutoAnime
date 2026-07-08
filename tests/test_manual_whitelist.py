@@ -50,6 +50,85 @@ class TestManualWhitelist(unittest.TestCase):
                     f'{raw_name} 应命中白名单中文名 {expected_zh}，实际得到 {result}',
                 )
 
+    def test_manual_whitelist_covers_new_titles(self):
+        """新增高频/低频英文罗马音与中文别译兜底映射。"""
+        cases = [
+            # 高频英文/罗马音
+            ('Isekai Nonbiri Nouka', '异世界悠闲农家'),
+            ('Isekai Nonbiri Nouka 2nd Season', '异世界悠闲农家'),
+            ('Maid-san wa Taberu Dake', '女仆小姐的贪吃日常'),
+            ('Otonari no Tenshi-sama', '关于邻家的天使大人不知不觉把我惯成了废人这档子事'),
+            ('Otonari no Tenshi-sama 2', '关于邻家的天使大人不知不觉把我惯成了废人这档子事'),
+            ('Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken', '关于邻家的天使大人不知不觉把我惯成了废人这档子事'),
+            ('Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken 2', '关于邻家的天使大人不知不觉把我惯成了废人这档子事'),
+            ('Aishiteru Game wo Owarasetai', '想结束这场“我爱你”的游戏'),
+            ('Ookii Onnanoko wa Suki Desuka', '你喜欢高大的女孩子吗？'),
+            ('Ikoku Nikki', '异国日记'),
+            ('Ichijyoma Mankitsu Gurashi', '一叠间漫画咖啡厅日常'),
+            ('Arne no Jikenbo', '阿涅斯事件簿'),
+            ('Akane-banashi', '落语朱音'),
+            ('Chitose-kun wa Ramune Bin no Naka', '千岁君在波子汽水瓶中'),
+            ('Saikyou no Ousama, Nidome no Jinsei wa Nani o Suru', '最强王者的第二人生'),
+            ('Saikyou no Ousama, Nidome no Jinsei wa Nani wo Suru', '最强王者的第二人生'),
+            ('终末起点', '最强王者的第二人生'),
+            # 用户指定作品
+            ('Otaku ni Yasashii Gal wa Inai', '哪里有温柔对待阿宅的辣妹！？'),
+            ('哪里有温柔对待阿宅的辣妹', '哪里有温柔对待阿宅的辣妹！？'),
+            ('没有辣妹会对阿宅温柔', '哪里有温柔对待阿宅的辣妹！？'),
+            # 低频/剩余
+            ('VIRGIN PUNK', '处女朋克'),
+            ('Odayaka Kizoku no Kyuuka no Susume', '优雅贵族的休假指南'),
+            ('Kuranika', '和班上第二可爱的女孩子成了朋友'),
+            ('Kirei ni Shite Moraemasu ka', '能帮我弄干净吗'),
+            ('Champignon no Majo', '蘑菇魔女'),
+            ('Bungou Stray Dogs Wan', '文豪野犬 汪！'),
+            ('Otome Kaijuu Carameliser', '乙女怪兽卡列尼策'),
+            ('NEEDY GIRL OVERDOSE', '主播女孩重度依赖'),
+        ]
+        for raw_name, expected_zh in cases:
+            with self.subTest(raw_name=raw_name):
+                result = Auxiliary_GetManualWhitelistedTitle(raw_name)
+                self.assertEqual(
+                    result,
+                    expected_zh,
+                    f'{raw_name} 应命中白名单中文名 {expected_zh}，实际得到 {result}',
+                )
+    def test_manual_whitelist_covers_remaining_english_dirs(self):
+        """round2 真实数据回归后仍未收敛的英文目录兜底映射。"""
+        cases = [
+            ('Youkoso Jitsuryoku Shijou Shugi no Kyoushitsu e', '欢迎来到实力至上主义的教室'),
+            ('Tongari Boushi no Atelier', '尖帽子的魔法工坊'),
+            ('Ace of Diamond Act II', '钻石王牌 act2'),
+            ('Kuroneko to Majo no Kyoushitsu', '黑猫与魔女的教室'),
+            ('Kanan-sama wa Akumade Choroi', '迦楠大人的白给是恶魔级'),
+            ('Mamonogurai no Boukensha', '吞噬魔物的冒险者'),
+            ('Class de 2-banme ni Kawaii Onnanoko to Tomodachi ni Natta', '和班上第二可爱的女孩子成了朋友'),
+            ('Honzuki no Gekokujou', '小书痴的下克上'),
+            ('Ponkotsu Fuuki Iin to Skirt-take ga Futekisetsu na JK no Hanashi', '木头风纪委员和迷你裙JK的故事'),
+            ('Yuusha no Rokkotsu de', '女神“异世界转生想成为什么”我“勇者的肋骨”'),
+            ('Tsue to Tsurugi no Wistoria', '杖与剑的魔剑谭'),
+            ('Awajima Hyakkei', '淡岛百景'),
+            ('Yozakura-san Chi no Daisakusen', '夜樱家的大作战'),
+            ('Himekishi wa Barbaroi no Yome', '女骑士成为蛮族新娘'),
+            ('Dorohedoro', '异兽魔都'),
+            ('Re Zero kara Hajimeru Isekai Seikatsu', 'Re：从零开始的异世界生活'),
+            ('Kamiina Botan, Yoeru Sugata wa Yuri no Hana', '上伊那牡丹，酒醉身姿似百合花般'),
+            ('Shunkashuutou Daikousha - Haru no Mai', '春夏秋冬代行者 春之舞'),
+            ('Marika-chan no Koukando wa Bukkowareteiru', '茉莉花同学的好感度坏得很彻底'),
+            ('Niwatori Fighter', '公鸡斗士'),
+            ('Kanojo Okarishimasu', '租借女友'),
+            ('Kabushikigaisha-Magi-Lumi=re-2nd-Season', '魔法光源股份有限公司'),
+            ('Gaikotsu Kishi-sama, Tadaima Isekai e Odekakechuu II', '骸骨骑士大人异世界冒险中'),
+        ]
+        for raw_name, expected_zh in cases:
+            with self.subTest(raw_name=raw_name):
+                result = Auxiliary_GetManualWhitelistedTitle(raw_name)
+                self.assertEqual(
+                    result,
+                    expected_zh,
+                    f'{raw_name} 应命中白名单中文名 {expected_zh}，实际得到 {result}',
+                )
+
     def test_fallback_uses_manual_whitelist_when_api_fails(self):
         """Bangumi/TMDB 都失败时，回退链路应使用白名单返回中文名。"""
         from autoanime.identification.local_fallback import Auxiliary_FallbackTraditionalApis
