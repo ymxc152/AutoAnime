@@ -32,7 +32,6 @@ class TestManualWhitelist(unittest.TestCase):
             ('GANSO BanG Dream Chan', 'BanG Dream! 元祖小剧场'),
             ('GANSO-BanG-Dream-Chan', 'BanG Dream! 元祖小剧场'),
             ('Medalist', '金牌得主'),
-            ('Medalist-2nd-Season', '金牌得主'),
             ('Ganbare! Nakamura-kun!!', '加油吧！中村君！！'),
             ('Ganbare-Nakamura-kun', '加油吧！中村君！！'),
             ('MAO', '摩绪'),
@@ -84,6 +83,7 @@ class TestManualWhitelist(unittest.TestCase):
             ('Bungou Stray Dogs Wan', '文豪野犬 汪！'),
             ('Otome Kaijuu Carameliser', '乙女怪兽卡列尼策'),
             ('NEEDY GIRL OVERDOSE', '主播女孩重度依赖'),
+            ('Yuusha Kei ni Shosu Choubatsu Yuusha 9004-tai Keimu Kiroku', '判处勇者刑 惩罚勇者9004队刑务纪录'),
         ]
         for raw_name, expected_zh in cases:
             with self.subTest(raw_name=raw_name):
@@ -117,7 +117,7 @@ class TestManualWhitelist(unittest.TestCase):
             ('Marika-chan no Koukando wa Bukkowareteiru', '茉莉花同学的好感度坏得很彻底'),
             ('Niwatori Fighter', '公鸡斗士'),
             ('Kanojo Okarishimasu', '租借女友'),
-            ('Kabushikigaisha-Magi-Lumi=re-2nd-Season', '魔法光源股份有限公司'),
+            ('Kabushikigaisha-Magi-Lumi=re', '魔法光源股份有限公司'),
             ('Gaikotsu Kishi-sama, Tadaima Isekai e Odekakechuu II', '骸骨骑士大人异世界冒险中'),
         ]
         for raw_name, expected_zh in cases:

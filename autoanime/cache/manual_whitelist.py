@@ -33,7 +33,6 @@ def Auxiliary_LoadManualWhitelist(force=False):
         'gansobangdreamchan': 'BanG Dream! 元祖小剧场',
         'bangdreamchan': 'BanG Dream! 元祖小剧场',
         'medalist': '金牌得主',
-        'medalist2ndseason': '金牌得主',
         'ganbarenakamurakun': '加油吧！中村君！！',
         'yuushanokuzu': '勇者之屑',
         'matoseiheinoslave': '魔都精兵的奴隶',
@@ -70,6 +69,7 @@ def Auxiliary_LoadManualWhitelist(force=False):
         'bungoustraydogswan': '文豪野犬 汪！',
         'otomekaijuucarameliser': '乙女怪兽卡列尼策',
         'needygirloverdose': '主播女孩重度依赖',
+        'yuushakeinishosuchoubatsuyuusha9004taikeimukiroku': '判处勇者刑 惩罚勇者9004队刑务纪录',
         # round2 真实数据回归后补充的未收敛英文目录
         'youkosojitsuryokushijoushuginokyoushitsue': '欢迎来到实力至上主义的教室',
         'tongariboushinoatelier': '尖帽子的魔法工坊',
@@ -92,7 +92,6 @@ def Auxiliary_LoadManualWhitelist(force=False):
         'marikachannokoukandowabukkowareteiru': '茉莉花同学的好感度坏得很彻底',
         'niwatorifighter': '公鸡斗士',
         'kanojookarishimasu': '租借女友',
-        'kabushikigaishamagilumire2ndseason': '魔法光源股份有限公司',
         'kabushikigaishamagilumire': '魔法光源股份有限公司',
         'gaikotsukishisamatadaimaisekaieodekakechuuii': '骸骨骑士大人异世界冒险中',
     }
