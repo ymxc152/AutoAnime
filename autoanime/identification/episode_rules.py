@@ -132,12 +132,12 @@ def Auxiliary_RemoveEpisodeSuffixFromTitle(Title, RawEpisode):
 
 
 _MANUAL_SEASON_LAYOUT = {
-    '葬送的芙莉莲': [(1, 28), (2, None)],
-    'Sousou no Frieren': [(1, 28), (2, None)],
-    '地狱乐': [(1, 13)],
-    'Jigokuraku': [(1, 13)],
-    '咒术回战': [(1, 24), (2, 23), (3, 14)],
-    'Jujutsu Kaisen': [(1, 24), (2, 23), (3, 14)],
+    '葬送的芙莉莲': [(1, 30), (2, None)],
+    'Sousou no Frieren': [(1, 30), (2, None)],
+    '地狱乐': [(1, 30)],
+    'Jigokuraku': [(1, 30)],
+    '咒术回战': [(1, 30), (2, 30), (3, 30)],
+    'Jujutsu Kaisen': [(1, 30), (2, 30), (3, 30)],
 }
 
 # 预计算归一化键，支持大小写/标点不同的别名命中
