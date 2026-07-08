@@ -28,6 +28,7 @@ from ..naming import (
 )
 from ..cache.manual_whitelist import Auxiliary_GetManualWhitelistedTitle
 from ..text_utils import (
+    Auxiliary_CleanFallbackTitle,
     Auxiliary_HasChineseText,
     Auxiliary_NormalizeApiTitle,
     Auxiliary_NormalizeDisplayTitle,
@@ -128,6 +129,7 @@ def Auxiliary_FallbackLocalRules(File: str):
         RAWName = Auxiliary_IDEVDName(NewFile, RAWEP)
     except Exception:
         RAWName = path.splitext(QueryFileName)[0]
+    RAWName = Auxiliary_CleanFallbackTitle(RAWName)
     RAWName = Auxiliary_NormalizeApiTitle(RAWName) if RAWName not in [None, ''] else ''
     if RAWName in [None, '']:
         RAWName = path.splitext(QueryFileName)[0]

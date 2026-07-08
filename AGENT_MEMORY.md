@@ -45,6 +45,20 @@
   - `autoanime/identification/local_fallback.py` / `autoanime/identification/title_chain.py`：调用通用映射。
 - **验证**：芙莉莲 38 → S02E10，咒术回战 58 → S03E11，地狱乐 25 越界警告。
 
+### 单元 7：支持两种新文件名格式 + 修复错误缓存
+- **问题**：
+  - 文件名含字幕组前缀 + 多语言标题（`六四位元字幕組★哪裡有溫柔對待阿宅的辣妹！？ Otaku ni Yasashii Gal wa Inai★09...`）。
+  - 文件名含 `[中 / 日 / 英]` 多语言分段（`【今晚月色真美】[没有辣妹会对阿宅温柔！？ / オタクに優しいギャルはいない!? / Otaku ni Yasashii Gal wa Inai!?][11]...`）。
+  - 缓存中 `Otaku ni Yasashii Gal wa Inai` 的 canonical 标题为旧译名 `没有辣妹会对阿宅温柔！？`，需统一为目标译名 `哪里有温柔对待阿宅的辣妹！？`。
+- **修改**：
+  - `autoanime/text_utils.py`：新增 `Auxiliary_CleanFallbackTitle`，清洗字幕组前缀、提取中文段、去除尾部非中文后缀。
+  - `autoanime/identification/local_fallback.py`：`Auxiliary_FallbackLocalRules` 中对 `RAWName` 先调用 `Auxiliary_CleanFallbackTitle`。
+  - `scripts/fix_otaku_gal_cache.py`：一次性脚本，备份并修复 `.cache/titles.json` / `.cache/organization.json`，将 canonical 与 organization 记录迁移到 `哪里有温柔对待阿宅的辣妹！？`，同步所有 alias 与 episode_last_dst 路径。
+- **验证**：
+  - `python -m pytest tests/test_text_utils.py tests/test_fallback_identification.py -v` → 8 passed。
+  - `python -m pytest tests/ -q` → 85 passed。
+  - dry-run 在 `F:/test/unit7` 上识别两文件为 `哪里有温柔对待阿宅的辣妹！？\Season01\S01E09/E11`。
+
 ## 关键文件变更
 - `autoanime/cli.py`
 - `autoanime/logging_utils.py`
@@ -61,6 +75,8 @@
 - `tests/test_bangumi.py`（新增）
 - `tests/test_manual_whitelist.py`（新增）
 - `tests/test_episode_rules.py`（新增）
+- `tests/test_text_utils.py`（新增）
+- `scripts/fix_otaku_gal_cache.py`（新增）
 
 ## 待办 / 下一步
 - [x] 全量 dry-run 回归验证（使用最终配置，临时禁用 OpenAI 避免超时）。
@@ -69,6 +85,12 @@
 - [ ] 继续补充 `_MANUAL_SEASON_LAYOUT` 其他长篇番剧。
 - [ ] 处理 DRY_RUN 模式下 ShowIndex「自愈」反复触发的问题（review_report 遗漏 1）。
 - [ ] 建议用户将 `config.ini` 中 `USEOPENAIAPI` 设为 `False`（当前 API 已过期）。
+
+## 最终回归验证结果（第 7 单元）
+- **测试**：`python -m pytest tests/ -q` → **85 passed**
+- **dry-run**：`python AutoAnimeMv2.py "F:/test/unit7" --output-path "F:/test_out" --dry-run`（OpenAI 临时禁用）
+  - 2 个目标文件均收敛到 `哪里有温柔对待阿宅的辣妹！？\Season01\S01E09/E11`
+  - 完整跑完，末尾 `一切工作已经完成,用时1.31s`
 
 ## 最终回归验证结果（第 6 单元）
 - **测试**：`python -m pytest tests/ -q` → **81 passed**
