@@ -5,6 +5,8 @@ config.ini
 __pycache__/
 *.pyc
 .cache/
+.autoanime-v3/
+config.v3.ini
 .cache.bak*/
 logs/
 .venv/

@@ -1,4 +1,2 @@
-# Runtime dependencies for AutoAnimeMv
-# Keep this file limited to project runtime dependencies only.
-requests
+# Runtime dependency used for Traditional/Simplified Chinese normalization.
 zhconv
