@@ -1,0 +1,238 @@
+{
+  "aliases": {
+    "MAO": "摩绪",
+    "Fate strange Fake": "命运：奇异赝品",
+    "GANSO BanG Dream Chan": "BanG Dream! 元祖小剧场",
+    "Medalist": "金牌得主",
+    "Ganbare Nakamura-kun": "加油吧！中村君！！",
+    "Yuusha no Kuzu": "勇者之屑",
+    "Mato Seihei no Slave": "魔都精兵的奴隶",
+    "Koori no Jouheki": "冰之城墙",
+    "Digimon Beatbreak": "数码宝贝 觉醒节拍",
+    "Isekai Nonbiri Nouka": "异世界悠闲农家",
+    "Maid-san wa Taberu Dake": "女仆小姐的贪吃日常",
+    "Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken": "关于邻家的天使大人不知不觉把我惯成了废人这档子事",
+    "Aishiteru Game wo Owarasetai": "想结束这场“我爱你”的游戏",
+    "Ookii Onnanoko wa Suki Desuka": "你喜欢高大的女孩子吗？",
+    "Ikoku Nikki": "异国日记",
+    "Ichijouma Mankitsu Gurashi": "一叠间漫画咖啡厅日常",
+    "Arne no Jikenbo": "阿涅斯事件簿",
+    "Akane Banashi": "落语朱音",
+    "Chitose-kun wa Ramune Bin no Naka": "千岁君在波子汽水瓶中",
+    "Saikyou no Ousama Nidome no Jinsei wa Nani wo Suru": "最强王者的第二人生",
+    "Otaku ni Yasashii Gal wa Inai": "哪里有温柔对待阿宅的辣妹！？",
+    "没有辣妹会对阿宅温柔": "哪里有温柔对待阿宅的辣妹！？",
+    "Virgin Punk": "处女朋克",
+    "Odayaka Kizoku no Kyuuka no Susume": "优雅贵族的休假指南",
+    "Kuranika": "和班上第二可爱的女孩子成了朋友",
+    "Kirei ni Shite Moraemasu ka": "能帮我弄干净吗",
+    "Champignon no Majo": "蘑菇魔女",
+    "Bungou Stray Dogs Wan": "文豪野犬 汪！",
+    "Otome Kaijuu Carameliser": "少女怪兽焦糖恋心",
+    "Needy Girl Overdose": "主播女孩重度依赖",
+    "Youkoso Jitsuryoku Shijou Shugi no Kyoushitsu e": "欢迎来到实力至上主义的教室",
+    "Tongari Boushi no Atelier": "尖帽子的魔法工坊",
+    "Ace of Diamond act II": "钻石王牌 act2",
+    "Kuroneko to Majo no Kyoushitsu": "黑猫与魔女的教室",
+    "Tsue to Tsurugi no Wistoria": "杖与剑的魔剑谭",
+    "Yozakura-san Chi no Daisakusen": "夜樱家的大作战",
+    "Dorohedoro": "异兽魔都",
+    "Re Zero kara Hajimeru Isekai Seikatsu": "Re：从零开始的异世界生活",
+    "Sousou no Frieren": "葬送的芙莉莲",
+    "Jujutsu Kaisen": "咒术回战",
+    "Tensei Shitara Slime Datta Ken": "关于我转生变成史莱姆这档事",
+    "One Piece": "海贼王",
+    "Flaming Dodgeball Girl Danko": "斗球女弹子",
+    "Dodge Danko": "斗球女弹子",
+    "Skeleton Knight in Another World": "骸骨骑士大人异世界冒险中",
+    "Gaikotsu Kishi sama Tadaima Isekai e Odekake chuu": "骸骨骑士大人异世界冒险中",
+    "Liar Game": "欺诈游戏",
+    "The Forsaken Saintess and Her Foodie Road Trip in Another World": "无用圣女的异世界美食之旅 凭借隐藏技能召唤露营车",
+    "The 100 Girlfriends Who Really Really Really Really REALLY Love You": "超超超超超喜欢你的100个女朋友",
+    "Victoria of Many Faces": "奇招百出的维多利亚",
+    "Young Ladies Dont Play Fighting Games": "感谢对战。～大小姐才不玩格斗游戏～",
+    "Haibara-kun no Tsuyokute Seishun New Game": "灰原同学重返过去，开启所向无敌的第二轮青春游戏",
+    "BanG Dream YUMEMITA": "BanG Dream! YUMEMITA",
+    "Mairimashita Iruma-kun": "入间同学入魔了",
+    "Mata Korosarete Shimatta no desu ne Tantei-sama": "又被杀掉了呢，侦探大人",
+    "Honzuki no Gekokujou": "小书痴的下克上",
+    "Star Detective Precure": "名侦探光之美少女！",
+    "Onegai Aipri": "拜托了偶像公主",
+    "Yomi no Tsugai": "黄泉使者",
+    "Kamiina Botan Yoeru Sugata wa Yuri no Hana": "上伊那牡丹，酒醉身姿似百合花般",
+    "MARRIAGETOXIN": "婚姻剧毒",
+    "Rooster Fighter": "公鸡斗士",
+    "LasTame": "身为悲剧始作俑者的最强邪恶BOSS女王为民竭心尽力。",
+    "Replica datte Koi wo Suru": "复制品的我也会谈恋爱。",
+    "Mamonogurai no Boukensha": "吞噬魔物的冒险者",
+    "Himekishi wa Barbaroi no Yome": "女骑士成为蛮族新娘",
+    "KILL BLUE": "杀手青春",
+    "Kanan-sama wa Akumade Choroi": "迦楠大人的白给是恶魔级",
+    "Ingoku Danchi": "淫狱团地",
+    "Magical Sisters LuluttoLilly": "魔法姐妹露露特莉莉",
+    "Nigetsuri": "关于虽然逃走的鱼很大、但钓上来的鱼却太大了这件事",
+    "Yuusha no Rokkotsu de": "女神“异世界转生想成为什么”我“勇者的肋骨”",
+    "Awajima Hyakkei": "淡岛百景",
+    "Ponkotsu Fuuki Iin to Skirt-take ga Futekisetsu na JK no Hanashi": "木头风纪委员和迷你裙JK的故事",
+    "Yowayowa Sensei": "弱弱老师",
+    "Class de 2-banme ni Kawaii Onnanoko to Tomodachi ni Natta": "和班上第二可爱的女孩子成了朋友",
+    "Nippon Sangoku": "日本三国",
+    "Jishou Akuyaku Reijou na Konyakusha no Kansatsu Kiroku": "自称恶役大小姐的婚约者观察记录。",
+    "GHOST CONCERT missing Songs": "幽灵音乐会",
+    "Kanteishi Kari": "最强的职业不是勇者也不是贤者好像是鉴定士（伪）的样子？",
+    "Shunkashuutou Daikousha Haru no Mai": "春夏秋冬代行者 春之舞",
+    "Jingai Kyoushitsu no Ningengirai Kyoushi": "非人学生与厌世教师",
+    "Marika-chan no Koukando wa Bukkowareteiru": "茉莉花同学的好感度坏得很彻底",
+    "Niwatori Fighter": "公鸡斗士",
+    "The World Is Dancing": "世界在起舞",
+    "Seihantai na Kimi to Boku": "相反的你和我",
+    "Neko to Ryuu": "猫与龙",
+    "Super no Ura de Yani Suu Futari": "在超市后门吸烟的二人",
+    "Rakudai Kenja no Gakuin Musou": "落第贤者的学院无双～第二次转生的S级开外挂魔术师冒险录～",
+    "Kanojo Okarishimasu": "租借女友",
+    "Mushoku Tensei": "无职转生～到了异世界就拿出真本事～",
+    "Grand Blue Dreaming": "碧蓝之海",
+    "Grand Blue": "碧蓝之海",
+    "Hell Mode": "地狱模式～喜欢挑战特殊成就的玩家在废设定的异世界成为无双～",
+    "Sekai Saikyou no Kouei": "世界最强的后卫 ～迷宫国的新人探索者～",
+    "Saved by the Ice Cold Princes Embrace": "拯救替身千金的是冷酷无情冰之王子的爱",
+    "Saijo no Osewa": "才女的侍从 在满是高岭之花的贵族学校暗中照顾（毫无生活自理能力的）学院第一大小姐",
+    "Ryoumin 0-nin Start no Henkyou Ryoushu-sama": "从0位居民开始的边境领主大人",
+    "Tenmaku no Jaadugar": "穹庐下的魔女",
+    "Classroom of the Elite": "欢迎来到实力至上主义的教室",
+    "Oshi no Ko": "我推的孩子",
+    "Toumei na Yoru ni Kakeru Kimi to Me ni Mienai Koi wo Shita": "与奔驰于透明之夜的你，谈一场看不见的恋爱。",
+    "Mayonaka Heart Tune": "午夜的倾心旋律",
+    "Magical Girl Lyrical Nanoha EXCEEDS Gun Blaze Vengeance": "魔法少女奈叶 EXCEEDS Gun Blaze Vengeance",
+    "Hime-sama Goumon no Jikan desu": "公主殿下，“拷问”的时间到了",
+    "公主大人“拷问”的时间到了": "公主殿下，“拷问”的时间到了",
+    "Yuusha kei ni Shosu Choubatsu Yuusha 9004 Tai Keimu Kiroku": "判处勇者刑 惩罚勇者9004队刑务纪录",
+    "Kabushikigaisha Magi Lumiere": "魔法光源股份有限公司",
+    "Kore Kaite Shine": "画完这个再去死",
+    "Yani Neko": "尼古喵喵",
+    "Tefuda ga Oome no Victoria": "奇招百出的维多利亚",
+    "Elegy for the Henchmen Fist of the North Star": "北斗神拳 拳王军杂兵们的挽歌",
+    "Dara-san of Reiwa": "令和妖神斑小姐",
+    "Oni no Hanayome": "鬼的新娘",
+    "Ibitte Konai Gibo to Gishi": "不虐待我的继母与继姐",
+    "Youjo Senki": "幼女战记",
+    "Toukutsu Ou": "盗墓王",
+    "I Want to Love You Till Your Dying Day": "与你相恋到生命尽头",
+    "Fumetsu no Anata e": "致不灭的你",
+    "Futsutsuka na Akujo dewa Gozaimasu ga": "我是不才恶女",
+    "Tsuihou sareta Tensei Juukishi wa Game Chishiki de Musou suru": "遭到流放的转生重骑士凭借游戏知识大开无双",
+    "Mato Seihei no Slave 2": "魔都精兵的奴隶",
+    "Hanaori-san wa Tensei shitemo Kenka ga Shitai": "花织即使是转生也想打架",
+    "Tamon-kun Ima Docchi": "现在多闻君是哪一面！？",
+    "Witch Hat Atelier": "尖帽子的魔法工坊",
+    "Android wa Keiken Ninzuu ni Hairimasu ka": "和机器人啪啪啪能算在经验次数里吗？？",
+    "Though I Am an Inept Villainess": "我是不才恶女",
+    "Trapped in a Dating Sim The World of Otome Games Is Tough for Mobs": "女性向游戏世界对路人角色很不友好",
+    "Ushiro no Shoumen Kamui-san": "从后面来的神威先生",
+    "Dr Stone Science Future": "石纪元 科学与未来",
+    "Kamen Rider ZEZTZ": "假面骑士ZEZTZ",
+    "Kaya-chan wa Kowakunai": "神八小妹不可怕",
+    "Kimi ga Shinu made Koi wo Shitai": "与你相恋到生命尽头",
+    "Heroine Seijo Iie All Works Maid Desu": "女主角？圣女？不，我是全能女仆",
+    "Hana-Kimi": "花样少年少女",
+    "Frieren Beyond Journeys End": "葬送的芙莉莲",
+    "Otonari no Tenshi sama": "关于邻家的天使大人不知不觉把我惯成了废人这档子事",
+    "Ichijyoma Mankitsu Gurashi": "一叠间漫画咖啡厅日常",
+    "Saikyou no Ousama Nidome no Jinsei wa Nani o Suru": "最强王者的第二人生",
+    "Hokuto no Ken FIST OF THE NORTH STAR": "北斗神拳",
+    "Hokuto no Ken Kenougun Zako tachi no Banka": "北斗神拳 拳王军杂兵们的挽歌",
+    "Lv999 no Murabito": "LV999的村民",
+    "Hyakkano": "超超超超超喜欢你的100个女朋友",
+    "Clevatess": "克雷瓦提斯-魔兽之王与婴儿与尸之勇者-",
+    "Jigokuraku": "地狱乐",
+    "20 Seiki Denki Mokuroku": "二十世纪电气目录",
+    "The Ghost in the Shell": "攻壳机动队",
+    "Saga of Tanya the Evil": "幼女战记",
+    "Sayonara Lara": "再见菈菈",
+    "Perfect Addiction": "澈底对你成瘾",
+    "One Hundred Thousand Years of Qi Refining": "炼气十万年",
+    "My Stepmother and Stepsisters Arent Wicked": "不虐待我的继母与继姐",
+    "Ushiro no Shoumen Kamui san Mini Anime Gekijou": "从后面来的神威先生 迷你动画剧场",
+    "Enen no Shouboutai": "炎炎消防队",
+    "Eris no Seihai": "厄里斯的圣杯",
+    "Bungo Stray Dogs Wan": "文豪野犬 汪！",
+    "Otome Game Sekai wa Mob ni Kibishii Sekai desu": "女性向游戏世界对路人角色很不友好",
+    "Heroine Seijo Iie All Works Maid Desu Hokori": "女主角？圣女？不，我是全能女仆",
+    "Kabushikigaisha Magi Lumière": "魔法光源股份有限公司",
+    "Buchigire Reijou wa Houfuku wo Chikaimashita": "暴怒千金发誓复仇，凭借魔导书之力打垮祖国",
+    "Kokoore": "“你们先走我断后”，于是10年后我成为了传说",
+    "Tenbin": "转学后班上的清纯可爱美少女，竟是小时候玩在一起的哥儿们",
+    "Saikyou Degarashi Ouji no Anyaku Teii Arasoi": "最强废渣皇子暗中活跃于帝位之争",
+    "Chainsmoker Cat": "尼古喵喵",
+    "Fushigi no Kuni de Alice to Dive in Wonderland": "不可思议之国的爱丽丝 -Dive in Wonderland-",
+    "Katainaka no Ossan Kensei ni Naru": "乡下大叔成为剑圣",
+    "Hokuto no Ken Kenougun Zako tachi no Banka Part 2": "北斗神拳 拳王军杂兵们的挽歌",
+    "Yoroi Shin Den Samurai Troopers": "铠真传 武士军团",
+    "My Mother The Animation": "My Mother The Animation",
+    "Kimi wo Tsumugu Anime PV": "Kimi wo Tsumugu 动画PV",
+    "Iseleve TVSP": "在异世界获得超强能力的我，在现实世界照样无敌 TVSP",
+    "ONE PIECE HEROINES": "海贼王女英雄们",
+    "Shibou Yuugi de Meshi wo Kuu 44 Cloudy Beach": "靠死亡游戏混饭吃。"
+    ,"从后面来的神威先生 年龄限制版": "从后面来的神威先生"
+    ,"终末起点": "最强王者的第二人生"
+    ,"勇者之渣": "勇者之屑"
+    ,"夜樱家大作战 第二季": "夜樱家的大作战"
+    ,"上伊那牡丹，醉姿如百合": "上伊那牡丹，酒醉身姿似百合花般"
+    ,"魔法姊妹露露特莉莉": "魔法姐妹露露特莉莉"
+    ,"朱音落语": "落语朱音"
+    ,"你又被杀了呢，侦探大人": "又被杀掉了呢，侦探大人"
+    ,"溜掉的大鱼比不上自己钓到的鱼": "关于虽然逃走的鱼很大、但钓上来的鱼却太大了这件事"
+    ,"容易对付的恶魔大人": "迦楠大人的白给是恶魔级"
+    ,"入间同学入魔了！第四季": "入间同学入魔了"
+    ,"关于我转生变成史莱姆这档事 第四季": "关于我转生变成史莱姆这档事"
+    ,"异兽魔都 第二季": "异兽魔都"
+    ,"钻石王牌 act2 第二季": "钻石王牌 act2"
+    ,"无职转生～到了异世界就拿出真本事～第三季": "无职转生～到了异世界就拿出真本事～"
+    ,"欢迎来到实力至上主义的教室 第四季 2年级篇 第一学期": "欢迎来到实力至上主义的教室"
+    ,"小书痴的下克上 为了成为图书管理员不择手段！领主的养女": "小书痴的下克上"
+    ,"神之雫": "神之水滴"
+    ,"我的英雄学院 FINAL SEASON": "我的英雄学院"
+    ,"MAO 摩绪": "摩绪"
+    ,"世界最强后卫 ～迷宫国的新人探索者～": "世界最强的后卫 ～迷宫国的新人探索者～"
+    ,"直到我死去的那天也想与你相爱": "与你相恋到生命尽头"
+    ,"Animatica 北斗之拳 拳王军杂兵们的挽歌": "北斗神拳 拳王军杂兵们的挽歌"
+    ,"加油！中村同学！！": "加油吧！中村君！！"
+    ,"THE WORLD IS DANCING 世界在起舞": "世界在起舞"
+    ,"世界正在跳舞": "世界在起舞"
+    ,"GRAND BLUE 碧蓝之海 3": "碧蓝之海"
+    ,"虽说是未成熟的恶女": "我是不才恶女"
+    ,"乙女怪兽卡列尼策": "少女怪兽焦糖恋心"
+    ,"Clevatess Ⅱ 魔兽之王与虚假的勇者传承": "克雷瓦提斯 魔兽之王与婴儿与尸之勇者"
+    ,"葬送的芙莉莲 Sousou no Frieren": "葬送的芙莉莲"
+  },
+  "season_layouts": {
+    "葬送的芙莉莲": [28, 28],
+    "咒术回战": [24, 23, 24],
+    "关于我转生变成史莱姆这档事": [24, 24, 24, 24],
+    "Re：从零开始的异世界生活": [25, 25, 16, 24],
+    "我的英雄学院": [13, 25, 25, 25, 25, 25, 21, 24],
+    "夜樱家的大作战": [27, 27]
+    ,"地狱模式～喜欢挑战特殊成就的玩家在废设定的异世界成为无双～": [12, 12]
+    ,"公主殿下，“拷问”的时间到了": [12, 12]
+    ,"擅长逃跑的殿下": [12, 12]
+    ,"相反的你和我": [12, 12]
+    ,"异兽魔都": [12, 12]
+    ,"杖与剑的魔剑谭": [12, 12]
+    ,"地狱乐": [13, 13]
+  },
+  "episode_defaults": {
+    "My Mother The Animation": [0, 1],
+    "Kimi wo Tsumugu Anime PV": [0, 1],
+    "Iseleve TVSP": [0, 1],
+    "ONE PIECE HEROINES": [0, 1],
+    "Shibou Yuugi de Meshi wo Kuu 44 Cloudy Beach": [1, 1]
+  },
+  "season_defaults": {
+    "碧蓝航线 微速前进！2！！": 2,
+    "GRAND BLUE 碧蓝之海 3": 3,
+    "Clevatess Ⅱ－魔兽之王与虚假的勇者传承－": 2,
+    "Dr Stone Science Future": 4,
+    "石纪元 科学与未来": 4,
+    "Katainaka no Ossan Kensei ni Naru II": 2
+  }
+}

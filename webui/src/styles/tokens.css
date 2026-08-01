@@ -1,0 +1,10 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f8fa; --surface: #ffffff; --surface-alt: #f3f4f7;
+  --text: #20232a; --muted: #68707d; --border: #e1e4e9; --border-strong: #cfd4dc;
+  --primary: #343f93; --primary-hover: #29347e; --primary-soft: #eef0ff;
+  --amber: #a86608; --amber-soft: #fff5dc; --red: #b4232e; --red-soft: #fff0f1;
+  --green: #217346; --green-soft: #eaf7f0; --blue: #2866a6; --blue-soft: #edf5ff;
+  --radius: 8px; --sidebar: 220px; --topbar: 58px;
+  font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+}

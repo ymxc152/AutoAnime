@@ -1,79 +1,87 @@
-# AutoAnimeMv
+# AutoAnime
 
-English | [简体中文](./README.md)
+[简体中文](./README.md) | English
 
-`AutoAnimeMv` is a Python tool for identifying anime titles, seasons, and episodes, then renaming and organizing video and subtitle files into a cleaner library structure. It supports both local batch processing and `qBittorrent` callback workflows.
+AutoAnime identifies and organizes anime files for Emby, Jellyfin, Plex, and similar media libraries. The repository now contains one implementation only: v3.1.1, entered through `AutoAnimeMv3.py` with its core in `autoanime_v3/`.
 
-## Features
-- OpenAI-compatible title, season, and episode recognition
-- Fallback sources via `Bangumi`, `BGM`, and `TMDB`
-- Linked handling for video and subtitle files
-- `default` and `emby` naming styles
-- Hard link support for seeding-friendly workflows
-- `--dry-run`, operation logs, and rollback support
-- Recursive scanning and optional separate output directory
+Production requires Python 3.11 or newer. Building the WebUI requires Node.js 20 or newer and pnpm 10 or newer.
 
-## Installation
-```bash
-python -m pip install -r requirements.txt
-```
+## Highlights
 
-## Quick Start
-1. Copy `config.ini.Template` to local `config.ini`
-2. Adjust recognition, naming, proxy, and file handling options as needed
-3. Inject real credentials through environment variables instead of storing them in the repository
-4. Run a preview with `--dry-run` before doing actual file operations
+- Handles a season/batch directory or one video file.
+- Defaults to preview mode; files change only with `--apply`.
+- Rejects low-confidence or conflicting identification instead of guessing.
+- Uses intrinsic stable labels for known releases and a stable `version-xxxxxxxx` key when metadata is absent, so incremental imports do not overwrite each other.
+- Supports hard-link, copy, and move modes. Move first atomically claims the source as a same-volume staging file, verifies it, and deletes only that staging path, so a newly recreated download path is never removed. Logs include SHA-256 and failed batches roll back automatically.
+- Uses a normalized SQLite library database instead of fragmented JSON cache files.
+- Includes a FastAPI + React single-administrator LAN console for configuration, review, immutable plan approval, real file execution, and safe rollback.
 
-### PowerShell Example
+## Quick start
+
 ```powershell
-$env:OPENAI_API_KEY="your-openai-key"
-$env:TMDB_BEARER_TOKEN="your-tmdb-token"
-python AutoAnimeMv.py "D:\Anime" --dry-run
-python AutoAnimeMv.py "D:\Anime"
+python -m pip install -r requirements.txt
+
+# Preview a download directory
+python AutoAnimeMv3.py "F:\Downloads" --output "F:\AnimeLibrary"
+
+# Preview one season directory or one file
+python AutoAnimeMv3.py "F:\Downloads\Some.Show.S03" --output "F:\AnimeLibrary"
+python AutoAnimeMv3.py "F:\Downloads\Some.Show.S03E02.mkv" --output "F:\AnimeLibrary"
+
+# Apply after reviewing the plan
+python AutoAnimeMv3.py "F:\Downloads" --output "F:\AnimeLibrary" --mode move --apply
+python AutoAnimeMv3.py "F:\Downloads" --output "F:\AnimeLibrary" --mode link --apply
+
+# Export an auditable JSON report
+python AutoAnimeMv3.py "F:\Downloads" --output "F:\AnimeLibrary" --report-json report.json
 ```
 
-## Common Commands
-```bash
-# Local batch processing
-python AutoAnimeMv.py "D:\Anime"
+Copy `config.v3.ini.Template` to `config.v3.ini` if a config file is desired, then pass it explicitly with `--config config.v3.ini`. Keep API credentials in environment variables.
 
-# Emby-style naming
-python AutoAnimeMv.py "D:\Anime" --naming-style emby
+## Library database
 
-# Use a separate output directory
-python AutoAnimeMv.py "D:\Anime" --output-path "D:\AnimeLibrary"
+The default database is `.autoanime-v3/library.sqlite3`. It contains normalized shows, seasons, episodes, media files, identification evidence, operation history, and correction drafts. A normalized source key keeps one current media fact while historical resolution decisions remain auditable. Alias/rule changes are included in the decision fingerprint, so stale decisions are invalidated without duplicating the current media row. Manual rollback restores database state and verifies the logged SHA-256 before destructive actions.
 
-# Roll back a previous run
-python AutoAnimeMv.py rollback --log ".\logs\AutoAnime_operations_xxx.json"
+```powershell
+python AutoAnimeMv3.py --database-reset
+python AutoAnimeMv3.py --rollback ".\.autoanime-v3\operations\run.jsonl"
 ```
 
-## qBittorrent Callback Example
-```bash
-python AutoAnimeMv.py "%D" "%N" "%C" "%L"
+Database reset does not modify media files.
+
+## Web console
+
+Build the React application, then run the Web/API and Worker processes against the same data directory:
+
+```powershell
+pnpm --dir webui install
+pnpm --dir webui build
+
+# Trusted LAN HTTP development only
+python AutoAnimeWeb.py --data-dir C:\ProgramData\AutoAnime --insecure-http
+python AutoAnimeWorker.py --data-dir C:\ProgramData\AutoAnime
 ```
 
-## Important Configuration
-- `USEOPENAIAPI` / `OPENAI_PRIORITY_FIRST` / `OPENAI_IDENTIFY_ALL`: AI recognition flow
-- `OPENAI_API_KEY_ENV` / `TMDB_BEARER_TOKEN_ENV`: credential environment variable names
-- `USELINK` / `STRICT_MODE` / `LINKFAILSUSEMOVEFLAGS`: file handling strategy
-- `NAMING_STYLE` / `OUTPUT_PATH` / `MAX_FILENAME_LENGTH`: naming and output behavior
-- `DRY_RUN` / `OPERATION_LOG_ENABLE` / `OPERATION_LOG_DIR`: preview, audit, and rollback controls
+The first administrator can only be created from the server itself. Before exposing the port or reverse proxy to the LAN, open `http://127.0.0.1:8765` on the server and complete bootstrap. After that, use `http://server-ip:8765`. The console manages multiple source/library roots, per-profile link/copy/move policies, manual scans, job events, reviews, immutable plans, operation rollback, library-title corrections, versioned JSON rules, encrypted secret status, ordinary settings, and online backups.
 
-## Public Repository Notes
-- Keep `config.ini` local and never commit it
-- Store real `API keys` / `tokens` in environment variables only
-- Ignore `docs/plans/`, `.cache/`, `logs/`, local logs, and virtual environments
-- Dependency setup is handled through `requirements.txt`; `get-pip.py` is no longer kept in the repository
-- If you plan to publish the full Git history, review author emails and legacy repository traces first
+For production, bind the Web process to loopback and use the example Caddy configuration in `deploy/windows/` for LAN HTTPS. The example also rejects remote bootstrap requests. Do not pass `--insecure-http` behind HTTPS. WinSW templates for the Web and Worker services are included in the same directory.
 
 ## Documentation
-- Index: `docs/00_文档总目录.md`
-- Architecture: `docs/01_项目架构与模块职责.md`
-- Deployment: `docs/02_开发环境与构建部署.md`
-- External APIs and dependencies: `docs/04_接口协议与外部依赖.md`
 
-## Feedback
-Please use the current repository's Issue or Pull Request workflow for bug reports and improvements.
+- [Chinese README with full usage](./README.md)
+- [v3 architecture and migration](./docs/12_v3_架构与迁移.md)
+- [WebUI and data-layer plan](./docs/11_v3_WebUI与数据层规划.md)
+
+## Tests
+
+```powershell
+python -m unittest discover -s tests -p "test_v3_*.py" -v
+pnpm --dir webui test --run
+pnpm --dir webui build
+pnpm --dir webui e2e
+pnpm --dir webui audit --prod --audit-level high
+```
 
 ## License
-This project is released under [GPL-3.0](./LICENSE).
+
+[GPL-3.0](./LICENSE)

@@ -5,6 +5,9 @@ config.ini
 __pycache__/
 *.pyc
 .cache/
+.autoanime-v3/
+config.v3.ini
+.cache.bak*/
 logs/
 .venv/
 venv/
@@ -17,4 +20,3 @@ docs/plans/
 *.aam.bak.*
 Thumbs.db
 Desktop.ini
-.cache/

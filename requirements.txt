@@ -1,4 +1,14 @@
-# Runtime dependencies for AutoAnimeMv
-# Keep this file limited to project runtime dependencies only.
-requests
-zhconv
+# Core filename normalization.
+zhconv==1.4.3
+
+# Web console backend and persistence.
+SQLAlchemy==2.0.41
+alembic==1.16.4
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+argon2-cffi==25.1.0
+cryptography==45.0.5
+watchdog==6.0.0
+tzdata==2025.2
+httpx==0.28.1
+pydantic-settings==2.10.1

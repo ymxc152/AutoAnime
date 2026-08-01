@@ -1,0 +1,9 @@
+<service>
+  <id>AutoAnimeWorker</id><name>AutoAnime Worker</name>
+  <description>AutoAnime scanner and safe file-operation Worker</description>
+  <executable>C:\Program Files\AutoAnime\.venv\Scripts\python.exe</executable>
+  <arguments>&quot;C:\Program Files\AutoAnime\AutoAnimeWorker.py&quot; --data-dir &quot;C:\ProgramData\AutoAnime&quot;</arguments>
+  <workingdirectory>C:\Program Files\AutoAnime</workingdirectory>
+  <logpath>C:\ProgramData\AutoAnime\logs</logpath>
+  <onfailure action="restart" delay="10 sec" /><stoptimeout>60 sec</stoptimeout>
+</service>

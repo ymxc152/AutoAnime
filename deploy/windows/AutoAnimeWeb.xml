@@ -1,0 +1,9 @@
+<service>
+  <id>AutoAnimeWeb</id><name>AutoAnime Web Console</name>
+  <description>AutoAnime LAN administration Web/API service</description>
+  <executable>C:\Program Files\AutoAnime\.venv\Scripts\python.exe</executable>
+  <arguments>&quot;C:\Program Files\AutoAnime\AutoAnimeWeb.py&quot; --data-dir &quot;C:\ProgramData\AutoAnime&quot; --host 127.0.0.1</arguments>
+  <workingdirectory>C:\Program Files\AutoAnime</workingdirectory>
+  <logpath>C:\ProgramData\AutoAnime\logs</logpath>
+  <onfailure action="restart" delay="10 sec" /><stoptimeout>30 sec</stoptimeout>
+</service>
