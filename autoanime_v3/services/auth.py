@@ -1,6 +1,7 @@
 """Single-administrator authentication and secret-setting services."""
 
 import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,12 +13,19 @@ from autoanime_v3.domain.errors import (
     AlreadyBootstrappedError,
     AuthenticationError,
     CsrfValidationError,
+    LocalOnlyError,
     LoginThrottledError,
     ValidationError,
 )
 from autoanime_v3.security.csrf import csrf_matches
 from autoanime_v3.security.passwords import hash_password, password_needs_rehash, verify_password
 from autoanime_v3.security.sessions import random_token, token_hash
+
+
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "AutoAnime-Admin-ChangeMe!"
+AUTH_LOCAL_BYPASS_KEY = "auth.local_bypass"
+LOCAL_HOOK_TRUST_KEY = "hooks.local_trust"
 
 
 def utc_now():
@@ -43,6 +51,21 @@ class AuthService:
         self.session_ttl = timedelta(seconds=session_ttl_seconds)
         run_migrations(self.database_path)
 
+    def ensure_default_admin(self):
+        """Create the documented default administrator when the database is empty."""
+        now = iso(self.clock())
+        with SqliteUnitOfWork(self.database_path) as uow:
+            repository = AuthRepository(uow.connection)
+            if repository.user_count() != 0:
+                return None
+            row = repository.create_user(
+                DEFAULT_ADMIN_USERNAME,
+                hash_password(DEFAULT_ADMIN_PASSWORD),
+                now,
+            )
+            uow.commit()
+            return public_user(row)
+
     def bootstrap_admin(self, username, password):
         username = str(username).strip()
         if len(username) < 3 or len(password) < 12:
@@ -55,6 +78,65 @@ class AuthService:
             row = repository.create_user(username, hash_password(password), now)
             uow.commit()
             return public_user(row)
+
+    def _setting_bool(self, key, default=False):
+        with SqliteUnitOfWork(self.database_path) as uow:
+            row = uow.connection.execute(
+                "SELECT value_json FROM app_settings WHERE key = ?", (key,)
+            ).fetchone()
+        if row is None:
+            return bool(default)
+        try:
+            return bool(json.loads(row[0]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return bool(default)
+
+    def local_bypass_enabled(self):
+        return self._setting_bool(AUTH_LOCAL_BYPASS_KEY, default=True)
+
+    def local_hook_trust_enabled(self):
+        return self._setting_bool(LOCAL_HOOK_TRUST_KEY, default=True)
+
+    def issue_session_for_user(self, user_row, client_ip=None, user_agent=None):
+        now = self.clock()
+        with SqliteUnitOfWork(self.database_path) as uow:
+            repository = AuthRepository(uow.connection)
+            session_token = random_token()
+            csrf_token = random_token()
+            expires_at = now + self.session_ttl
+            repository.create_session(
+                user_row["id"],
+                token_hash(session_token),
+                token_hash(csrf_token),
+                iso(now),
+                iso(expires_at),
+                client_ip,
+                user_agent,
+            )
+            uow.commit()
+            return SessionCredentials(
+                session_token=session_token,
+                csrf_token=csrf_token,
+                expires_at=iso(expires_at),
+                user=public_user(user_row),
+            )
+
+    def local_session(self, client_ip=None, user_agent=None, is_loopback=False):
+        if not is_loopback:
+            raise LocalOnlyError("Passwordless local login is only available on loopback")
+        if not self.local_bypass_enabled():
+            raise AuthenticationError("Local passwordless login is disabled")
+        self.ensure_default_admin()
+        with SqliteUnitOfWork(self.database_path) as uow:
+            repository = AuthRepository(uow.connection)
+            user = repository.get_user_by_username(DEFAULT_ADMIN_USERNAME)
+            if user is None:
+                user = repository.connection.execute(
+                    "SELECT * FROM users WHERE is_active = 1 ORDER BY id LIMIT 1"
+                ).fetchone()
+            if user is None or not bool(user["is_active"]):
+                raise AuthenticationError("No active administrator is available")
+        return self.issue_session_for_user(user, client_ip=client_ip, user_agent=user_agent)
 
     def _attempt_key(self, username, client_ip):
         value = "%s\0%s" % (str(username).casefold(), client_ip or "unknown")

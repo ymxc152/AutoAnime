@@ -1,7 +1,6 @@
 """FastAPI app factory and v1 HTTP contract."""
 
 import json
-import ipaddress
 import secrets
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -18,10 +17,16 @@ from autoanime_v3.api.errors import status_for_error
 from autoanime_v3.db.engine import connect_sqlite
 from autoanime_v3.db.migrations import SCHEMA_VERSION, run_migrations
 from autoanime_v3.domain.entities import CreateProfile
-from autoanime_v3.domain.errors import BootstrapLocalOnlyError, DomainError
+from autoanime_v3.domain.errors import BootstrapLocalOnlyError, DomainError, LocalOnlyError
 from autoanime_v3.jobs.queue import JobQueue
+from autoanime_v3.security.network import is_loopback_host
 from autoanime_v3.security.secrets import DpapiSecretStore, EncryptedFileSecretStore
-from autoanime_v3.services.auth import AuthService, SecretService
+from autoanime_v3.services.auth import (
+    AUTH_LOCAL_BYPASS_KEY,
+    LOCAL_HOOK_TRUST_KEY,
+    AuthService,
+    SecretService,
+)
 from autoanime_v3.services.automation import ScheduleService, WebhookSourceService
 from autoanime_v3.services.backups import BackupService
 from autoanime_v3.services.changes import ChangeService
@@ -85,8 +90,11 @@ class ServiceContainer:
             else EncryptedFileSecretStore(settings.data_directory / "secret-store")
         )
         queue = JobQueue(settings.database_path)
+        auth = AuthService(settings.database_path)
+        auth.ensure_default_admin()
+        app_settings = SettingsService(settings.database_path)
         return cls(
-            auth=AuthService(settings.database_path),
+            auth=auth,
             secrets=SecretService(settings.database_path, secret_store),
             roots=RootService(settings.database_path),
             profiles=ProfileService(settings.database_path),
@@ -97,7 +105,7 @@ class ServiceContainer:
             operations=OperationService(settings.database_path, settings.data_directory / "operations"),
             rules=RuleService(settings.database_path),
             changes=ChangeService(settings.database_path),
-            settings=SettingsService(settings.database_path),
+            settings=app_settings,
             backups=BackupService(settings.database_path, settings.data_directory / "backups"),
             schedules=ScheduleService(settings.database_path),
             webhooks=WebhookSourceService(settings.database_path),
@@ -200,8 +208,34 @@ def serialize(value):
     return value
 
 
+def client_host(request: Request):
+    return request.client.host if request.client else ""
+
+
+def set_session_cookie(response: Response, session_token: str, secure_cookies: bool):
+    response.set_cookie(
+        SESSION_COOKIE,
+        session_token,
+        httponly=True,
+        secure=secure_cookies,
+        samesite="strict",
+        path="/",
+        max_age=43200,
+    )
+
+
+def credentials_payload(credentials):
+    return {
+        "user": serialize(credentials.user),
+        "csrf_token": credentials.csrf_token,
+        "expires_at": credentials.expires_at,
+    }
+
+
 def create_app(settings, services=None):
     services = services or ServiceContainer.build(settings)
+    # Ensure default security settings exist as soon as the app starts.
+    services.settings.ensure_defaults()
     app = FastAPI(title="AutoAnime Web Console", version="3.0")
     app.state.settings = settings
     app.state.services = services
@@ -251,21 +285,22 @@ def create_app(settings, services=None):
         return {"status": "ready", "schema_version": SCHEMA_VERSION}
 
     @app.get("/api/v1/auth/bootstrap-status")
-    def bootstrap_status():
-        return {"configured": bool(rows("SELECT 1 FROM users LIMIT 1"))}
+    def bootstrap_status(request: Request):
+        host = client_host(request)
+        loopback = is_loopback_host(host)
+        configured = bool(rows("SELECT 1 FROM users LIMIT 1"))
+        local_bypass = services.auth.local_bypass_enabled()
+        return {
+            "configured": configured,
+            "local_bypass": local_bypass,
+            "local_client": loopback,
+            "can_local_login": bool(loopback and local_bypass and configured),
+        }
 
     @app.post("/api/v1/auth/bootstrap", status_code=201)
     def bootstrap(body: LoginBody, request: Request):
-        host = request.client.host if request.client else ""
-        try:
-            address = ipaddress.ip_address(host)
-            is_loopback = address.is_loopback or bool(
-                getattr(address, "ipv4_mapped", None)
-                and address.ipv4_mapped.is_loopback
-            )
-        except ValueError:
-            is_loopback = False
-        if not is_loopback:
+        host = client_host(request)
+        if not is_loopback_host(host):
             raise BootstrapLocalOnlyError(
                 "The first administrator must be created from the local machine"
             )
@@ -276,23 +311,22 @@ def create_app(settings, services=None):
         credentials = services.auth.login(
             body.username,
             body.password,
-            request.client.host if request.client else None,
+            client_host(request),
             request.headers.get("User-Agent"),
         )
-        response.set_cookie(
-            SESSION_COOKIE,
-            credentials.session_token,
-            httponly=True,
-            secure=settings.secure_cookies,
-            samesite="strict",
-            path="/",
-            max_age=43200,
+        set_session_cookie(response, credentials.session_token, settings.secure_cookies)
+        return credentials_payload(credentials)
+
+    @app.post("/api/v1/auth/local-session")
+    def local_session(request: Request, response: Response):
+        host = client_host(request)
+        credentials = services.auth.local_session(
+            client_ip=host,
+            user_agent=request.headers.get("User-Agent"),
+            is_loopback=is_loopback_host(host),
         )
-        return {
-            "user": serialize(credentials.user),
-            "csrf_token": credentials.csrf_token,
-            "expires_at": credentials.expires_at,
-        }
+        set_session_cookie(response, credentials.session_token, settings.secure_cookies)
+        return credentials_payload(credentials)
 
     @app.get("/api/v1/auth/me")
     def me(user=Depends(current_user)):
@@ -400,6 +434,44 @@ def create_app(settings, services=None):
         if body.path:
             paths.append(body.path)
         return serialize(services.webhooks.submit_token(token, paths))
+
+    @app.post("/api/v1/hooks/local", status_code=202)
+    def local_downloader_hook(body: DownloaderHookBody, request: Request):
+        host = client_host(request)
+        if not is_loopback_host(host):
+            raise LocalOnlyError("Local hook endpoint is only available on loopback")
+        if not services.auth.local_hook_trust_enabled():
+            raise LocalOnlyError("Local trusted hooks are disabled")
+        paths = list(body.paths)
+        if body.path:
+            paths.append(body.path)
+        profile_id = None
+        if paths:
+            # Prefer the first enabled profile whose source root contains the path.
+            for profile in rows(
+                """
+                SELECT p.id AS profile_id, r.path AS source_path
+                FROM scan_profiles p
+                JOIN storage_roots r ON r.id = p.source_root_id
+                WHERE p.enabled = 1 AND r.enabled = 1
+                ORDER BY p.id
+                """
+            ):
+                from autoanime_v3.services.roots import path_is_within
+
+                if any(path_is_within(Path(path).expanduser(), profile["source_path"]) for path in paths):
+                    profile_id = int(profile["profile_id"])
+                    break
+        if profile_id is None:
+            enabled = rows("SELECT id FROM scan_profiles WHERE enabled = 1 ORDER BY id LIMIT 1")
+            if not enabled:
+                from autoanime_v3.domain.errors import NotFoundError
+
+                raise NotFoundError("No enabled scan profile is available for local hook")
+            profile_id = int(enabled[0]["id"])
+        return serialize(
+            services.jobs.submit_scan(profile_id, paths, f"local-hook:{profile_id}:{secrets.token_hex(8)}")
+        )
 
     @app.post("/api/v1/jobs/scans", status_code=202)
     def submit_scan(
@@ -543,8 +615,24 @@ def create_app(settings, services=None):
 
     @app.get("/api/v1/settings")
     def settings_view(user=Depends(current_user)):
+        items = services.settings.list()
+        by_key = {item["key"]: item for item in items}
         return {
-            "items": services.settings.list(),
+            "items": items,
+            "security": {
+                "local_bypass": bool(
+                    by_key.get(AUTH_LOCAL_BYPASS_KEY, {}).get("value", True)
+                ),
+                "local_bypass_revision": int(
+                    by_key.get(AUTH_LOCAL_BYPASS_KEY, {}).get("revision", 0)
+                ),
+                "local_hook_trust": bool(
+                    by_key.get(LOCAL_HOOK_TRUST_KEY, {}).get("value", True)
+                ),
+                "local_hook_trust_revision": int(
+                    by_key.get(LOCAL_HOOK_TRUST_KEY, {}).get("revision", 0)
+                ),
+            },
             "secrets": rows("SELECT key, provider, updated_at, 1 AS configured FROM secret_settings ORDER BY key"),
         }
 

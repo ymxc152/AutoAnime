@@ -10,6 +10,7 @@ class ApiSecurityTests(unittest.TestCase):
         self.temporary_directory = tempfile.TemporaryDirectory()
         root = Path(self.temporary_directory.name)
         from autoanime_v3.api.app import ServerSettings, create_app
+        from autoanime_v3.services.auth import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
 
         self.client = TestClient(
             create_app(
@@ -17,13 +18,9 @@ class ApiSecurityTests(unittest.TestCase):
             ),
             client=("127.0.0.1", 50000),
         )
-        self.client.post(
-            "/api/v1/auth/bootstrap",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
-        )
         login = self.client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
+            json={"username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD},
         )
         self.csrf = login.json()["csrf_token"]
 

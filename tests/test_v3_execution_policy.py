@@ -50,13 +50,11 @@ class ExecutionPolicyTests(unittest.TestCase):
         return profile, media, ScanService(self.database).run(profile.id)
 
     def login(self, client):
-        client.post(
-            "/api/v1/auth/bootstrap",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
-        )
+        from autoanime_v3.services.auth import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
+
         response = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
+            json={"username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD},
         )
         self.assertEqual(response.status_code, 200)
         return {"X-CSRF-Token": response.json()["csrf_token"]}

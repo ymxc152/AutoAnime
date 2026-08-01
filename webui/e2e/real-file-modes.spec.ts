@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 const validationRoot = process.env.AUTOANIME_REAL_TEST_ROOT
 const sample = process.env.AUTOANIME_REAL_SAMPLE
 const python = resolve('../.venv/Scripts/python.exe')
-const password = 'Correct Horse Battery Staple!42'
+const password = 'AutoAnime-Admin-ChangeMe!'
 let server: ChildProcess
 
 test.skip(!validationRoot || !sample, 'Set AUTOANIME_REAL_TEST_ROOT and AUTOANIME_REAL_SAMPLE for isolated real-file validation')
@@ -21,11 +21,17 @@ function filesIn(directory: string): string[] {
 }
 
 async function login(page: Page) {
-  await page.request.post('/api/v1/auth/bootstrap', { data: { username: 'admin', password } })
   await page.goto('/')
+  const overview = page.getByRole('link', { name: /概览/ })
+  try {
+    await expect(overview).toBeVisible({ timeout: 8000 })
+    return
+  } catch {
+    // fall through
+  }
   await page.getByLabel('密码').fill(password)
   await page.getByRole('button', { name: '登录' }).click()
-  await expect(page.getByRole('link', { name: /概览/ })).toBeVisible()
+  await expect(overview).toBeVisible()
 }
 
 test.beforeAll(async () => {

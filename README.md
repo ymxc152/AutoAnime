@@ -21,6 +21,10 @@ AutoAnime 是一个面向 Emby、Jellyfin、Plex 等媒体库的番剧识别与�
 AutoAnimeMv3.py              CLI 入口
 AutoAnimeWeb.py              Web/API 入口
 AutoAnimeWorker.py           持久任务 Worker 入口
+start-autoanime.bat          Windows 一键启动（根目录）
+stop-autoanime.bat           Windows 一键停止
+install-autostart.bat        登录自启
+uninstall-autostart.bat      取消自启
 autoanime_v3/
 ├─ scanner.py                单文件/季度目录扫描
 ├─ parser.py                 文件名与季集解析
@@ -35,7 +39,7 @@ autoanime_v3/
 ├─ repository.py / cache.py  CLI 兼容资料库边界
 └─ data/aliases.json         可维护的标题与季集规则
 webui/                       React/Vite 管理控制台
-deploy/windows/              WinSW 与 Caddy 示例
+deploy/windows/              WinSW、Caddy 与兼容包装脚本
 tests/                       v3 自动化测试
 docs/                        架构与 WebUI 规划
 ```
@@ -170,7 +174,42 @@ WebUI 面向 Windows 常驻服务器和局域网内的单管理员使用。它�
 - 持久扫描任务、任务事件、审核项、不可变整理计划和操作批次；
 - 番剧资料、海报/简介/放送状态（可选元数据），以及带修订检查的人工标题纠正；
 - 版本化 JSON 规则的草稿、校验、激活和回退；
-- 普通 JSON 设置、DPAPI 加密密钥状态和 SQLite 在线备份。
+- 普通 JSON 设置、DPAPI 加密密钥状态和 SQLite 在线备份；
+- 本机免密登录与本机 Hook 信任策略（可在系统设置中关闭）。
+
+### Windows 一键启动
+
+打开项目文件夹后，根目录即可看到：
+
+| 文件 | 作用 |
+|------|------|
+| `start-autoanime.bat` | 启动 Web + Worker |
+| `stop-autoanime.bat` | 停止服务 |
+| `install-autostart.bat` | 登录后自动启动 |
+| `uninstall-autostart.bat` | 取消开机自启 |
+
+默认：
+
+- 控制台：`http://127.0.0.1:8765`
+- 数据目录：`C:\ProgramData\AutoAnime`
+- 日志：`C:\ProgramData\AutoAnime\logs\`
+
+### 默认账号与本机免密
+
+首次启动 Web 服务时会自动创建默认管理员：
+
+| 项目 | 值 |
+|------|----|
+| 账号 | `admin` |
+| 密码 | `AutoAnime-Admin-ChangeMe!` |
+
+安全策略：
+
+- **本机免密登录（默认开启）**：从 `127.0.0.1` / `::1` 打开控制台时自动建立会话，无需输入密码。
+- **局域网仍需密码**：非 loopback 访问必须使用账号密码。
+- 可在 WebUI「系统设置 → 本机访问与 Hook」关闭「本机免密登录」。
+- **本机 Hook 信任（默认开启）**：本机可调用 `POST /api/v1/hooks/local` 触发扫描；关闭后仅允许带 token 的下载器 webhook。
+- 建议上线后尽快修改默认密码，并在不需要免密时关闭本机免验证。
 
 首次构建前端：
 
@@ -182,6 +221,8 @@ pnpm --dir webui build
 本机或可信局域网内直接使用 HTTP：
 
 ```powershell
+# 推荐：双击根目录 start-autoanime.bat
+# 或手动：
 # 终端 1：Web/API；--insecure-http 只用于没有 HTTPS 的可信内网
 python AutoAnimeWeb.py --data-dir C:\ProgramData\AutoAnime --insecure-http
 
@@ -189,7 +230,7 @@ python AutoAnimeWeb.py --data-dir C:\ProgramData\AutoAnime --insecure-http
 python AutoAnimeWorker.py --data-dir C:\ProgramData\AutoAnime
 ```
 
-首次管理员只能从服务器本机创建：先在服务器上访问 `http://127.0.0.1:8765` 完成初始化，再允许局域网访问。不要在尚未初始化时把端口或反向代理暴露给局域网。初始化完成后可访问 `http://服务器IP:8765`。生产部署建议让 Web 仅监听 `127.0.0.1`，通过 `deploy/windows/Caddyfile.example` 提供局域网 HTTPS；Caddy 示例也会拒绝远程 bootstrap 请求，此时不要传 `--insecure-http`。WinSW 服务模板位于 `deploy/windows/`；应使用可访问下载目录和媒体库、但权限尽量小的专用 Windows 服务账号，并限制防火墙只允许可信子网访问。
+访问 `http://127.0.0.1:8765` 即可进入控制台（默认本机免密）。局域网访问使用 `http://服务器IP:8765` 并输入默认账号密码。生产部署建议让 Web 仅监听 `127.0.0.1`，通过 `deploy/windows/Caddyfile.example` 提供局域网 HTTPS；Caddy 示例也会拒绝远程 bootstrap 请求，此时不要传 `--insecure-http`。WinSW 服务模板位于 `deploy/windows/`；应使用可访问下载目录和媒体库、但权限尽量小的专用 Windows 服务账号，并限制防火墙只允许可信子网访问。
 
 完整安全和数据设计见 [docs/11_v3_WebUI与数据层规划.md](./docs/11_v3_WebUI与数据层规划.md)。密钥只返回“是否已配置”和更新时间，永不通过 API 或页面回显明文/密文。
 

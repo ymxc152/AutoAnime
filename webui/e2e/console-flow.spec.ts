@@ -7,14 +7,24 @@ import { join, resolve } from 'node:path'
 let server: ChildProcess
 let root: string
 const python = resolve('../.venv/Scripts/python.exe')
-const password = 'Correct Horse Battery Staple!42'
+const password = 'AutoAnime-Admin-ChangeMe!'
 
-async function loginExisting(page: Page) {
-  await page.request.post('/api/v1/auth/bootstrap', { data: { username: 'admin', password } })
+async function ensureLoggedIn(page: Page) {
   await page.goto('/')
+  const overview = page.getByRole('link', { name: /概览/ })
+  try {
+    await expect(overview).toBeVisible({ timeout: 8000 })
+    return
+  } catch {
+    // fall through to password login when local bypass is off or slow
+  }
   await page.getByLabel('密码').fill(password)
   await page.getByRole('button', { name: '登录' }).click()
-  await expect(page.getByRole('link', { name: /概览/ })).toBeVisible()
+  await expect(overview).toBeVisible()
+}
+
+async function loginExisting(page: Page) {
+  await ensureLoggedIn(page)
 }
 
 function countFiles(directory: string): number {
@@ -65,11 +75,7 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   mkdirSync(source); mkdirSync(library)
   writeFileSync(join(source, '测试番 S01E01.mkv'), Buffer.alloc(1024 * 32, 7))
 
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: '创建管理员账号' })).toBeVisible()
-  await page.getByLabel('密码').fill(password)
-  await page.getByRole('button', { name: '创建并登录' }).click()
-  await expect(page.getByRole('link', { name: /概览/ })).toBeVisible()
+  await ensureLoggedIn(page)
 
   await page.getByRole('link', { name: /扫描配置/ }).click()
   await page.getByLabel('目录路径').fill(source)

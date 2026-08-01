@@ -4,6 +4,7 @@ from autoanime_v3.domain.errors import (
     AuthenticationError,
     BootstrapLocalOnlyError,
     CsrfValidationError,
+    LocalOnlyError,
     LoginThrottledError,
     NotFoundError,
     ValidationError,
@@ -13,7 +14,7 @@ from autoanime_v3.domain.errors import (
 def status_for_error(error):
     if isinstance(error, AuthenticationError):
         return 401
-    if isinstance(error, (CsrfValidationError, BootstrapLocalOnlyError)):
+    if isinstance(error, (CsrfValidationError, BootstrapLocalOnlyError, LocalOnlyError)):
         return 403
     if isinstance(error, NotFoundError):
         return 404

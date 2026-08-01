@@ -25,27 +25,24 @@ class ApiManagementTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def login(self):
-        self.client.post(
-            "/api/v1/auth/bootstrap",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
-        )
+        from autoanime_v3.services.auth import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
+
         response = self.client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
+            json={"username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD},
         )
         self.assertEqual(response.status_code, 200)
         return {"X-CSRF-Token": response.json()["csrf_token"]}
 
     def test_bootstrap_status_distinguishes_first_run_from_logged_out(self):
-        self.assertEqual(
-            self.client.get("/api/v1/auth/bootstrap-status").json(),
-            {"configured": False},
-        )
+        status = self.client.get("/api/v1/auth/bootstrap-status").json()
+        self.assertTrue(status["configured"])
+        self.assertTrue(status["local_bypass"])
+        self.assertTrue(status["local_client"])
+        self.assertTrue(status["can_local_login"])
         self.login()
-        self.assertEqual(
-            self.client.get("/api/v1/auth/bootstrap-status").json(),
-            {"configured": True},
-        )
+        status = self.client.get("/api/v1/auth/bootstrap-status").json()
+        self.assertTrue(status["configured"])
 
     def test_settings_update_uses_revisions_and_returns_json_values(self):
         headers = self.login()
@@ -64,8 +61,13 @@ class ApiManagementTests(unittest.TestCase):
             headers=headers,
         )
         self.assertEqual(conflict.status_code, 409)
-        listed = self.client.get("/api/v1/settings").json()["items"]
-        self.assertEqual(listed[0]["value"], 14)
+        listed = {
+            item["key"]: item["value"]
+            for item in self.client.get("/api/v1/settings").json()["items"]
+        }
+        self.assertEqual(listed["backup.retention_days"], 14)
+        self.assertIn("auth.local_bypass", listed)
+        self.assertTrue(listed["auth.local_bypass"])
 
     def test_schedule_and_webhook_management_and_anonymous_downloader_hook(self):
         headers = self.login()

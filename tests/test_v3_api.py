@@ -4,6 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from autoanime_v3.services.auth import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
+
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
@@ -23,33 +25,65 @@ class ApiTests(unittest.TestCase):
         self.client.close()
         self.temporary_directory.cleanup()
 
-    def bootstrap_and_login(self):
-        bootstrap = self.client.post(
-            "/api/v1/auth/bootstrap",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
-        )
-        self.assertEqual(bootstrap.status_code, 201)
+    def login_default(self):
         response = self.client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Correct Horse Battery Staple!42"},
+            json={"username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD},
         )
         self.assertEqual(response.status_code, 200)
         return response.json()["csrf_token"]
 
-    def test_health_bootstrap_login_me_and_logout(self):
+    def test_health_default_login_me_and_logout(self):
         self.assertEqual(self.client.get("/health/live").json()["status"], "live")
         self.assertEqual(self.client.get("/health/ready").json()["status"], "ready")
-        csrf = self.bootstrap_and_login()
+        status = self.client.get("/api/v1/auth/bootstrap-status").json()
+        self.assertTrue(status["configured"])
+        self.assertTrue(status["local_bypass"])
+        self.assertTrue(status["can_local_login"])
+        csrf = self.login_default()
         cookie = self.client.cookies.get("autoanime_session")
         self.assertTrue(cookie)
         me = self.client.get("/api/v1/auth/me")
-        self.assertEqual(me.json()["username"], "admin")
+        self.assertEqual(me.json()["username"], DEFAULT_ADMIN_USERNAME)
         logout = self.client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
         self.assertEqual(logout.status_code, 204)
         self.assertEqual(self.client.get("/api/v1/auth/me").status_code, 401)
 
+    def test_local_session_on_loopback(self):
+        response = self.client.post("/api/v1/auth/local-session")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["user"]["username"], DEFAULT_ADMIN_USERNAME)
+        me = self.client.get("/api/v1/auth/me")
+        self.assertEqual(me.status_code, 200)
+
+    def test_remote_client_cannot_use_local_session(self):
+        with TestClient(self.app, client=("203.0.113.10", 50000)) as remote:
+            response = remote.post("/api/v1/auth/local-session")
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json()["code"], "local_only")
+            remote_status = remote.get("/api/v1/auth/bootstrap-status").json()
+            self.assertTrue(remote_status["configured"])
+            self.assertFalse(remote_status["local_client"])
+            self.assertFalse(remote_status["can_local_login"])
+
+    def test_local_bypass_can_be_disabled(self):
+        csrf = self.login_default()
+        settings = self.client.get("/api/v1/settings").json()
+        revision = settings["security"]["local_bypass_revision"]
+        disabled = self.client.patch(
+            "/api/v1/settings",
+            json={"key": "auth.local_bypass", "value": False, "revision": revision},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(disabled.status_code, 200)
+        self.client.cookies.clear()
+        blocked = self.client.post("/api/v1/auth/local-session")
+        self.assertEqual(blocked.status_code, 401)
+        status = self.client.get("/api/v1/auth/bootstrap-status").json()
+        self.assertFalse(status["can_local_login"])
+
     def test_authenticated_root_creation_and_listing(self):
-        csrf = self.bootstrap_and_login()
+        csrf = self.login_default()
         source = Path(self.temporary_directory.name) / "source"
         source.mkdir()
         created = self.client.post(
@@ -61,20 +95,66 @@ class ApiTests(unittest.TestCase):
         roots = self.client.get("/api/v1/roots")
         self.assertEqual(len(roots.json()["items"]), 1)
 
-    def test_remote_client_cannot_claim_first_administrator(self):
+    def test_local_hook_requires_loopback_and_enabled_profile(self):
+        csrf = self.login_default()
+        source = Path(self.temporary_directory.name) / "hook-source"
+        library = Path(self.temporary_directory.name) / "hook-library"
+        source.mkdir()
+        library.mkdir()
+        source_id = self.client.post(
+            "/api/v1/roots",
+            json={"kind": "source", "path": str(source)},
+            headers={"X-CSRF-Token": csrf},
+        ).json()["id"]
+        library_id = self.client.post(
+            "/api/v1/roots",
+            json={"kind": "library", "path": str(library)},
+            headers={"X-CSRF-Token": csrf},
+        ).json()["id"]
+        self.client.post(
+            "/api/v1/profiles",
+            json={
+                "name": "hook-profile",
+                "source_root_id": source_id,
+                "library_root_id": library_id,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        media = source / "show S01E01.mkv"
+        media.write_bytes(b"x" * 1024)
+        accepted = self.client.post(
+            "/api/v1/hooks/local",
+            json={"path": str(media)},
+        )
+        self.assertEqual(accepted.status_code, 202)
         with TestClient(self.app, client=("203.0.113.10", 50000)) as remote:
+            rejected = remote.post("/api/v1/hooks/local", json={"path": str(media)})
+            self.assertEqual(rejected.status_code, 403)
+            self.assertEqual(rejected.json()["code"], "local_only")
+
+    def test_remote_client_cannot_claim_first_administrator_when_empty(self):
+        empty_root = Path(self.temporary_directory.name) / "empty"
+        empty_root.mkdir()
+        from autoanime_v3.api.app import ServerSettings, ServiceContainer, create_app
+
+        settings = ServerSettings(
+            database_path=empty_root / "web.sqlite3",
+            data_directory=empty_root,
+            secure_cookies=False,
+            secret_provider="file",
+        )
+        services = ServiceContainer.build(settings)
+        import sqlite3
+
+        connection = sqlite3.connect(str(settings.database_path))
+        connection.execute("DELETE FROM users")
+        connection.commit()
+        connection.close()
+        app = create_app(settings, services=services)
+        with TestClient(app, client=("203.0.113.10", 50000)) as remote:
             response = remote.post(
                 "/api/v1/auth/bootstrap",
                 json={"username": "attacker", "password": "Correct Horse Battery Staple!42"},
             )
-
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["code"], "bootstrap_local_only")
-        self.assertEqual(
-            self.client.get("/api/v1/auth/bootstrap-status").json(),
-            {"configured": False},
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()

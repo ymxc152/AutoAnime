@@ -51,6 +51,36 @@ Database reset does not modify media files.
 
 ## Web console
 
+### Windows one-click start
+
+Root-level scripts (visible as soon as you open the project folder):
+
+| File | Purpose |
+|------|---------|
+| `start-autoanime.bat` | Start Web + Worker |
+| `stop-autoanime.bat` | Stop services |
+| `install-autostart.bat` | Start on user logon |
+| `uninstall-autostart.bat` | Remove autostart |
+
+Defaults: `http://127.0.0.1:8765`, data under `C:\ProgramData\AutoAnime`.
+
+### Default credentials and local passwordless login
+
+On first Web start a default administrator is created:
+
+| Field | Value |
+|------|-------|
+| Username | `admin` |
+| Password | `AutoAnime-Admin-ChangeMe!` |
+
+Security policy:
+
+- **Local passwordless login (on by default)** for loopback (`127.0.0.1` / `::1`).
+- LAN clients still need the username/password.
+- Toggle under WebUI **Settings → Local access & hooks**.
+- **Local hook trust (on by default)** allows `POST /api/v1/hooks/local` from loopback without a webhook token.
+- Change the default password before exposing the service more broadly.
+
 Build the React application, then run the Web/API and Worker processes against the same data directory:
 
 ```powershell
@@ -62,7 +92,7 @@ python AutoAnimeWeb.py --data-dir C:\ProgramData\AutoAnime --insecure-http
 python AutoAnimeWorker.py --data-dir C:\ProgramData\AutoAnime
 ```
 
-The first administrator can only be created from the server itself. Before exposing the port or reverse proxy to the LAN, open `http://127.0.0.1:8765` on the server and complete bootstrap. After that, use `http://server-ip:8765`. The console manages multiple source/library roots, per-profile link/copy/move policies, manual scans, job events, reviews, immutable plans, operation rollback, library-title corrections, versioned JSON rules, encrypted secret status, ordinary settings, and online backups.
+Open `http://127.0.0.1:8765` for the console (passwordless on loopback by default). Use `http://server-ip:8765` with the default credentials from another machine. The console manages multiple source/library roots, per-profile link/copy/move policies, manual scans, job events, reviews, immutable plans, operation rollback, library-title corrections, versioned JSON rules, encrypted secret status, ordinary settings, and online backups.
 
 For production, bind the Web process to loopback and use the example Caddy configuration in `deploy/windows/` for LAN HTTPS. The example also rejects remote bootstrap requests. Do not pass `--insecure-http` behind HTTPS. WinSW templates for the Web and Worker services are included in the same directory.
 

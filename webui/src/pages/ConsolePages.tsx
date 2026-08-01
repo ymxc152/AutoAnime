@@ -241,15 +241,90 @@ export function AutomationSettings({ profiles, schedules, webhooks, createdToken
 }
 
 export function SettingsPage() {
-  const query = useQuery({ queryKey: ['settings'], queryFn: () => api.get<{ items: Item[]; secrets: Item[] }>('/settings') }); const backups = useList('backups', '/backups', 0); const schedules = useList('schedules', '/schedules', 0); const webhooks = useList('webhook-sources', '/webhook-sources', 0); const profiles = useList('automation-profiles', '/profiles', 0); const client = useQueryClient(); const [secret, setSecret] = useState(''); const [key, setKey] = useState(''); const [settingValue, setSettingValue] = useState(''); const [error, setError] = useState(''); const [createdToken, setCreatedToken] = useState('')
+  const query = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api.get<{ items: Item[]; secrets: Item[]; security?: Item }>('/settings'),
+  })
+  const backups = useList('backups', '/backups', 0)
+  const schedules = useList('schedules', '/schedules', 0)
+  const webhooks = useList('webhook-sources', '/webhook-sources', 0)
+  const profiles = useList('automation-profiles', '/profiles', 0)
+  const client = useQueryClient()
+  const [secret, setSecret] = useState('')
+  const [key, setKey] = useState('')
+  const [settingValue, setSettingValue] = useState('')
+  const [error, setError] = useState('')
+  const [createdToken, setCreatedToken] = useState('')
+  const security = query.data?.security || {}
   const saveSecret = useMutation({ mutationFn: () => api.put('/settings/secrets/metadata.api_key', { value: secret }), onSuccess: async () => { setSecret(''); await client.invalidateQueries({ queryKey: ['settings'] }) } })
   const saveSetting = useMutation({ mutationFn: async () => { setError(''); let value: unknown; try { value = JSON.parse(settingValue) } catch { throw new Error('设置值必须是有效 JSON') } const current = query.data?.items.find(item => item.key === key); return api.patch('/settings', { key, value, revision: current?.revision || 0 }) }, onSuccess: async () => { setKey(''); setSettingValue(''); await client.invalidateQueries({ queryKey: ['settings'] }) }, onError: reason => setError(reason instanceof Error ? reason.message : '保存失败') })
+  const toggleSecurity = useMutation({
+    mutationFn: ({ settingKey, enabled, revision }: { settingKey: string; enabled: boolean; revision: number }) =>
+      api.patch('/settings', { key: settingKey, value: enabled, revision }),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ['settings'] })
+      await client.invalidateQueries({ queryKey: ['bootstrap-status'] })
+    },
+  })
   const backup = useMutation({ mutationFn: () => api.post('/backups'), onSuccess: () => client.invalidateQueries({ queryKey: ['backups'] }) })
   const createSchedule = useMutation({ mutationFn: (value: Item) => api.post('/schedules', value), onSuccess: () => client.invalidateQueries({ queryKey: ['schedules'] }) })
   const toggleSchedule = useMutation({ mutationFn: (value: Item) => api.patch(`/schedules/${value.id}`, { revision: value.revision, patch: { enabled: !Boolean(value.enabled) } }), onSuccess: () => client.invalidateQueries({ queryKey: ['schedules'] }) })
   const createWebhook = useMutation({ mutationFn: (value: Item) => api.post<Item>('/webhook-sources', value), onSuccess: async value => { setCreatedToken(String(value.token || '')); await client.invalidateQueries({ queryKey: ['webhook-sources'] }) } })
   const toggleWebhook = useMutation({ mutationFn: (value: Item) => api.patch(`/webhook-sources/${value.id}`, { revision: value.revision, patch: { enabled: !Boolean(value.enabled) } }), onSuccess: () => client.invalidateQueries({ queryKey: ['webhook-sources'] }) })
-  return <Page title="系统设置" description="受限密钥、自动扫描、普通设置修订、备份和运行健康"><AutomationSettings profiles={profiles.data?.items || []} schedules={schedules.data?.items || []} webhooks={webhooks.data?.items || []} createdToken={createdToken} onCreateSchedule={value => createSchedule.mutate(value)} onToggleSchedule={value => toggleSchedule.mutate(value)} onCreateWebhook={value => createWebhook.mutate(value)} onToggleWebhook={value => toggleWebhook.mutate(value)} /><div className="split"><section className="surface form-surface"><div className="surface-title"><h2>普通设置</h2><span>JSON 值使用乐观修订控制</span></div><label>设置键<input aria-label="设置键" value={key} onChange={event => { setKey(event.target.value); const current = query.data?.items.find(item => item.key === event.target.value); if (current) setSettingValue(JSON.stringify(current.value)) }} placeholder="backup.retention_days" /></label><label>设置值（JSON）<textarea aria-label="设置值（JSON）" value={settingValue} onChange={event => setSettingValue(event.target.value)} placeholder="14" /></label>{error ? <div className="form-error form-indent">{error}</div> : null}<button className="primary" disabled={!key || !settingValue} onClick={() => saveSetting.mutate()}><Save size={16} />保存设置</button><DataTable items={query.data?.items || []} columns={['key', 'value', 'revision', 'updated_at']} /></section><section className="surface form-surface"><div className="surface-title"><h2>外部服务密钥</h2><span>加密保存，永不回显完整值</span></div><label>元数据 API Key<input type="password" value={secret} onChange={event => setSecret(event.target.value)} placeholder={query.data?.secrets.some(item => item.key === 'metadata.api_key') ? '已配置 · 输入新值可替换' : '尚未配置'} /></label><button className="primary" disabled={!secret} onClick={() => saveSecret.mutate()}><Save size={16} />更新密钥</button></section><section className="surface form-surface"><div className="surface-title"><h2>数据库备份</h2><span>SQLite Online Backup</span></div><p>备份包含识别事实、任务、计划与操作历史，不包含媒体文件本身。</p><button className="secondary" onClick={() => backup.mutate()}><Save size={16} />立即创建备份</button><DataTable items={backups.data?.items || []} columns={['id', 'kind', 'size', 'sha256', 'created_at']} /></section></div></Page>
+  return <Page title="系统设置" description="本机信任、受限密钥、自动扫描、普通设置修订、备份和运行健康">
+    <section className="surface form-surface">
+      <div className="surface-title"><h2>本机访问与 Hook</h2><span>仅影响 127.0.0.1 / ::1；局域网仍需账号密码</span></div>
+      <label className="check-field">
+        <input
+          type="checkbox"
+          aria-label="本机免密登录"
+          checked={Boolean(security.local_bypass ?? true)}
+          onChange={event => toggleSecurity.mutate({
+            settingKey: 'auth.local_bypass',
+            enabled: event.target.checked,
+            revision: Number(security.local_bypass_revision || 0),
+          })}
+        />
+        本机免密登录（默认开启）
+      </label>
+      <label className="check-field">
+        <input
+          type="checkbox"
+          aria-label="本机 Hook 信任"
+          checked={Boolean(security.local_hook_trust ?? true)}
+          onChange={event => toggleSecurity.mutate({
+            settingKey: 'hooks.local_trust',
+            enabled: event.target.checked,
+            revision: Number(security.local_hook_trust_revision || 0),
+          })}
+        />
+        允许本机无 token Hook（`POST /api/v1/hooks/local`，默认开启）
+      </label>
+      <p className="muted">关闭后，本机也必须使用账号密码；下载器回调仍可走带 token 的 webhook。</p>
+    </section>
+    <AutomationSettings profiles={profiles.data?.items || []} schedules={schedules.data?.items || []} webhooks={webhooks.data?.items || []} createdToken={createdToken} onCreateSchedule={value => createSchedule.mutate(value)} onToggleSchedule={value => toggleSchedule.mutate(value)} onCreateWebhook={value => createWebhook.mutate(value)} onToggleWebhook={value => toggleWebhook.mutate(value)} />
+    <div className="split">
+      <section className="surface form-surface">
+        <div className="surface-title"><h2>普通设置</h2><span>JSON 值使用乐观修订控制</span></div>
+        <label>设置键<input aria-label="设置键" value={key} onChange={event => { setKey(event.target.value); const current = query.data?.items.find(item => item.key === event.target.value); if (current) setSettingValue(JSON.stringify(current.value)) }} placeholder="backup.retention_days" /></label>
+        <label>设置值（JSON）<textarea aria-label="设置值（JSON）" value={settingValue} onChange={event => setSettingValue(event.target.value)} placeholder="14" /></label>
+        {error ? <div className="form-error form-indent">{error}</div> : null}
+        <button className="primary" disabled={!key || !settingValue} onClick={() => saveSetting.mutate()}><Save size={16} />保存设置</button>
+        <DataTable items={query.data?.items || []} columns={['key', 'value', 'revision', 'updated_at']} />
+      </section>
+      <section className="surface form-surface">
+        <div className="surface-title"><h2>外部服务密钥</h2><span>加密保存，永不回显完整值</span></div>
+        <label>元数据 API Key<input type="password" value={secret} onChange={event => setSecret(event.target.value)} placeholder={query.data?.secrets.some(item => item.key === 'metadata.api_key') ? '已配置 · 输入新值可替换' : '尚未配置'} /></label>
+        <button className="primary" disabled={!secret} onClick={() => saveSecret.mutate()}><Save size={16} />更新密钥</button>
+      </section>
+      <section className="surface form-surface">
+        <div className="surface-title"><h2>数据库备份</h2><span>SQLite Online Backup</span></div>
+        <p>备份包含识别事实、任务、计划与操作历史，不包含媒体文件本身。</p>
+        <button className="secondary" onClick={() => backup.mutate()}><Save size={16} />立即创建备份</button>
+        <DataTable items={backups.data?.items || []} columns={['id', 'kind', 'size', 'sha256', 'created_at']} />
+      </section>
+    </div>
+  </Page>
 }
 
 function displayValue(value: unknown) {

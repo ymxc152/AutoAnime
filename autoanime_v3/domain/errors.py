@@ -54,6 +54,10 @@ class BootstrapLocalOnlyError(DomainError):
     code = "bootstrap_local_only"
 
 
+class LocalOnlyError(DomainError):
+    code = "local_only"
+
+
 class LeaseConflictError(DomainError):
     code = "lease_conflict"
 
