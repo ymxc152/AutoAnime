@@ -23,8 +23,6 @@ AutoAnimeWeb.py              Web/API 入口
 AutoAnimeWorker.py           持久任务 Worker 入口
 start-autoanime.bat          Windows 一键启动（根目录）
 stop-autoanime.bat           Windows 一键停止
-install-autostart.bat        登录自启
-uninstall-autostart.bat      取消自启
 autoanime_v3/
 ├─ scanner.py                单文件/季度目录扫描
 ├─ parser.py                 文件名与季集解析
@@ -39,7 +37,7 @@ autoanime_v3/
 ├─ repository.py / cache.py  CLI 兼容资料库边界
 └─ data/aliases.json         可维护的标题与季集规则
 webui/                       React/Vite 管理控制台
-deploy/windows/              WinSW、Caddy 与兼容包装脚本
+deploy/windows/              WinSW、Caddy 部署配置
 tests/                       v3 自动化测试
 docs/                        架构与 WebUI 规划
 ```
@@ -185,8 +183,6 @@ WebUI 面向 Windows 常驻服务器和局域网内的单管理员使用。它�
 |------|------|
 | `start-autoanime.bat` | 启动 Web + Worker |
 | `stop-autoanime.bat` | 停止服务 |
-| `install-autostart.bat` | 登录后自动启动 |
-| `uninstall-autostart.bat` | 取消开机自启 |
 
 默认：
 

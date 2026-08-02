@@ -61,7 +61,7 @@ test('link, copy and move execute and rollback with a real media payload', async
     copyFileSync(sample!, original)
     const originalSize = statSync(original).size
 
-    await page.getByRole('link', { name: /扫描/ }).click()
+    await page.getByRole('link', { name: '扫描', exact: true }).click()
     await page.getByLabel('目录类型').selectOption('source')
     await page.getByLabel('目录路径').fill(source)
     await page.getByRole('button', { name: '添加' }).click()
@@ -77,7 +77,8 @@ test('link, copy and move execute and rollback with a real media payload', async
     await profile.getByRole('button', { name: '手动扫描' }).click()
 
     execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', validationRoot!, '--once'], { cwd: resolve('..') })
-    await page.getByRole('link', { name: /待处理/ }).click()
+    await page.getByRole('link', { name: '待处理', exact: true }).click()
+    await page.getByRole('button', { name: /整理计划/ }).click()
     await expect(page.getByRole('button', { name: '批准并开始整理' })).toBeEnabled()
     await page.getByRole('button', { name: '批准并开始整理' }).click()
     execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', validationRoot!, '--once'], { cwd: resolve('..') })

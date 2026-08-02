@@ -21,7 +21,21 @@ export function AuthenticatedApp() {
   const me = useQuery({ queryKey: ['me'], queryFn: () => api.get('/auth/me'), retry: false })
   const bootstrap = useQuery({ queryKey: ['bootstrap-status'], queryFn: () => api.get<BootstrapStatus>('/auth/bootstrap-status'), retry: false })
   const [localTried, setLocalTried] = useState(false); const client = useQueryClient()
-  useEffect(() => { if (localTried || me.isLoading || bootstrap.isLoading || me.data || !bootstrap.data?.can_local_login) return; let cancelled = false; setLocalTried(true); (async () => { try { const result = await api.post<{ csrf_token: string }>('/auth/local-session'); if (cancelled) return; setCsrfToken(result.csrf_token); await client.invalidateQueries({ queryKey: ['me'] }) } catch { /* show local button fallback */ } })(); return () => { cancelled = true } }, [bootstrap.data, bootstrap.isLoading, client, localTried, me.data, me.isLoading])
+  useEffect(() => {
+    if (localTried || me.isLoading || bootstrap.isLoading || me.data || !bootstrap.data?.can_local_login) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const result = await api.post<{ csrf_token: string }>('/auth/local-session')
+        if (cancelled) return
+        setCsrfToken(result.csrf_token)
+        await client.invalidateQueries({ queryKey: ['me'] })
+      } catch {
+        if (!cancelled) setLocalTried(true) // fall back to the local button on loopback
+      }
+    })()
+    return () => { cancelled = true }
+  }, [bootstrap.data, bootstrap.isLoading, client, localTried, me.data, me.isLoading])
   if (me.isLoading || bootstrap.isLoading || (bootstrap.data?.can_local_login && !me.data && !localTried)) return <div className="loading-screen">正在连接 AutoAnime…</div>
   if (me.error || !me.data) { const firstRun = me.error instanceof ApiError && me.error.status === 401 && bootstrap.data?.configured === false; return <LoginPage firstRun={Boolean(firstRun)} canLocalLogin={Boolean(bootstrap.data?.can_local_login)} /> }
   return <AppShell><Routes><Route path="/" element={<DashboardPage />} /><Route path="/scan" element={<ProfilesPage />} /><Route path="/inbox" element={<InboxPage />} /><Route path="/activity" element={<ActivityPage />} /><Route path="/library" element={<LibraryPage />} /><Route path="/settings" element={<SettingsPage />} /><Route path="/profiles" element={<Navigate to="/scan" replace />} /><Route path="/reviews" element={<Navigate to="/inbox?tab=reviews" replace />} /><Route path="/plans" element={<Navigate to="/inbox?tab=plans" replace />} /><Route path="/jobs" element={<Navigate to="/activity?tab=jobs" replace />} /><Route path="/operations" element={<Navigate to="/activity?tab=operations" replace />} /><Route path="/rules" element={<Navigate to="/settings?tab=advanced&panel=rules" replace />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></AppShell>

@@ -77,7 +77,7 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
 
   await ensureLoggedIn(page)
 
-  await page.getByRole('link', { name: /扫描/ }).click()
+  await page.getByRole('link', { name: '扫描', exact: true }).click()
   await page.getByLabel('目录路径').fill(source)
   await page.getByRole('button', { name: '添加' }).click()
   await page.getByLabel('目录类型').selectOption('library')
@@ -88,6 +88,7 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   await page.getByLabel('媒体库').selectOption({ label: library })
   await page.getByRole('button', { name: '创建扫描方案' }).click()
   await page.getByRole('button', { name: '编辑' }).click()
+  await page.getByRole('button', { name: '更多选项' }).click()
   await page.getByLabel('最低置信度').fill('90')
   await page.getByRole('button', { name: '保存配置' }).click()
   await expect(page.getByText(/阈值 90%/)).toBeVisible()
@@ -97,7 +98,7 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   await page.goto('/activity?tab=jobs')
   await page.locator('tbody tr').first().click()
   await expect(page.getByText('扫描完成')).toBeVisible()
-  await page.getByRole('link', { name: /待处理/ }).click()
+  await page.getByRole('link', { name: '待处理', exact: true }).click()
   await page.getByRole('button', { name: /整理计划/ }).click()
   await expect(page.getByRole('button', { name: '批准并开始整理' })).toBeEnabled()
   await page.getByRole('button', { name: '批准并开始整理' }).click()
@@ -150,7 +151,7 @@ test('library title correction is previewed before approval', async ({ page }) =
     { cwd: resolve('..') },
   )
   await loginExisting(page)
-  await page.getByRole('link', { name: /资料库/ }).click()
+  await page.getByRole('link', { name: '资料库', exact: true }).click()
   await page.getByText('待纠正标题').click()
   await page.getByLabel('新规范标题').fill('已纠正标题')
   await page.getByLabel('修改原因').fill('E2E 人工纠正')

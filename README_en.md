@@ -72,8 +72,6 @@ Root-level scripts (visible as soon as you open the project folder):
 |------|---------|
 | `start-autoanime.bat` | Start Web + Worker |
 | `stop-autoanime.bat` | Stop services |
-| `install-autostart.bat` | Start on user logon |
-| `uninstall-autostart.bat` | Remove autostart |
 
 Defaults: `http://127.0.0.1:8765`, data under `C:\ProgramData\AutoAnime`.
 
