@@ -74,6 +74,8 @@ class OperationService:
             raise InvalidStateError("Only an approved plan can be executed")
         prepared = []
         for row in rows:
+            if row["decision"] == "rejected":
+                continue
             if row["execution_status"] == "conflict" or row["action"] in {"conflict", "skip"}:
                 if row["action"] == "conflict":
                     raise PlanConflictError("Plan still contains conflicts")

@@ -14,6 +14,7 @@ from autoanime_v3.domain.errors import (
     NotFoundError,
     PlanConflictError,
     StalePlanError,
+    ValidationError,
 )
 from autoanime_v3.path_safety import validate_library_destination
 from autoanime_v3.services.rules import RuleService
@@ -37,6 +38,61 @@ class PlanService:
             return plan
         finally:
             connection.close()
+
+    def decide_item(self, plan_id, item_id, decision, user_id=None, reason=None):
+        if decision not in {"approved", "rejected"}:
+            raise ValidationError("Unsupported plan item decision", {"decision": decision})
+        normalized_reason = str(reason or "").strip()
+        if decision == "rejected" and not normalized_reason:
+            raise ValidationError("A reject reason is required", {"field": "reason"})
+        with SqliteUnitOfWork(self.database_path) as uow:
+            plan = PlanRepository(uow.connection).get(plan_id)
+            if plan is None:
+                raise NotFoundError("Plan does not exist", {"id": plan_id})
+            if plan.status not in {"draft", "ready", "approved"}:
+                raise PlanConflictError("Plan item decisions cannot change in the current state")
+            if not any(item.id == item_id for item in plan.items):
+                raise NotFoundError(
+                    "Plan item does not exist",
+                    {"plan_id": plan_id, "item_id": item_id},
+                )
+            decided_at = datetime.now(timezone.utc).isoformat()
+            updated = uow.connection.execute(
+                """
+                UPDATE plan_items
+                SET decision = ?, reject_reason = ?, decided_by = ?, decided_at = ?
+                WHERE id = ? AND plan_id = ?
+                """,
+                (
+                    decision,
+                    normalized_reason if decision == "rejected" else None,
+                    user_id,
+                    decided_at,
+                    item_id,
+                    plan_id,
+                ),
+            ).rowcount
+            if updated != 1:
+                raise NotFoundError(
+                    "Plan item does not exist",
+                    {"plan_id": plan_id, "item_id": item_id},
+                )
+            uow.connection.execute(
+                """
+                INSERT INTO audit_events(
+                    actor_user_id, action, object_type, object_id, reason
+                ) VALUES (?, ?, 'plan_item', ?, ?)
+                """,
+                (
+                    user_id,
+                    "plan_item.approve" if decision == "approved" else "plan_item.reject",
+                    str(item_id),
+                    normalized_reason if decision == "rejected" else None,
+                ),
+            )
+            updated_plan = PlanRepository(uow.connection).get(plan_id)
+            uow.commit()
+            return updated_plan
 
     def _set_status(self, plan_id, status):
         with SqliteUnitOfWork(self.database_path) as uow:
@@ -73,7 +129,7 @@ class PlanService:
                 SELECT sr.path AS root_path, pi.destination_relative_path
                 FROM plan_items pi
                 JOIN storage_roots sr ON sr.id = pi.destination_root_id
-                WHERE pi.plan_id = ?
+                WHERE pi.plan_id = ? AND COALESCE(pi.decision, '') <> 'rejected'
                 """,
                 (plan_id,),
             ).fetchall()
@@ -113,10 +169,15 @@ class PlanService:
         allowed_statuses = {"ready"} if automatic else {"draft", "ready"}
         if plan.status not in allowed_statuses:
             raise PlanConflictError("Plan cannot be approved in its current state")
-        if open_reviews or any(item.execution_status == "conflict" for item in plan.items):
+        if open_reviews or any(
+            item.decision != "rejected" and item.execution_status == "conflict"
+            for item in plan.items
+        ):
             raise PlanConflictError("Open reviews or conflicts prevent plan approval")
         self._validate_destinations(plan_id)
         for item in plan.items:
+            if item.decision == "rejected":
+                continue
             source = Path(item.source_path)
             try:
                 stat = source.stat()
@@ -236,15 +297,23 @@ class PlanService:
             allowed_statuses = {"ready"} if automatic else {"draft", "ready"}
             if plan.status not in allowed_statuses:
                 raise PlanConflictError("Plan cannot be approved in its current state")
-            if open_reviews or any(item.execution_status == "conflict" for item in plan.items):
+            if open_reviews or any(
+                item.decision != "rejected" and item.execution_status == "conflict"
+                for item in plan.items
+            ):
                 raise PlanConflictError("Open reviews or conflicts prevent plan approval")
             self._validate_destinations(plan_id, uow.connection)
             if automatic and (
                 str(profile["execution_policy"]) != "auto_apply_safe"
                 or not plan.items
-                or not any(item.action not in {"skip", "conflict"} for item in plan.items)
+                or not any(
+                    item.decision != "rejected"
+                    and item.action not in {"skip", "conflict"}
+                    for item in plan.items
+                )
                 or any(
-                    item.risk_level not in AUTO_APPLY_SAFE_RISK_LEVELS
+                    item.decision != "rejected"
+                    and item.risk_level not in AUTO_APPLY_SAFE_RISK_LEVELS
                     for item in plan.items
                 )
             ):
@@ -280,9 +349,19 @@ class PlanService:
             or plan.status != "ready"
             or open_reviews
             or not plan.items
-            or not any(item.action not in {"skip", "conflict"} for item in plan.items)
-            or any(item.execution_status == "conflict" for item in plan.items)
-            or any(item.risk_level not in AUTO_APPLY_SAFE_RISK_LEVELS for item in plan.items)
+            or not any(
+                item.decision != "rejected" and item.action not in {"skip", "conflict"}
+                for item in plan.items
+            )
+            or any(
+                item.decision != "rejected" and item.execution_status == "conflict"
+                for item in plan.items
+            )
+            or any(
+                item.decision != "rejected"
+                and item.risk_level not in AUTO_APPLY_SAFE_RISK_LEVELS
+                for item in plan.items
+            )
         ):
             return None
         try:

@@ -158,6 +158,10 @@ class PlanItemView:
     source_file_index: Optional[str]
     source_sha256: Optional[str]
     execution_status: str
+    decision: Optional[str] = None
+    reject_reason: Optional[str] = None
+    decided_by: Optional[int] = None
+    decided_at: Optional[str] = None
 
 
 @dataclass(frozen=True)

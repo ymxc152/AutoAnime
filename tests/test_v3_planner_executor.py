@@ -28,9 +28,12 @@ class PlannerExecutorTests(unittest.TestCase):
         left = self.resolution("Show.S01E03.Baha.mkv", "Baha")
         right = self.resolution("Show.S01E03.friDay.mkv", "friDay")
         plan = build_plan([left, right], self.root / "library")
-        destinations = [entry.destination for entry in plan if entry.action == "organize"]
-        self.assertEqual(len(destinations), 2)
-        self.assertEqual(len(set(destinations)), 2)
+        organized = [entry for entry in plan if entry.action == "organize"]
+        skipped = [entry for entry in plan if entry.action == "skip"]
+        self.assertEqual(len(organized), 1)
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0].reason, "not_preferred_release")
+        self.assertNotEqual(organized[0].destination, skipped[0].destination)
 
     def test_move_and_rollback(self):
         resolution = self.resolution("Show.S01E03.mkv", "")

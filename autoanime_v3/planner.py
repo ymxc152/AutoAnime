@@ -93,6 +93,19 @@ def _version_label(resolution: Resolution) -> str:
     return "-".join(clean)
 
 
+def _resolution_rank(resolution: Resolution) -> int:
+    value = "%s %s" % (resolution.media.path.stem, resolution.release_tag or "")
+    if re.search(r"(?<!\w)(?:2160p?|4k)(?!\w)", value, re.I):
+        return 4
+    if re.search(r"(?<!\w)(?:1080p?|fhd)(?!\w)", value, re.I):
+        return 3
+    if re.search(r"(?<!\w)(?:720p?|hd)(?!\w)", value, re.I):
+        return 2
+    if re.search(r"(?<!\w)(?:480p?|576p?|sd)(?!\w)", value, re.I):
+        return 1
+    return 0
+
+
 def _stable_source_digest(resolution: Resolution) -> str:
     source_identity = "%s\0%s" % (
         os.path.abspath(os.fspath(resolution.media.path)),
@@ -123,9 +136,19 @@ def build_plan(resolutions: Iterable[Resolution], output_root: Path) -> List[Pla
             continue
         label = intrinsic_labels[id(resolution)]
         labels[id(resolution)] = label or "version-" + _stable_source_digest(resolution)
+    demoted = set()
     for versions in grouped.values():
         if len(versions) <= 1:
             continue
+        preferred = sorted(
+            enumerate(versions),
+            key=lambda value: (
+                -_resolution_rank(value[1]),
+                -int(value[1].media.size),
+                value[0],
+            ),
+        )[0][1]
+        demoted.update(id(resolution) for resolution in versions if resolution is not preferred)
         label_counts = defaultdict(int)
         for resolution in versions:
             label_counts[intrinsic_labels[id(resolution)].casefold()] += 1
@@ -158,6 +181,17 @@ def build_plan(resolutions: Iterable[Resolution], output_root: Path) -> List[Pla
             plan.append(PlanEntry(resolution.media.path, None, "review", resolution, "unsafe_resolution"))
             continue
         destination = _destination(output_root, resolution, labels.get(id(resolution), ""))
+        if id(resolution) in demoted:
+            plan.append(
+                PlanEntry(
+                    resolution.media.path,
+                    destination,
+                    "skip",
+                    resolution,
+                    "not_preferred_release",
+                )
+            )
+            continue
         key = str(destination).casefold()
         if key in reserved:
             plan.append(PlanEntry(resolution.media.path, destination, "conflict", resolution, "duplicate_destination"))

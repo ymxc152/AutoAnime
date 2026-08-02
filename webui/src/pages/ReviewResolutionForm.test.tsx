@@ -27,7 +27,7 @@ describe('ReviewResolutionForm', () => {
     expect(screen.getByText(/目标路径预览/).parentElement).toHaveTextContent('电影标题')
     expect(screen.getByText(/parser/)).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: '保存并生成新计划' }))
+    await userEvent.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
 
     expect(onSubmit).toHaveBeenCalledWith({
       title: '电影标题',
@@ -56,7 +56,7 @@ describe('ReviewResolutionForm', () => {
     expect(screen.getByLabelText('集号')).toHaveValue('12')
     expect(screen.getByText(/目标路径预览/).parentElement).toHaveTextContent('S02E12')
 
-    await userEvent.click(screen.getByRole('button', { name: '保存并生成新计划' }))
+    await userEvent.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
 
     expect(onSubmit).toHaveBeenCalledWith({
       title: '季度番剧',
@@ -87,7 +87,7 @@ describe('ReviewResolutionForm', () => {
     expect(screen.getByLabelText('集号')).toHaveValue('SP03')
     expect(screen.getByText(/目标路径预览/).parentElement).toHaveTextContent('Specials')
 
-    await userEvent.click(screen.getByRole('button', { name: '保存并生成新计划' }))
+    await userEvent.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
 
     expect(onSubmit).toHaveBeenCalledWith({
       title: '番剧特典',
@@ -109,7 +109,7 @@ describe('ReviewResolutionForm', () => {
 
     await user.clear(screen.getByLabelText('集号'))
     await user.type(screen.getByLabelText('集号'), '12.5')
-    await user.click(screen.getByRole('button', { name: '保存并生成新计划' }))
+    await user.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ episode: 12.5 }))
   })
@@ -129,7 +129,7 @@ describe('ReviewResolutionForm', () => {
     await user.selectOptions(screen.getByLabelText('媒体类型'), 'episode')
     expect(screen.getByLabelText('季度')).toHaveValue(1)
     expect(screen.getByLabelText('集号')).toHaveValue('')
-    expect(screen.getByRole('button', { name: '保存并生成新计划' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '确认信息并生成计划' })).toBeDisabled()
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -149,7 +149,7 @@ describe('ReviewResolutionForm', () => {
     expect(screen.getByLabelText('季度')).toHaveValue(1)
     expect(screen.getByLabelText('集号')).toHaveValue('')
     await user.type(screen.getByLabelText('集号'), '3')
-    await user.click(screen.getByRole('button', { name: '保存并生成新计划' }))
+    await user.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       media_type: 'episode',

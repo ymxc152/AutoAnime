@@ -43,6 +43,26 @@ class OperationServiceTests(unittest.TestCase):
         outcome = ScanService(self.database).run(self.profile.id)
         return PlanService(self.database).approve(outcome.plan_id)
 
+    def test_rejected_plan_item_is_excluded_from_execution(self):
+        from autoanime_v3.services.operations import OperationService
+        from autoanime_v3.services.plans import PlanService
+        from autoanime_v3.services.scans import ScanService
+
+        for index, name in enumerate(("测试番 S01E01.mkv", "测试番 S01E02.mkv")):
+            (self.source / name).write_bytes(("file-%s" % index).encode("utf-8") * 1024)
+        outcome = ScanService(self.database).run(self.profile.id)
+        plans = PlanService(self.database)
+        draft = plans.get(outcome.plan_id)
+        rejected = draft.items[1]
+        plans.decide_item(draft.id, rejected.id, "rejected", reason="duplicate")
+        approved = plans.approve(draft.id)
+
+        batch = OperationService(self.database).execute(approved.id)
+
+        self.assertEqual(len(batch.items), 1)
+        self.assertEqual(batch.items[0].source_path, approved.items[0].source_path)
+        self.assertFalse(Path(rejected.destination_path).exists())
+
     def test_preflight_checks_entire_batch_before_any_file_change(self):
         from autoanime_v3.domain.errors import StalePlanError
         from autoanime_v3.services.operations import OperationService

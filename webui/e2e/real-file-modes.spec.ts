@@ -22,7 +22,7 @@ function filesIn(directory: string): string[] {
 
 async function login(page: Page) {
   await page.goto('/')
-  const overview = page.getByRole('link', { name: /概览/ })
+  const overview = page.getByRole('link', { name: /首页/ })
   try {
     await expect(overview).toBeVisible({ timeout: 8000 })
     return
@@ -61,7 +61,7 @@ test('link, copy and move execute and rollback with a real media payload', async
     copyFileSync(sample!, original)
     const originalSize = statSync(original).size
 
-    await page.getByRole('link', { name: /扫描配置/ }).click()
+    await page.getByRole('link', { name: /扫描/ }).click()
     await page.getByLabel('目录类型').selectOption('source')
     await page.getByLabel('目录路径').fill(source)
     await page.getByRole('button', { name: '添加' }).click()
@@ -72,18 +72,18 @@ test('link, copy and move execute and rollback with a real media payload', async
     await page.getByLabel('下载源').selectOption({ label: source })
     await page.getByLabel('媒体库').selectOption({ label: library })
     await page.getByLabel('文件模式').selectOption(mode)
-    await page.getByRole('button', { name: '创建扫描配置' }).click()
+    await page.getByRole('button', { name: '创建扫描方案' }).click()
     const profile = page.locator('.profile-row').filter({ hasText: `真实 ${mode} 验证` })
     await profile.getByRole('button', { name: '手动扫描' }).click()
 
     execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', validationRoot!, '--once'], { cwd: resolve('..') })
-    await page.getByRole('link', { name: /整理计划/ }).click()
-    await expect(page.getByRole('button', { name: '批准并执行' })).toBeEnabled()
-    await page.getByRole('button', { name: '批准并执行' }).click()
+    await page.getByRole('link', { name: /待处理/ }).click()
+    await expect(page.getByRole('button', { name: '批准并开始整理' })).toBeEnabled()
+    await page.getByRole('button', { name: '批准并开始整理' }).click()
     execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', validationRoot!, '--once'], { cwd: resolve('..') })
 
-    await page.getByRole('link', { name: /操作历史/ }).click()
-    await expect(page.locator('tbody tr').first().getByText('completed')).toBeVisible()
+    await page.goto('/activity?tab=operations')
+    await expect(page.locator('tbody tr').first().getByText('已完成')).toBeVisible()
     await expect.poll(() => filesIn(library).length).toBe(1)
     const destination = filesIn(library)[0]
     expect(statSync(destination).size).toBe(originalSize)
@@ -94,6 +94,7 @@ test('link, copy and move execute and rollback with a real media payload', async
       expect(sameFile).toBe('True')
     }
 
+    page.once('dialog', dialog => dialog.accept())
     await page.locator('tbody tr').first().getByRole('button', { name: '回滚' }).click()
     await expect.poll(async () => {
       const response = await page.request.get('/api/v1/jobs')

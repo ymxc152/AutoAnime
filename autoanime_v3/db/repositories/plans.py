@@ -25,6 +25,10 @@ def plan_from_rows(plan_row, item_rows):
                 source_file_index=row["source_file_index"],
                 source_sha256=row["source_sha256"],
                 execution_status=str(row["execution_status"]),
+                decision=row["decision"],
+                reject_reason=row["reject_reason"],
+                decided_by=int(row["decided_by"]) if row["decided_by"] is not None else None,
+                decided_at=row["decided_at"],
             )
         )
     return PlanView(

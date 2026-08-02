@@ -17,10 +17,12 @@ class PlannerIncrementalTests(unittest.TestCase):
     def tearDown(self):
         self.temporary_directory.cleanup()
 
-    def resolution(self, relative_path, release_tag="", episode=3):
+    def resolution(self, relative_path, release_tag="", episode=3, content=None):
         path = self.root / "input" / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(str(relative_path).encode("utf-8"))
+        path.write_bytes(
+            str(relative_path).encode("utf-8") if content is None else content
+        )
         stat = path.stat()
         media = MediaFile(
             path,
@@ -77,21 +79,54 @@ class PlannerIncrementalTests(unittest.TestCase):
         left = self.resolution("left/Show.S01E03.Baha.mkv", "Baha")
         right = self.resolution("right/Show.S01E03.Baha.mkv", "Baha")
 
-        forward = {
-            entry.source: entry.destination
-            for entry in build_plan([left, right], self.output_root)
-            if not entry.companion_of
-        }
-        reverse = {
-            entry.source: entry.destination
-            for entry in build_plan([right, left], self.output_root)
+        forward_plan = [entry for entry in build_plan([left, right], self.output_root) if not entry.companion_of]
+        reverse_plan = [entry for entry in build_plan([right, left], self.output_root) if not entry.companion_of]
+        forward = {entry.source: (entry.destination, entry.action, entry.reason) for entry in forward_plan}
+        reverse = {entry.source: (entry.destination, entry.action, entry.reason) for entry in reverse_plan}
+
+        self.assertEqual(
+            {source: values[0] for source, values in forward.items()},
+            {source: values[0] for source, values in reverse.items()},
+        )
+        self.assertEqual(2, len({values[0] for values in forward.values()}))
+        self.assertEqual(1, sum(values[1] == "organize" for values in forward.values()))
+        self.assertEqual(1, sum(values[1] == "skip" for values in forward.values()))
+        self.assertEqual(
+            {"not_preferred_release"},
+            {values[2] for values in forward.values() if values[1] == "skip"},
+        )
+        for destination, unused_action, unused_reason in forward.values():
+            self.assertRegex(destination.name, r"\[Baha-[0-9a-f]{8}\]")
+
+    def test_preferred_release_uses_resolution_rank_before_size(self):
+        high = self.resolution("high/Show.S01E03.1080p.mkv", content=b"high")
+        low = self.resolution("low/Show.S01E03.720p.mkv", content=b"x" * 4096)
+
+        entries = {
+            entry.source: entry
+            for entry in build_plan([low, high], self.output_root)
             if not entry.companion_of
         }
 
-        self.assertEqual(forward, reverse)
-        self.assertEqual(2, len(set(forward.values())))
-        for destination in forward.values():
-            self.assertRegex(destination.name, r"\[Baha-[0-9a-f]{8}\]")
+        self.assertEqual(entries[high.media.path].action, "organize")
+        self.assertEqual(entries[low.media.path].action, "skip")
+        self.assertEqual(entries[low.media.path].reason, "not_preferred_release")
+
+    def test_preferred_release_uses_larger_size_for_equal_rank(self):
+        small = self.resolution("small/Show.S01E03.1080p.mkv", content=b"small")
+        large = self.resolution(
+            "large/Show.S01E03.1080p.mkv", content=b"large" * 1024
+        )
+
+        entries = {
+            entry.source: entry
+            for entry in build_plan([small, large], self.output_root)
+            if not entry.companion_of
+        }
+
+        self.assertEqual(entries[large.media.path].action, "organize")
+        self.assertEqual(entries[small.media.path].action, "skip")
+        self.assertEqual(entries[small.media.path].reason, "not_preferred_release")
 
     def test_incremental_plain_versions_get_distinct_stable_path_keys(self):
         first_resolution = self.resolution("plain-a/Show.S01E03.mkv")

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Plus, RefreshCw, RotateCcw, ScanSearch, Save, ShieldCheck } from 'lucide-react'
 import { api } from '../api/client'
@@ -9,78 +10,58 @@ import { PlanDetail, PlanWorkspace } from '../features/plans/PlanWorkspace'
 
 type Item = Record<string, any>
 type ListResponse = { items: Item[] }
-const useList = (key: string, path: string, interval = 5000) => useQuery({ queryKey: [key], queryFn: () => api.get<ListResponse>(path), refetchInterval: interval })
+const useList = (key: string, path: string, interval = 5000, enabled = true) => useQuery({ queryKey: [key], queryFn: () => api.get<ListResponse>(path), refetchInterval: interval, enabled })
 
 export function DashboardPage() {
   const query = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get<DashboardData>('/dashboard'), refetchInterval: 5000 })
-  return <Page title="概览" description="扫描、审核与文件操作的实时运行状态">{query.data ? <DashboardView data={query.data} /> : <Empty>{query.error ? '无法读取系统状态' : '正在载入…'}</Empty>}</Page>
+  return <Page title="首页" description="扫描、确认与文件整理的实时运行状态">{query.data ? <DashboardView data={query.data} /> : <Empty>{query.error ? '无法读取系统状态' : '正在载入…'}</Empty>}</Page>
 }
 
 const defaultProfile = { name: '', source_root_id: '', library_root_id: '', mode: 'link', execution_policy: 'review_all', min_confidence: 86, stability_seconds: 30, watch_enabled: false, enabled: true }
 
 export function ProfileForm({ initial, roots, editing = false, onSave, onCancel }: { initial: Item; roots: Item[]; editing?: boolean; onSave: (value: Item) => void; onCancel?: () => void }) {
   const [value, setValue] = useState<Item>({ ...initial, watch_enabled: Boolean(initial.watch_enabled), enabled: Boolean(initial.enabled) })
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const sourceRoots = roots.filter(item => item.kind === 'source' && item.enabled !== 0)
   const libraryRoots = roots.filter(item => item.kind === 'library' && item.enabled !== 0)
   const change = (key: string, next: unknown) => setValue(current => ({ ...current, [key]: next }))
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    onSave({ ...value, source_root_id: Number(value.source_root_id), library_root_id: Number(value.library_root_id), min_confidence: Number(value.min_confidence), stability_seconds: Number(value.stability_seconds) })
-  }
+  const submit = (event: FormEvent) => { event.preventDefault(); onSave({ ...value, source_root_id: Number(value.source_root_id), library_root_id: Number(value.library_root_id), min_confidence: Number(value.min_confidence), stability_seconds: Number(value.stability_seconds) }) }
   return <form className="profile-form profile-editor" onSubmit={submit}>
-    <label>配置名称<input aria-label="配置名称" value={value.name} onChange={event => change('name', event.target.value)} /></label>
+    <label>方案名称<input aria-label="配置名称" value={value.name} onChange={event => change('name', event.target.value)} /></label>
     {!editing ? <><label>下载源<select aria-label="下载源" value={value.source_root_id} onChange={event => change('source_root_id', event.target.value)}><option value="">选择下载源</option>{sourceRoots.map(root => <option key={root.id} value={root.id}>{root.path}</option>)}</select></label><label>媒体库<select aria-label="媒体库" value={value.library_root_id} onChange={event => change('library_root_id', event.target.value)}><option value="">选择媒体库</option>{libraryRoots.map(root => <option key={root.id} value={root.id}>{root.path}</option>)}</select></label></> : null}
     <label>文件模式<select aria-label="文件模式" value={value.mode} onChange={event => change('mode', event.target.value)}><option value="link">硬链接（保种推荐）</option><option value="copy">复制</option><option value="move">移动</option></select></label>
+    {value.mode === 'move' ? <div className="risk-warning">源目录中的文件会被移走。第一次使用建议选择硬链接或复制。</div> : null}
     <label>执行策略<select aria-label="执行策略" value={value.execution_policy} onChange={event => change('execution_policy', event.target.value)}><option value="review_all">全部审核（推荐起步）</option><option value="auto_apply_safe">安全项自动执行</option><option value="dry_run">仅预览</option></select></label>
-    <label>最低置信度<input aria-label="最低置信度" type="number" min="0" max="100" value={value.min_confidence} onChange={event => change('min_confidence', event.target.value)} /></label>
-    <label>稳定等待秒数<input aria-label="稳定等待秒数" type="number" min="0" value={value.stability_seconds} onChange={event => change('stability_seconds', event.target.value)} /></label>
-    <label className="check-field"><input type="checkbox" checked={Boolean(value.watch_enabled)} onChange={event => change('watch_enabled', event.target.checked)} />启用目录监听</label>
-    <label className="check-field"><input type="checkbox" checked={Boolean(value.enabled)} onChange={event => change('enabled', event.target.checked)} />启用此配置</label>
-    <div className="form-actions"><button className="primary" disabled={!value.name || (!editing && (!value.source_root_id || !value.library_root_id))}><Save size={16} />{editing ? '保存配置' : '创建扫描配置'}</button>{onCancel ? <button type="button" className="secondary" onClick={onCancel}>取消</button> : null}</div>
+    <button type="button" className="more-options" aria-expanded={showAdvanced} onClick={() => setShowAdvanced(value => !value)}>{showAdvanced ? '收起更多选项' : '更多选项'}</button>
+    {showAdvanced ? <div className="advanced-fields"><label>最低置信度<input aria-label="最低置信度" type="number" min="0" max="100" value={value.min_confidence} onChange={event => change('min_confidence', event.target.value)} /></label><label>稳定等待秒数<input aria-label="稳定等待秒数" type="number" min="0" value={value.stability_seconds} onChange={event => change('stability_seconds', event.target.value)} /></label><label className="check-field"><input type="checkbox" checked={Boolean(value.watch_enabled)} onChange={event => change('watch_enabled', event.target.checked)} />启用目录监听</label><label className="check-field"><input type="checkbox" checked={Boolean(value.enabled)} onChange={event => change('enabled', event.target.checked)} />启用此配置</label></div> : null}
+    <div className="form-actions"><button className="primary" disabled={!value.name || (!editing && (!value.source_root_id || !value.library_root_id))}><Save size={16} />{editing ? '保存配置' : '创建扫描方案'}</button>{onCancel ? <button type="button" className="secondary" onClick={onCancel}>取消</button> : null}</div>
   </form>
 }
-
 export function ProfilesPage() {
   const roots = useList('roots', '/roots'); const profiles = useList('profiles', '/profiles'); const client = useQueryClient()
-  const [kind, setKind] = useState('source'); const [path, setPath] = useState(''); const [editing, setEditing] = useState<Item | null>(null)
-  const [pathError, setPathError] = useState('')
+  const [kind, setKind] = useState('source'); const [path, setPath] = useState(''); const [editing, setEditing] = useState<Item | null>(null); const [pathError, setPathError] = useState(''); const [scanSuccess, setScanSuccess] = useState(false)
   const addRoot = useMutation({ mutationFn: () => api.post('/roots', { kind, path }), onSuccess: async () => { setPath(''); setPathError(''); await client.invalidateQueries({ queryKey: ['roots'] }) }, onError: reason => setPathError(reason instanceof Error ? reason.message : '添加失败') })
-  const pickFolder = useMutation({
-    mutationFn: () => api.post<{ path: string | null; cancelled: boolean }>('/system/pick-folder', {
-      title: kind === 'library' ? '选择媒体库文件夹' : kind === 'operations' ? '选择操作日志文件夹' : '选择下载源文件夹',
-      initial_directory: path || undefined,
-    }),
-    onSuccess: result => {
-      setPathError('')
-      if (!result.cancelled && result.path) setPath(result.path)
-    },
-    onError: reason => {
-      const msg = reason instanceof Error ? reason.message : ''
-      if (/only available on the local machine/i.test(msg)) {
-        setPathError('文件夹选择仅本机可用（请用 127.0.0.1 打开控制台，或直接粘贴路径）')
-      } else {
-        setPathError(msg || '无法打开系统文件夹选择器')
-      }
-    },
-  })
+  const pickFolder = useMutation({ mutationFn: () => api.post<{ path: string | null; cancelled: boolean }>('/system/pick-folder', { title: kind === 'library' ? '选择媒体库文件夹' : kind === 'operations' ? '选择操作日志文件夹' : '选择下载源文件夹', initial_directory: path || undefined }), onSuccess: result => { setPathError(''); if (!result.cancelled && result.path) setPath(result.path) }, onError: reason => { const msg = reason instanceof Error ? reason.message : ''; setPathError(/only available on the local machine/i.test(msg) ? '文件夹选择仅本机可用（请用 127.0.0.1 打开控制台，或直接粘贴路径）' : msg || '无法打开系统文件夹选择器') } })
   const validateRoot = useMutation({ mutationFn: (id: number) => api.post(`/roots/${id}/validate`), onSuccess: () => client.invalidateQueries({ queryKey: ['roots'] }) })
   const toggleRoot = useMutation({ mutationFn: (root: Item) => api.patch(`/roots/${root.id}`, { patch: { enabled: !Boolean(root.enabled) } }), onSuccess: () => client.invalidateQueries({ queryKey: ['roots'] }) })
   const addProfile = useMutation({ mutationFn: (profile: Item) => api.post('/profiles', profile), onSuccess: () => client.invalidateQueries({ queryKey: ['profiles'] }) })
   const updateProfile = useMutation({ mutationFn: ({ profile, patch }: { profile: Item; patch: Item }) => api.patch(`/profiles/${profile.id}`, { revision: profile.revision, patch }), onSuccess: async () => { setEditing(null); await client.invalidateQueries({ queryKey: ['profiles'] }) } })
-  const scan = useMutation({ mutationFn: (id: number) => api.post('/jobs/scans', { profile_id: id, paths: [] }, { 'Idempotency-Key': `manual-${id}-${Date.now()}` }) })
-  return <Page title="扫描配置" description="管理多下载根、媒体库根和逐目录扫描策略。日常使用：选目录 → 建配置 → 手动扫描 → 审核/批准。" actions={<button className="secondary" onClick={() => roots.refetch()}><RefreshCw size={16} />刷新状态</button>}>
-    <div className="split"><section className="surface"><div className="surface-title"><h2>存储根目录</h2><span>本机可点“浏览”弹出 Windows 选文件夹；也可手输路径</span></div><form className="inline-form" onSubmit={event => { event.preventDefault(); addRoot.mutate() }}><select aria-label="目录类型" value={kind} onChange={event => setKind(event.target.value)}><option value="source">下载源</option><option value="library">媒体库</option><option value="operations">操作日志</option></select><input aria-label="目录路径" value={path} onChange={event => setPath(event.target.value)} placeholder="F:\动漫下载" /><button type="button" className="secondary" onClick={() => pickFolder.mutate()} disabled={pickFolder.isPending}>{pickFolder.isPending ? '选择中…' : '浏览…'}</button><button className="primary" disabled={!path}><Plus size={16} />添加</button></form>{pathError ? <div className="form-error form-indent">{pathError}</div> : null}<p className="muted form-indent">局域网浏览器无法弹出服务器本机对话框，请直接粘贴路径。下载源与媒体库不能是同一路径或互相嵌套。</p><DataTable items={roots.data?.items || []} columns={['kind', 'path', 'health_status', 'enabled']} action={root => <div className="row-actions"><button className="text-button" onClick={() => validateRoot.mutate(root.id)}>验证</button><button className="text-button" onClick={() => toggleRoot.mutate(root)}>{root.enabled ? '停用' : '启用'}</button></div>} /></section>
-      <section className="surface"><div className="surface-title"><h2>扫描策略</h2><span>建议先用“全部审核”，确认无误后再改自动</span></div>{editing ? <ProfileForm key={editing.id} editing initial={editing} roots={roots.data?.items || []} onCancel={() => setEditing(null)} onSave={patch => updateProfile.mutate({ profile: editing, patch: { name: patch.name, mode: patch.mode, execution_policy: patch.execution_policy, min_confidence: patch.min_confidence, stability_seconds: patch.stability_seconds, watch_enabled: patch.watch_enabled, enabled: patch.enabled } })} /> : <ProfileForm initial={defaultProfile} roots={roots.data?.items || []} onSave={profile => addProfile.mutate(profile)} />}{profiles.data?.items.length ? profiles.data.items.map(profile => <div className="profile-row" key={profile.id}><div><strong>{profile.name}</strong><span>{profile.mode} · {profile.execution_policy} · 阈值 {profile.min_confidence}% · rev {profile.revision}</span></div><div className="row-actions"><button className="text-button" onClick={() => setEditing(profile)}>编辑</button><button className="secondary" onClick={() => scan.mutate(profile.id)} disabled={!profile.enabled}><ScanSearch size={16} />手动扫描</button></div></div>) : <Empty>添加源目录和媒体库后创建配置</Empty>}</section></div>
+  const scan = useMutation({ mutationFn: (id: number) => api.post('/jobs/scans', { profile_id: id, paths: [] }, { 'Idempotency-Key': `manual-${id}-${Date.now()}` }), onSuccess: () => setScanSuccess(true) })
+  return <Page title="目录与扫描" description="先选择下载目录和媒体库，再创建一个扫描方案。" actions={<button className="secondary" onClick={() => roots.refetch()}><RefreshCw size={16} />刷新状态</button>}>
+    <div className="steps"><span><b>1</b>添加下载源与媒体库目录</span><span><b>2</b>创建扫描方案</span><span><b>3</b>开始扫描</span></div>
+    {scanSuccess ? <div className="success-note"><span>扫描任务已创建。文件较多时可能需要一些时间。</span><div className="row-actions"><Link className="primary" to="/inbox">查看待处理</Link><Link className="secondary" to="/activity?tab=jobs">查看扫描进度</Link></div></div> : null}
+    <div className="split"><section className="surface"><div className="surface-title"><h2>目录</h2><span>本机可点“浏览”选择文件夹</span></div><form className="inline-form" onSubmit={event => { event.preventDefault(); addRoot.mutate() }}><select aria-label="目录类型" value={kind} onChange={event => setKind(event.target.value)}><option value="source">下载源</option><option value="library">媒体库</option><option value="operations">操作日志（更多）</option></select><input aria-label="目录路径" value={path} onChange={event => setPath(event.target.value)} placeholder="F:\动漫下载" /><button type="button" className="secondary" onClick={() => pickFolder.mutate()} disabled={pickFolder.isPending}>{pickFolder.isPending ? '选择中…' : '浏览…'}</button><button className="primary" disabled={!path}><Plus size={16} />添加</button></form>{pathError ? <div className="form-error form-indent">{pathError}</div> : null}<p className="muted form-indent">局域网浏览器无法弹出服务器本机对话框，请直接粘贴路径。下载源与媒体库不能是同一路径或互相嵌套。</p><DataTable items={roots.data?.items || []} columns={['kind', 'path', 'health_status', 'enabled']} action={root => <div className="row-actions"><button className="text-button" onClick={() => validateRoot.mutate(root.id)}>验证</button><button className="text-button" onClick={() => toggleRoot.mutate(root)}>{root.enabled ? '停用' : '启用'}</button></div>} /></section>
+      <section className="surface"><div className="surface-title"><h2>扫描方案</h2><span>建议先用“全部审核”</span></div>{editing ? <ProfileForm key={editing.id} editing initial={editing} roots={roots.data?.items || []} onCancel={() => setEditing(null)} onSave={patch => updateProfile.mutate({ profile: editing, patch: { name: patch.name, mode: patch.mode, execution_policy: patch.execution_policy, min_confidence: patch.min_confidence, stability_seconds: patch.stability_seconds, watch_enabled: patch.watch_enabled, enabled: patch.enabled } })} /> : <ProfileForm initial={defaultProfile} roots={roots.data?.items || []} onSave={profile => addProfile.mutate(profile)} />}{profiles.data?.items.length ? profiles.data.items.map(profile => <div className="profile-row" key={profile.id}><div><strong>{profile.name}</strong><span>{profile.mode} · {profile.execution_policy} · 阈值 {profile.min_confidence}% · rev {profile.revision}</span></div><div className="row-actions"><button className="text-button" onClick={() => setEditing(profile)}>编辑</button><button className="secondary" onClick={() => scan.mutate(profile.id)} disabled={!profile.enabled}><ScanSearch size={16} />手动扫描</button></div></div>) : <Empty title="还没有扫描方案" description="添加下载源和媒体库后创建第一个扫描方案。" />}<p className="muted form-indent">开启 AI 可减少待确认项（设置 → 常用 → AI 识别）</p></section></div>
   </Page>
 }
-
-export function JobsPage() {
-  const query = useList('jobs', '/jobs'); const client = useQueryClient(); const [selected, setSelected] = useState<Item | null>(null)
-  const events = useQuery({ queryKey: ['job-events', selected?.id], queryFn: async () => parseEventStream(await api.text(`/jobs/${selected?.id}/events`)), enabled: Boolean(selected) })
+function JobsPanel({ active = true }: { active?: boolean }) {
+  const query = useList('jobs', '/jobs', 5000, active); const client = useQueryClient(); const [selected, setSelected] = useState<Item | null>(null)
+  const events = useQuery({ queryKey: ['job-events', selected?.id], queryFn: async () => parseEventStream(await api.text(`/jobs/${selected?.id}/events`)), enabled: active && Boolean(selected) })
   const cancel = useMutation({ mutationFn: (id: number) => api.post(`/jobs/${id}/cancel`), onSuccess: () => client.invalidateQueries({ queryKey: ['jobs'] }) })
-  return <Page title="任务中心" description="持久任务、Worker 租约、执行进度与事件记录"><div className="plan-layout"><section className="surface"><DataTable items={query.data?.items || []} columns={['id', 'job_type', 'current_stage', 'progress_current', 'status', 'created_at']} onRow={setSelected} selectedId={selected?.id} action={item => ['queued', 'leased', 'running'].includes(item.status) ? <button className="text-button" onClick={() => cancel.mutate(item.id)}>安全取消</button> : null} /></section><aside className="inspector">{selected ? <><h2>任务 #{selected.id}</h2><Status value={selected.status} /><dl><dt>类型</dt><dd>{selected.job_type}</dd><dt>阶段</dt><dd>{selected.current_stage || '—'}</dd><dt>错误</dt><dd>{selected.error_summary || '—'}</dd></dl><h3>事件记录</h3><div className="event-list">{events.data?.length ? events.data.map(event => <div key={event.sequence}><strong>#{event.sequence} {event.type}</strong><span>{event.message || JSON.stringify(event.payload)}</span></div>) : <Empty>暂无事件</Empty>}</div></> : <Empty>选择任务查看事件</Empty>}</aside></div></Page>
+  if (!query.data?.items.length) return <Empty title="还没有运行记录" description="开始第一次扫描后，可以在这里查看进度和结果。" />
+  return <div className="plan-layout"><section className="surface"><DataTable items={query.data.items} columns={['id', 'job_type', 'current_stage', 'progress_current', 'status', 'created_at']} onRow={setSelected} selectedId={selected?.id} action={item => ['queued', 'leased', 'running'].includes(item.status) ? <button className="text-button" onClick={() => cancel.mutate(item.id)}>安全取消</button> : null} /></section><aside className="inspector">{selected ? <><h2>任务 #{selected.id}</h2><Status value={selected.status} /><dl><dt>类型</dt><dd>{selected.job_type}</dd><dt>阶段</dt><dd>{selected.current_stage || '—'}</dd><dt>错误</dt><dd>{selected.error_summary || '—'}</dd></dl><h3>事件记录</h3><div className="event-list">{events.data?.length ? events.data.map(event => <div key={event.sequence}><strong>#{event.sequence} {event.type}</strong><span>{event.message || JSON.stringify(event.payload)}</span></div>) : <Empty>暂无事件</Empty>}</div></> : <Empty>选择任务查看事件</Empty>}</aside></div>
 }
-
+export function JobsPage() { return <Page title="任务进度"><JobsPanel /></Page> }
 type MediaType = 'episode' | 'movie' | 'special'
 
 function reviewPayload(review: Item) {
@@ -172,34 +153,46 @@ export function ReviewResolutionForm({ review, onSubmit, submitting = false }: {
     <label>版本 / 发布标签<input aria-label="版本 / 发布标签" value={releaseTag} onChange={event => setReleaseTag(event.target.value)} placeholder="例如 WEB-DL、BDRip" /></label>
     <label className="check-field"><input type="checkbox" checked={manualLock} onChange={event => setManualLock(event.target.checked)} />人工锁</label>
     <div className="change-preview"><strong>目标路径预览</strong><span>{preview}</span><small>实际目标会按媒体库根目录、文件扩展名和同集版本冲突规则生成。</small></div>
-    <button className="primary full" disabled={!complete || submitting}><Save size={16} />保存并生成新计划</button>
+    <button className="primary full" disabled={!complete || submitting}><Save size={16} />确认信息并生成计划</button>
   </form>
 }
 
-export function ReviewsPage() {
-  const query = useList('reviews', '/reviews'); const client = useQueryClient(); const [selected, setSelected] = useState<Item | null>(null)
-  const resolve = useMutation({ mutationFn: (resolution: Item) => api.post(`/reviews/${selected?.id}/resolve`, { resolution }), onSuccess: async () => { setSelected(null); await client.invalidateQueries({ queryKey: ['reviews'] }); await client.invalidateQueries({ queryKey: ['plans'] }) } })
-  return <Page title="审核队列" description="检查低置信度、季集缺失、证据冲突和路径冲突"><div className="plan-layout"><section className="surface"><DataTable items={query.data?.items || []} columns={['id', 'review_type', 'status']} onRow={setSelected} selectedId={selected?.id} /></section><aside className="inspector">{selected ? <><h2>审核 #{selected.id}</h2><ReviewResolutionForm key={selected.id} review={selected} onSubmit={resolution => resolve.mutate(resolution)} submitting={resolve.isPending} />{resolve.error ? <p className="error-copy">{resolve.error.message}</p> : null}</> : <Empty>选择一条待审核记录</Empty>}</aside></div></Page>
+function ReviewsPanel({ active = true, onResolved }: { active?: boolean; onResolved?: () => void }) {
+  const query = useList('reviews', '/reviews', 5000, active); const client = useQueryClient(); const [selected, setSelected] = useState<Item | null>(null)
+  const resolve = useMutation({ mutationFn: (resolution: Item) => api.post(`/reviews/${selected?.id}/resolve`, { resolution }), onSuccess: async () => { setSelected(null); await client.invalidateQueries({ queryKey: ['reviews'] }); await client.invalidateQueries({ queryKey: ['plans'] }); onResolved?.() } })
+  if (!query.data?.items.length) return <Empty title="没有需要人工确认的文件" description="系统目前没有发现标题、季集或路径问题。" cta={{ label: '查看整理计划', to: '/inbox?tab=plans' }} />
+  return <div className="plan-layout"><section className="surface"><DataTable items={query.data.items} columns={['id', 'review_type', 'status']} onRow={setSelected} selectedId={selected?.id} /></section><aside className="inspector">{selected ? <><h2>确认 #{selected.id}</h2><ReviewResolutionForm key={selected.id} review={selected} onSubmit={resolution => resolve.mutate(resolution)} submitting={resolve.isPending} />{resolve.error ? <p className="error-copy">{resolve.error.message}</p> : null}</> : <Empty>选择一条待确认记录</Empty>}</aside></div>
 }
 
-export function PlansPage() {
-  const list = useList('plans', '/plans'); const [id, setId] = useState<number | null>(null); const [manualSelection, setManualSelection] = useState(false); const detail = useQuery({ queryKey: ['plan', id], queryFn: () => api.get<PlanDetail>(`/plans/${id}`), enabled: id !== null }); const client = useQueryClient()
-  const approve = useMutation({ mutationFn: () => api.post(`/plans/${id}/approve`), onSuccess: async () => { await client.invalidateQueries({ queryKey: ['plans'] }); await detail.refetch() } })
+function PlansPanel({ active = true }: { active?: boolean }) {
+  const list = useList('plans', '/plans', 5000, active); const [id, setId] = useState<number | null>(null); const [manualSelection, setManualSelection] = useState(false); const detail = useQuery({ queryKey: ['plan', id], queryFn: () => api.get<PlanDetail>(`/plans/${id}`), enabled: active && id !== null }); const client = useQueryClient()
+  const refresh = async () => { await client.invalidateQueries({ queryKey: ['plans'] }); await detail.refetch() }
+  const approve = useMutation({ mutationFn: () => api.post(`/plans/${id}/approve`), onSuccess: refresh })
+  const approveItem = useMutation({ mutationFn: (itemId: number) => api.post(`/plans/${id}/items/${itemId}/approve`), onSuccess: refresh })
+  const rejectItem = useMutation({ mutationFn: ({ itemId, reason }: { itemId: number; reason: string }) => api.post(`/plans/${id}/items/${itemId}/reject`, { reason }), onSuccess: refresh })
   useEffect(() => { const newest = list.data?.items[0]?.id; if (!manualSelection && newest && id !== Number(newest)) setId(Number(newest)) }, [id, list.data?.items, manualSelection])
-  return <Page title="整理计划" description="逐文件核对目标路径；批准后计划不可修改"><div className="plan-tabs">{list.data?.items.map(plan => <button key={plan.id} className={id === plan.id ? 'active' : ''} onClick={() => { setManualSelection(true); setId(plan.id) }}>#{plan.id} <Status value={plan.status} /></button>)}</div>{detail.data ? <PlanWorkspace plan={detail.data} onApprove={() => approve.mutate()} /> : <Empty>暂无整理计划</Empty>}</Page>
+  if (!list.data?.items.length) return <Empty title="暂无整理计划" description="完成一次扫描后，系统会先生成文件整理预览。" cta={{ label: '开始扫描', to: '/scan' }} />
+  return <><div className="plan-tabs">{list.data.items.map(plan => <button key={plan.id} className={id === plan.id ? 'active' : ''} onClick={() => { setManualSelection(true); setId(plan.id) }}>#{plan.id} <Status value={plan.status} /></button>)}</div>{detail.data ? <PlanWorkspace plan={detail.data} onApprove={() => approve.mutate()} onApproveItem={itemId => approveItem.mutate(itemId)} onRejectItem={(itemId, reason) => rejectItem.mutate({ itemId, reason })} /> : <Empty>正在载入计划…</Empty>}</>
 }
 
+export function InboxPage() {
+  const [params, setParams] = useSearchParams(); const tab = params.get('tab') === 'plans' ? 'plans' : 'reviews'; const reviews = useList('reviews-count', '/reviews', 5000, tab === 'reviews'); const plans = useList('plans-count', '/plans', 5000, tab === 'plans'); const [success, setSuccess] = useState(false)
+  const switchTab = (next: string) => setParams({ tab: next })
+  return <Page title="待处理" description="确认识别结果，并在执行前检查整理计划。"><div className="tab-list inbox-tabs" role="tablist"><button className={`tab-button${tab === 'reviews' ? ' active' : ''}`} onClick={() => switchTab('reviews')}>需要确认{reviews.data ? ` (${reviews.data.items.length})` : ''}</button><button className={`tab-button${tab === 'plans' ? ' active' : ''}`} onClick={() => switchTab('plans')}>整理计划{plans.data ? ` (${plans.data.items.length})` : ''}</button></div>{success ? <div className="success-note">信息已确认，已生成新的整理计划</div> : null}{tab === 'reviews' ? <ReviewsPanel active onResolved={() => { setSuccess(true); switchTab('plans') }} /> : <PlansPanel active />}</Page>
+}
+export function ReviewsPage() { return <InboxPage /> }
+export function PlansPage() { return <InboxPage /> }
 export function LibraryPage() {
   const query = useList('shows', '/library/shows'); const client = useQueryClient(); const [selected, setSelected] = useState<Item | null>(null); const [title, setTitle] = useState(''); const [reason, setReason] = useState(''); const [locked, setLocked] = useState(true); const [preview, setPreview] = useState<Item | null>(null)
   const detail = useQuery({ queryKey: ['show', selected?.id], queryFn: () => api.get<Item>(`/library/shows/${selected?.id}`), enabled: Boolean(selected) })
   const previewChange = useMutation({ mutationFn: () => api.post<Item>('/library/changes/preview', { show_id: selected?.id, base_revision: selected?.revision, patch: { canonical_title: title, title_locked: locked }, reason }), onSuccess: setPreview })
   const approve = useMutation({ mutationFn: () => api.post<Item>(`/library/changes/${preview?.id}/approve`), onSuccess: async updated => { setPreview(null); setSelected(updated); setTitle(''); setReason(''); await client.invalidateQueries({ queryKey: ['shows'] }); await client.invalidateQueries({ queryKey: ['show', updated.id] }) } })
   const metadata = detail.data?.metadata?.[0]
-  return <Page title="资料库" description="查看番剧、季度、文件位置、识别证据和附加元数据"><div className="plan-layout"><section className="surface"><DataTable items={query.data?.items || []} columns={['canonical_title', 'status', 'revision', 'updated_at']} onRow={item => { setSelected(item); setTitle(item.canonical_title); setPreview(null) }} selectedId={selected?.id} /></section><aside className="inspector">{selected ? <>{metadata?.poster_url ? <img className="poster" src={metadata.poster_url} alt={`${selected.canonical_title} 海报`} /> : null}<h2>{selected.canonical_title}</h2><p className="muted-copy">{metadata?.synopsis || '暂无简介；元数据不可用不会影响文件整理。'}</p><dl><dt>放送状态</dt><dd>{metadata?.broadcast_status || '未知'}</dd><dt>季度数</dt><dd>{detail.data?.seasons?.length ?? 0}</dd><dt>修订</dt><dd>{selected.revision}</dd></dl><label>新规范标题<input aria-label="新规范标题" value={title} onChange={event => setTitle(event.target.value)} /></label><label>修改原因<input aria-label="修改原因" value={reason} onChange={event => setReason(event.target.value)} /></label><label className="check-field"><input type="checkbox" checked={locked} onChange={event => setLocked(event.target.checked)} />锁定人工标题</label>{preview ? <div className="change-preview"><strong>修改预览</strong><span>{String(preview.old_values?.canonical_title)} → {String(preview.new_values?.canonical_title)}</span><button className="primary full" onClick={() => approve.mutate()}><ShieldCheck size={16} />批准修改</button></div> : <button className="secondary full" disabled={!title || !reason || title === selected.canonical_title} onClick={() => previewChange.mutate()}><Check size={16} />预览修改</button>}</> : <Empty>选择番剧查看详情和纠正</Empty>}</aside></div></Page>
+  return <Page title="资料库" description="查看番剧、季度、文件位置、识别证据和附加元数据">{!query.data?.items.length ? <Empty title="资料库还是空的" description="批准并完成一次整理后，番剧会显示在这里。" cta={{ label: '配置目录', to: '/scan' }} /> : <div className="plan-layout"><section className="surface"><DataTable items={query.data.items} columns={['canonical_title', 'status', 'revision', 'updated_at']} onRow={item => { setSelected(item); setTitle(item.canonical_title); setPreview(null) }} selectedId={selected?.id} /></section><aside className="inspector">{selected ? <>{metadata?.poster_url ? <img className="poster" src={metadata.poster_url} alt={`${selected.canonical_title} 海报`} /> : null}<h2>{selected.canonical_title}</h2><p className="muted-copy">{metadata?.synopsis || '暂无简介；元数据不可用不会影响文件整理。'}</p><dl><dt>放送状态</dt><dd>{metadata?.broadcast_status || '未知'}</dd><dt>季度数</dt><dd>{detail.data?.seasons?.length ?? 0}</dd><dt>修订</dt><dd>{selected.revision}</dd></dl><label>新规范标题<input aria-label="新规范标题" value={title} onChange={event => setTitle(event.target.value)} /></label><label>修改原因<input aria-label="修改原因" value={reason} onChange={event => setReason(event.target.value)} /></label><label className="check-field"><input type="checkbox" checked={locked} onChange={event => setLocked(event.target.checked)} />锁定人工标题</label>{preview ? <div className="change-preview"><strong>修改预览</strong><span>{String(preview.old_values?.canonical_title)} → {String(preview.new_values?.canonical_title)}</span><button className="primary full" onClick={() => approve.mutate()}><ShieldCheck size={16} />批准修改</button></div> : <button className="secondary full" disabled={!title || !reason || title === selected.canonical_title} onClick={() => previewChange.mutate()}><Check size={16} />预览修改</button>}</> : <Empty>选择番剧查看详情和纠正</Empty>}</aside></div>}</Page>
 }
 
-export function RulesPage() {
-  const query = useList('rules', '/rules', 0); const client = useQueryClient(); const [name, setName] = useState(''); const [selectedId, setSelectedId] = useState<number | null>(null); const [document, setDocument] = useState('{\n  "aliases": {}\n}'); const [error, setError] = useState('')
+function RulesPanel({ active = true }: { active?: boolean }) {
+  const query = useList('rules', '/rules', 0, active); const client = useQueryClient(); const [name, setName] = useState(''); const [selectedId, setSelectedId] = useState<number | null>(null); const [document, setDocument] = useState('{\n  "aliases": {}\n}'); const [error, setError] = useState('')
   const selected = query.data?.items.find(item => item.id === selectedId) || query.data?.items[0]
   useEffect(() => { if (selectedId === null && query.data?.items[0]?.id) setSelectedId(Number(query.data.items[0].id)) }, [query.data?.items, selectedId])
   const refresh = () => client.invalidateQueries({ queryKey: ['rules'] })
@@ -209,15 +202,22 @@ export function RulesPage() {
   const activate = useMutation({ mutationFn: (id: number) => api.post(`/rules/revisions/${id}/activate`), onSuccess: refresh })
   const rollback = useMutation({ mutationFn: (id: number) => api.post(`/rules/${selected?.id}/revisions/${id}/rollback`), onSuccess: refresh })
   const latest = selected?.revisions?.[0]
-  return <Page title="规则与别名" description="JSON 规则以不可变修订保存，必须先校验再激活"><div className="plan-layout"><section className="surface"><form className="inline-form" onSubmit={event => { event.preventDefault(); createSet.mutate() }}><input aria-label="规则集名称" value={name} onChange={event => setName(event.target.value)} placeholder="例如：默认别名" /><button className="primary" disabled={!name}><Plus size={16} />新建规则集</button></form><DataTable items={query.data?.items || []} columns={['id', 'name', 'active_revision_id', 'updated_at']} onRow={item => setSelectedId(item.id)} selectedId={selected?.id} /></section><aside className="inspector">{selected ? <><h2>{selected.name}</h2><label>规则 JSON<textarea aria-label="规则 JSON" value={document} onChange={event => setDocument(event.target.value)} /></label>{error ? <div className="form-error">{error}</div> : null}<button className="secondary full" onClick={() => createRevision.mutate()}><Save size={16} />保存草稿</button><div className="revision-list">{selected.revisions?.map((revision: Item) => <div key={revision.id}><strong>rev {revision.revision}</strong><Status value={revision.status} /><div className="row-actions">{revision.status === 'draft' ? <button className="text-button" onClick={() => validate.mutate(revision.id)}>校验</button> : null}{revision.status === 'validated' ? <button className="text-button" onClick={() => activate.mutate(revision.id)}>激活</button> : null}{revision.content_hash && revision.status !== 'active' ? <button className="text-button" onClick={() => rollback.mutate(revision.id)}>回退到此版</button> : null}</div></div>)}</div>{latest ? <pre className="evidence">{JSON.stringify(latest.document, null, 2)}</pre> : <Empty>尚无修订</Empty>}</> : <Empty>先创建规则集</Empty>}</aside></div></Page>
+  return <><p className="risk-warning">仅供熟悉 AutoAnime 规则格式的用户使用。普通用户无需创建或修改规则 JSON。</p><div className="plan-layout"><section className="surface"><form className="inline-form" onSubmit={event => { event.preventDefault(); createSet.mutate() }}><input aria-label="规则集名称" value={name} onChange={event => setName(event.target.value)} placeholder="例如：默认别名" /><button className="primary" disabled={!name}><Plus size={16} />新建规则集</button></form><DataTable items={query.data?.items || []} columns={['id', 'name', 'active_revision_id', 'updated_at']} onRow={item => setSelectedId(item.id)} selectedId={selected?.id} /></section><aside className="inspector">{selected ? <><h2>{selected.name}</h2><label>规则 JSON<textarea aria-label="规则 JSON" value={document} onChange={event => setDocument(event.target.value)} /></label>{error ? <div className="form-error">{error}</div> : null}<button className="secondary full" onClick={() => createRevision.mutate()}><Save size={16} />保存草稿</button><div className="revision-list">{selected.revisions?.map((revision: Item) => <div key={revision.id}><strong>rev {revision.revision}</strong><Status value={revision.status} /><div className="row-actions">{revision.status === 'draft' ? <button className="text-button" onClick={() => validate.mutate(revision.id)}>校验</button> : null}{revision.status === 'validated' ? <button className="text-button" onClick={() => activate.mutate(revision.id)}>激活</button> : null}{revision.content_hash && revision.status !== 'active' ? <button className="text-button" onClick={() => rollback.mutate(revision.id)}>回退到此版</button> : null}</div></div>)}</div>{latest ? <pre className="evidence">{JSON.stringify(latest.document, null, 2)}</pre> : <Empty>尚无修订</Empty>}</> : <Empty>先创建规则集</Empty>}</aside></div></>
 }
+export function RulesPage() { return <Page title="规则与别名"><RulesPanel /></Page> }
 
-export function OperationsPage() {
-  const query = useList('operations', '/operations'); const client = useQueryClient(); const [selected, setSelected] = useState<Item | null>(null); const detail = useQuery({ queryKey: ['operation', selected?.id], queryFn: () => api.get<Item>(`/operations/${selected?.id}`), enabled: Boolean(selected) })
+function OperationsPanel({ active = true }: { active?: boolean }) {
+  const query = useList('operations', '/operations', 5000, active); const client = useQueryClient(); const [selected, setSelected] = useState<Item | null>(null); const detail = useQuery({ queryKey: ['operation', selected?.id], queryFn: () => api.get<Item>(`/operations/${selected?.id}`), enabled: active && Boolean(selected) })
   const rollback = useMutation({ mutationFn: (id: number) => api.post(`/operations/${id}/rollback`), onSuccess: async () => { await client.invalidateQueries({ queryKey: ['operations'] }); await detail.refetch() } })
-  return <Page title="操作历史" description="执行、自动补偿、手动回滚和逐文件摘要"><div className="plan-layout"><section className="surface"><DataTable items={query.data?.items || []} columns={['id', 'kind', 'status', 'created_at', 'finished_at']} onRow={setSelected} selectedId={selected?.id} action={item => item.kind === 'execute' && item.status === 'completed' ? <button className="text-button danger" onClick={() => rollback.mutate(item.id)}><RotateCcw size={14} />回滚</button> : null} /></section><aside className="inspector">{detail.data ? <><h2>批次 #{detail.data.id}</h2><Status value={detail.data.status} /><pre className="evidence">{JSON.stringify(detail.data.summary, null, 2)}</pre><div className="event-list">{detail.data.items?.map((item: Item) => <div key={item.id}><strong>{item.action} · {item.status}</strong><span>{item.source_path} → {item.destination_path}</span></div>)}</div></> : <Empty>选择批次查看文件摘要</Empty>}</aside></div></Page>
+  const requestRollback = (id: number) => { if (window.confirm('将尝试撤销本批次的文件操作，是否继续？')) rollback.mutate(id) }
+  if (!query.data?.items.length) return <Empty title="还没有运行记录" description="开始第一次扫描后，可以在这里查看进度和结果。" />
+  return <div className="plan-layout"><section className="surface"><DataTable items={query.data.items} columns={['id', 'kind', 'status', 'created_at', 'finished_at']} onRow={setSelected} selectedId={selected?.id} action={item => item.kind === 'execute' && item.status === 'completed' ? <button className="text-button danger" onClick={() => requestRollback(item.id)}><RotateCcw size={14} />回滚</button> : null} /></section><aside className="inspector">{detail.data ? <><h2>批次 #{detail.data.id}</h2><Status value={detail.data.status} /><pre className="evidence">{JSON.stringify(detail.data.summary, null, 2)}</pre><div className="event-list">{detail.data.items?.map((item: Item) => <div key={item.id}><strong>{item.action} · {item.status}</strong><span>{item.source_path} → {item.destination_path}</span></div>)}</div></> : <Empty>选择批次查看文件摘要</Empty>}</aside></div>
 }
-
+export function OperationsPage() { return <Page title="整理记录"><OperationsPanel /></Page> }
+export function ActivityPage() {
+  const [params, setParams] = useSearchParams(); const tab = params.get('tab') === 'operations' ? 'operations' : 'jobs'
+  return <Page title="运行记录" description="查看扫描进度、任务事件和已完成的文件操作。"><div className="tab-list activity-tabs"><button className={`tab-button${tab === 'jobs' ? ' active' : ''}`} onClick={() => setParams({ tab: 'jobs' })}>任务进度</button><button className={`tab-button${tab === 'operations' ? ' active' : ''}`} onClick={() => setParams({ tab: 'operations' })}>整理记录</button></div>{tab === 'jobs' ? <JobsPanel active /> : <OperationsPanel active />}</Page>
+}
 export function AutomationSettings({ profiles, schedules, webhooks, createdToken, onCreateSchedule, onToggleSchedule, onCreateWebhook, onToggleWebhook }: {
   profiles: Item[]
   schedules: Item[]
@@ -269,14 +269,19 @@ export function AutomationSettings({ profiles, schedules, webhooks, createdToken
 }
 
 export function SettingsPage() {
+  const [params, setParams] = useSearchParams()
+  const requestedTab = params.get('tab')
+  const tab = requestedTab === 'automation' || requestedTab === 'advanced' ? requestedTab : 'general'
+  const panel = params.get('panel') === 'raw' ? 'raw' : 'rules'
   const query = useQuery({
     queryKey: ['settings'],
     queryFn: () => api.get<{ items: Item[]; secrets: Item[]; security?: Item; openai?: Item }>('/settings'),
+    enabled: tab === 'general' || (tab === 'advanced' && panel === 'raw'),
   })
-  const backups = useList('backups', '/backups', 0)
-  const schedules = useList('schedules', '/schedules', 0)
-  const webhooks = useList('webhook-sources', '/webhook-sources', 0)
-  const profiles = useList('automation-profiles', '/profiles', 0)
+  const backups = useList('backups', '/backups', 0, tab === 'advanced')
+  const schedules = useList('schedules', '/schedules', 0, tab === 'automation')
+  const webhooks = useList('webhook-sources', '/webhook-sources', 0, tab === 'automation')
+  const profiles = useList('automation-profiles', '/profiles', 0, tab === 'automation')
   const client = useQueryClient()
   const [openaiKey, setOpenaiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
@@ -374,8 +379,9 @@ export function SettingsPage() {
   })
 
   return (
-    <Page title="系统设置" description="用表单修改常用项；开关立即生效，AI 参数点保存。密钥只存本机，不会回显或提交。">
-      <section className="surface form-surface">
+    <Page title="设置" description="管理常用功能、自动扫描和高级维护。">
+      <div className="tab-list settings-tabs"><button className={`tab-button${tab === 'general' ? ' active' : ''}`} onClick={() => setParams({ tab: 'general' })}>常用</button><button className={`tab-button${tab === 'automation' ? ' active' : ''}`} onClick={() => setParams({ tab: 'automation' })}>自动化</button><button className={`tab-button${tab === 'advanced' ? ' active' : ''}`} onClick={() => setParams({ tab: 'advanced', panel: 'rules' })}>高级</button></div>
+      {tab === 'general' ? <><section className="surface form-surface">
         <div className="surface-title">
           <h2>AI 识别（可选）</h2>
           <span>
@@ -496,9 +502,9 @@ export function SettingsPage() {
           />
           允许本机无 token Hook
         </label>
-      </section>
+      </section></> : null}
 
-      <AutomationSettings
+      {tab === 'automation' ? <AutomationSettings
         profiles={profiles.data?.items || []}
         schedules={schedules.data?.items || []}
         webhooks={webhooks.data?.items || []}
@@ -507,9 +513,9 @@ export function SettingsPage() {
         onToggleSchedule={value => toggleSchedule.mutate(value)}
         onCreateWebhook={value => createWebhook.mutate(value)}
         onToggleWebhook={value => toggleWebhook.mutate(value)}
-      />
+      /> : null}
 
-      <section className="surface form-surface">
+      {tab === 'advanced' ? <><div className="tab-list sub-tabs"><button className={`tab-button${panel === 'rules' ? ' active' : ''}`} onClick={() => setParams({ tab: 'advanced', panel: 'rules' })}>规则与别名</button><button className={`tab-button${panel === 'raw' ? ' active' : ''}`} onClick={() => setParams({ tab: 'advanced', panel: 'raw' })}>原始设置</button></div><section className="surface form-surface">
         <div className="surface-title">
           <h2>数据库备份</h2>
           <span>不含媒体文件</span>
@@ -522,7 +528,8 @@ export function SettingsPage() {
         <DataTable items={backups.data?.items || []} columns={['id', 'kind', 'size', 'sha256', 'created_at']} />
       </section>
 
-      <section className="surface form-surface">
+      {panel === 'rules' ? <RulesPanel active /> : null}
+      {panel === 'raw' ? <section className="surface form-surface">
         <div className="surface-title">
           <h2>高级</h2>
           <button type="button" className="text-button" onClick={() => setShowAdvanced(value => !value)}>
@@ -538,7 +545,7 @@ export function SettingsPage() {
         ) : (
           <p className="muted form-indent">已隐藏原始 JSON/密钥表，避免误操作。</p>
         )}
-      </section>
+      </section> : null}</> : null}
     </Page>
   )
 }

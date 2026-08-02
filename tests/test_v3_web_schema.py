@@ -90,6 +90,36 @@ class WebSchemaTests(unittest.TestCase):
             connection.close()
         self.assertEqual(rows, [(3,)])
 
+    def test_migration_adds_plan_item_decision_columns_to_existing_table(self):
+        migrations = self.migration_module()
+        connection = sqlite3.connect(str(self.database))
+        try:
+            connection.execute(
+                """
+                CREATE TABLE plan_items(
+                    id INTEGER PRIMARY KEY,
+                    execution_status VARCHAR(32) NOT NULL DEFAULT 'pending'
+                )
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        migrations.run_migrations(self.database)
+        migrations.run_migrations(self.database)
+
+        connection = sqlite3.connect(str(self.database))
+        try:
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(plan_items)").fetchall()
+            }
+        finally:
+            connection.close()
+        self.assertTrue(
+            {"decision", "reject_reason", "decided_by", "decided_at"}.issubset(columns)
+        )
+
     def test_database_connections_enable_foreign_keys_wal_and_busy_timeout(self):
         migrations = self.migration_module()
 

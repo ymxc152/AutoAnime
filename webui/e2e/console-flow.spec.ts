@@ -11,7 +11,7 @@ const password = 'AutoAnime-Admin-ChangeMe!'
 
 async function ensureLoggedIn(page: Page) {
   await page.goto('/')
-  const overview = page.getByRole('link', { name: /概览/ })
+  const overview = page.getByRole('link', { name: /首页/ })
   try {
     await expect(overview).toBeVisible({ timeout: 8000 })
     return
@@ -77,7 +77,7 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
 
   await ensureLoggedIn(page)
 
-  await page.getByRole('link', { name: /扫描配置/ }).click()
+  await page.getByRole('link', { name: /扫描/ }).click()
   await page.getByLabel('目录路径').fill(source)
   await page.getByRole('button', { name: '添加' }).click()
   await page.getByLabel('目录类型').selectOption('library')
@@ -86,7 +86,7 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   await page.getByLabel('配置名称').fill('E2E 真实整理')
   await page.getByLabel('下载源').selectOption({ label: source })
   await page.getByLabel('媒体库').selectOption({ label: library })
-  await page.getByRole('button', { name: '创建扫描配置' }).click()
+  await page.getByRole('button', { name: '创建扫描方案' }).click()
   await page.getByRole('button', { name: '编辑' }).click()
   await page.getByLabel('最低置信度').fill('90')
   await page.getByRole('button', { name: '保存配置' }).click()
@@ -94,16 +94,18 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   await page.getByRole('button', { name: '手动扫描' }).click()
 
   execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', root, '--once'])
-  await page.getByRole('link', { name: /任务中心/ }).click()
+  await page.goto('/activity?tab=jobs')
   await page.locator('tbody tr').first().click()
   await expect(page.getByText('扫描完成')).toBeVisible()
-  await page.getByRole('link', { name: /整理计划/ }).click()
-  await expect(page.getByRole('button', { name: '批准并执行' })).toBeEnabled()
-  await page.getByRole('button', { name: '批准并执行' }).click()
+  await page.getByRole('link', { name: /待处理/ }).click()
+  await page.getByRole('button', { name: /整理计划/ }).click()
+  await expect(page.getByRole('button', { name: '批准并开始整理' })).toBeEnabled()
+  await page.getByRole('button', { name: '批准并开始整理' }).click()
   execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', root, '--once'])
 
-  await page.getByRole('link', { name: /操作历史/ }).click()
-  await expect(page.getByText('completed').first()).toBeVisible()
+  await page.goto('/activity?tab=operations')
+  await expect(page.getByText('已完成').first()).toBeVisible()
+  page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '回滚' }).click()
   await expect.poll(async () => {
     const response = await page.request.get('/api/v1/jobs')
@@ -115,30 +117,29 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   await expect.poll(() => countFiles(library)).toBe(0)
 })
 
-test('existing installation shows login on fresh browser storage', async ({ page }) => {
+test('loopback enters an existing installation without the admin login form', async ({ page }) => {
   await page.request.post('/api/v1/auth/bootstrap', { data: { username: 'admin', password } })
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: '管理员登录' })).toBeVisible({ timeout: 5_000 })
-  await expect(page.getByRole('heading', { name: '创建管理员账号' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: /首页/ })).toBeVisible({ timeout: 8_000 })
+  await expect(page.getByLabel('密码')).toHaveCount(0)
 })
 
 test('rules and ordinary settings can be created and activated', async ({ page }) => {
   await loginExisting(page)
-  await page.getByRole('link', { name: /规则与别名/ }).click()
+  await page.goto('/settings?tab=advanced&panel=rules')
   await page.getByLabel('规则集名称').fill('E2E 别名规则')
   await page.getByRole('button', { name: '新建规则集' }).click()
   await page.getByLabel('规则 JSON').fill('{"aliases":{"Frieren":"葬送的芙莉莲"}}')
   await page.getByRole('button', { name: '保存草稿' }).click()
   await page.getByRole('button', { name: '校验' }).click()
-  await expect(page.getByText('validated').first()).toBeVisible()
+  await expect(page.getByText('已校验').first()).toBeVisible()
   await page.getByRole('button', { name: '激活' }).click()
-  await expect(page.getByText('active').first()).toBeVisible()
+  await expect(page.getByText('启用').first()).toBeVisible()
 
-  await page.getByRole('link', { name: /系统设置/ }).click()
-  await page.getByLabel('设置键').fill('backup.retention_days')
-  await page.getByLabel('设置值（JSON）').fill('14')
-  await page.getByRole('button', { name: '保存设置' }).click()
-  await expect(page.getByText('backup.retention_days')).toBeVisible()
+  await page.getByRole('link', { name: /设置/ }).click()
+  const hook = page.getByLabel('本机 Hook 信任')
+  await hook.click()
+  await expect(hook).not.toBeChecked()
 })
 
 test('library title correction is previewed before approval', async ({ page }) => {

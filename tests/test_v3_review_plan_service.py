@@ -52,6 +52,51 @@ class ReviewAndPlanServiceTests(unittest.TestCase):
         ScanService(self.database).run(self.profile.id)
         return ReviewService(self.database).list_open()[0]
 
+    def test_plan_item_decisions_are_persisted_and_audited(self):
+        from autoanime_v3.db.engine import connect_sqlite
+        from autoanime_v3.services.plans import PlanService
+
+        outcome = self.scan_safe()
+        service = PlanService(self.database)
+        item_id = service.get(outcome.plan_id).items[0].id
+
+        approved = service.decide_item(outcome.plan_id, item_id, "approved")
+        self.assertEqual(approved.items[0].decision, "approved")
+        self.assertIsNone(approved.items[0].reject_reason)
+
+        rejected = service.decide_item(
+            outcome.plan_id, item_id, "rejected", reason="wrong release"
+        )
+        self.assertEqual(rejected.items[0].decision, "rejected")
+        self.assertEqual(rejected.items[0].reject_reason, "wrong release")
+        self.assertTrue(rejected.items[0].decided_at)
+
+        with self.assertRaises(ValidationError):
+            service.decide_item(outcome.plan_id, item_id, "rejected", reason="  ")
+
+        connection = connect_sqlite(self.database)
+        try:
+            events = connection.execute(
+                "SELECT action, object_id, reason FROM audit_events ORDER BY id"
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(events[-2][0], "plan_item.approve")
+        self.assertEqual(events[-1], ("plan_item.reject", str(item_id), "wrong release"))
+
+    def test_rejected_item_does_not_block_plan_approval(self):
+        from autoanime_v3.services.plans import PlanService
+
+        outcome = self.scan_safe()
+        service = PlanService(self.database)
+        item = service.get(outcome.plan_id).items[0]
+        service.decide_item(outcome.plan_id, item.id, "rejected", reason="not wanted")
+
+        approved = service.approve(outcome.plan_id)
+
+        self.assertEqual(approved.status, "approved")
+        self.assertEqual(approved.items[0].decision, "rejected")
+
     def test_changed_source_identity_makes_plan_stale(self):
         from autoanime_v3.domain.errors import StalePlanError
         from autoanime_v3.services.plans import PlanService

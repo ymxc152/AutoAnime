@@ -28,6 +28,8 @@ describe('ProfileForm', () => {
       />,
     )
 
+    expect(screen.queryByLabelText('最低置信度')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '更多选项' }))
     expect(screen.getByLabelText('配置名称')).toHaveValue('默认配置')
     expect(screen.getByLabelText('文件模式')).toHaveValue('copy')
     expect(screen.getByLabelText('最低置信度')).toHaveValue(91)

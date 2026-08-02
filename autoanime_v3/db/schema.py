@@ -460,6 +460,10 @@ plan_items = Table(
     Column("source_sha256", String(64)),
     Column("identification_snapshot_json", Text, nullable=False),
     Column("execution_status", String(32), nullable=False, server_default=text("'pending'")),
+    Column("decision", String(16)),
+    Column("reject_reason", Text),
+    Column("decided_by", ForeignKey("users.id", ondelete="SET NULL")),
+    Column("decided_at", String(32)),
     UniqueConstraint("plan_id", "destination_root_id", "destination_relative_path"),
 )
 

@@ -95,6 +95,51 @@ class ApiTests(unittest.TestCase):
         roots = self.client.get("/api/v1/roots")
         self.assertEqual(len(roots.json()["items"]), 1)
 
+    def test_plan_item_decision_endpoints_require_csrf_and_validate_reason(self):
+        csrf = self.login_default()
+        root = Path(self.temporary_directory.name)
+        source = root / "decision-source"
+        library = root / "decision-library"
+        source.mkdir()
+        library.mkdir()
+        from autoanime_v3.domain.entities import CreateProfile
+        from autoanime_v3.services.profiles import ProfileService
+        from autoanime_v3.services.roots import RootService
+        from autoanime_v3.services.scans import ScanService
+
+        roots = RootService(self.settings.database_path)
+        source_root = roots.create_root("source", source)
+        library_root = roots.create_root("library", library)
+        profile = ProfileService(self.settings.database_path).create_profile(
+            CreateProfile("decision-profile", source_root.id, library_root.id)
+        )
+        (source / "测试番 S01E01.mkv").write_bytes(b"decision-media")
+        outcome = ScanService(self.settings.database_path).run(profile.id)
+        plan = self.client.get("/api/v1/plans/%s" % outcome.plan_id).json()
+        item_id = plan["items"][0]["id"]
+        approve_url = "/api/v1/plans/%s/items/%s/approve" % (outcome.plan_id, item_id)
+        reject_url = "/api/v1/plans/%s/items/%s/reject" % (outcome.plan_id, item_id)
+
+        self.assertEqual(self.client.post(approve_url).status_code, 403)
+        approved = self.client.post(approve_url, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["items"][0]["decision"], "approved")
+
+        empty = self.client.post(
+            reject_url,
+            json={"reason": "  "},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(empty.status_code, 422)
+        rejected = self.client.post(
+            reject_url,
+            json={"reason": "not wanted"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(rejected.status_code, 200)
+        self.assertEqual(rejected.json()["items"][0]["decision"], "rejected")
+        self.assertEqual(rejected.json()["items"][0]["reject_reason"], "not wanted")
+
     def test_local_hook_requires_loopback_and_enabled_profile(self):
         csrf = self.login_default()
         source = Path(self.temporary_directory.name) / "hook-source"

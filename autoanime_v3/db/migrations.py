@@ -37,6 +37,19 @@ def run_migrations(database_path):
                 connection.exec_driver_sql(
                     "ALTER TABLE webhook_sources ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
                 )
+            plan_item_columns = {
+                row[1]
+                for row in connection.exec_driver_sql("PRAGMA table_info(plan_items)").fetchall()
+            }
+            plan_item_alters = {
+                "decision": "ALTER TABLE plan_items ADD COLUMN decision VARCHAR(16)",
+                "reject_reason": "ALTER TABLE plan_items ADD COLUMN reject_reason TEXT",
+                "decided_by": "ALTER TABLE plan_items ADD COLUMN decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+                "decided_at": "ALTER TABLE plan_items ADD COLUMN decided_at VARCHAR(32)",
+            }
+            for column, statement in plan_item_alters.items():
+                if column not in plan_item_columns:
+                    connection.exec_driver_sql(statement)
             existing = connection.execute(
                 select(schema_migrations.c.version).where(
                     schema_migrations.c.version == SCHEMA_VERSION

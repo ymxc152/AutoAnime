@@ -174,6 +174,10 @@ class ReviewBody(BaseModel):
     resolution: Any
 
 
+class RejectBody(BaseModel):
+    reason: str
+
+
 class SettingBody(BaseModel):
     key: str
     value: Any
@@ -561,6 +565,21 @@ def create_app(settings, services=None):
     @app.get("/api/v1/plans/{plan_id}")
     def get_plan(plan_id: int, user=Depends(current_user)):
         return serialize(services.plans.get(plan_id))
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/approve")
+    def approve_plan_item(plan_id: int, item_id: int, user=Depends(changing_user)):
+        return serialize(services.plans.decide_item(plan_id, item_id, "approved", user.id))
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/reject")
+    def reject_plan_item(
+        plan_id: int,
+        item_id: int,
+        body: RejectBody,
+        user=Depends(changing_user),
+    ):
+        return serialize(
+            services.plans.decide_item(plan_id, item_id, "rejected", user.id, body.reason)
+        )
 
     @app.post("/api/v1/plans/{plan_id}/approve")
     def approve_plan(plan_id: int, user=Depends(changing_user)):
