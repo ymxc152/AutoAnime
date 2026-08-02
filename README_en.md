@@ -49,6 +49,19 @@ python AutoAnimeMv3.py --rollback ".\.autoanime-v3\operations\run.jsonl"
 
 Database reset does not modify media files.
 
+
+### Moving from legacy organize scripts to the Web console
+
+The repo is a single v3 stack (`AutoAnimeMv3.py` + Web/Worker). There is no automatic v2 database importer. Typical cutover:
+
+1. Stop old schedulers so two tools do not move the same tree.
+2. Start Web + Worker (`start-autoanime.bat` or dev Vite on port 5173).
+3. In **Scan profiles**, add source and library roots. On the host machine, use **Browse…** for the Windows folder picker; from another PC on the LAN, paste paths.
+4. Create a profile (prefer `link` if you seed torrents). Start with **review all**, then switch to auto-apply once results look right.
+5. Flow: manual scan → reviews → plans → approve/execute → rollback from operation history if needed.
+6. Optional automation: schedules and downloader webhooks under Settings; local trusted hook at `POST /api/v1/hooks/local`.
+7. CLI still works for one-off dry runs; it does not automatically share the Web data directory SQLite.
+
 ## Web console
 
 ### Windows one-click start
@@ -115,3 +128,13 @@ pnpm --dir webui audit --prod --audit-level high
 ## License
 
 [GPL-3.0](./LICENSE)
+
+
+### Privacy and local data
+
+This is a local open-source tool. It does **not** upload your folder paths, API keys, media, or settings to the project authors or a vendor cloud.
+
+- API keys are encrypted on the machine running AutoAnimeWeb (DPAPI on Windows when available).
+- With AI recognition enabled, only unresolved items may send **filename/metadata text** to the **Base URL you configured** (OpenAI or a compatible endpoint you choose). Video bytes are never uploaded by AutoAnime.
+- Keep AI disabled if you do not want any remote calls. Do not commit `config.v3.ini`, `.dev-data/`, `secret-store/`, or SQLite databases.
+

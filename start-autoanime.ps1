@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param(
     [string]$DataDir = "C:\ProgramData\AutoAnime",
     [string]$HostAddress = "0.0.0.0",
@@ -39,13 +39,20 @@ function Get-PythonInvocation([string]$PythonPath) {
 function Invoke-Python {
     param(
         [hashtable]$Python,
-        [string[]]$Args
+        [string[]]$PyArgs
     )
+    # NB: parameter must NOT be named $Args - PowerShell's automatic $args
+    # variable shadows it and binding silently fails (args arrive empty).
     $all = @()
     $all += $Python.Prefix
-    $all += $Args
-    & $Python.Exe @all
-    return $LASTEXITCODE
+    $all += $PyArgs
+    # Capture native stdout so it does not become part of this function's
+    # return value (PowerShell adds uncaptured native output to the output
+    # stream), then echo it and return only the real exit code.
+    $nativeOut = & $Python.Exe @all
+    $exitCode = $LASTEXITCODE
+    if ($nativeOut) { $nativeOut | Out-Host }
+    return $exitCode
 }
 
 function Ensure-PythonDeps([hashtable]$Python) {
@@ -57,7 +64,7 @@ function Ensure-PythonDeps([hashtable]$Python) {
         }
     }
     Write-Info "Installing Python dependencies..."
-    $code = Invoke-Python -Python $Python -Args @("-m", "pip", "install", "-r", "requirements.txt")
+    $code = Invoke-Python -Python $Python -PyArgs @("-m", "pip", "install", "-r", "requirements.txt")
     if ($code -ne 0) { throw "pip install -r requirements.txt failed (exit=$code)" }
     "ok" | Set-Content -Path $marker -Encoding ascii
 }

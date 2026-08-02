@@ -10,12 +10,24 @@ from autoanime_v3.domain.errors import RevisionConflictError, ValidationError
 from autoanime_v3.services.auth import AUTH_LOCAL_BYPASS_KEY, LOCAL_HOOK_TRUST_KEY
 
 
+OPENAI_ENABLED_KEY = "openai.enabled"
+OPENAI_BASE_URL_KEY = "openai.base_url"
+OPENAI_MODEL_KEY = "openai.model"
+OPENAI_TIMEOUT_KEY = "openai.timeout"
+OPENAI_API_KEY_SECRET = "openai.api_key"
+
 DEFAULT_SETTINGS = {
     AUTH_LOCAL_BYPASS_KEY: True,
     LOCAL_HOOK_TRUST_KEY: True,
+    OPENAI_ENABLED_KEY: False,
+    OPENAI_BASE_URL_KEY: "https://api.openai.com",
+    OPENAI_MODEL_KEY: "gpt-4.1-mini",
+    OPENAI_TIMEOUT_KEY: 30,
 }
 
-BOOLEAN_SETTINGS = {AUTH_LOCAL_BYPASS_KEY, LOCAL_HOOK_TRUST_KEY}
+BOOLEAN_SETTINGS = {AUTH_LOCAL_BYPASS_KEY, LOCAL_HOOK_TRUST_KEY, OPENAI_ENABLED_KEY}
+INTEGER_SETTINGS = {OPENAI_TIMEOUT_KEY}
+STRING_SETTINGS = {OPENAI_BASE_URL_KEY, OPENAI_MODEL_KEY}
 
 
 def setting_view(row):
@@ -70,12 +82,57 @@ class SettingsService:
             return DEFAULT_SETTINGS.get(key, default)
         return json.loads(row["value_json"])
 
+    def openai_public_view(self, secret_configured=False):
+        """Safe AI settings block for the WebUI (never includes the API key)."""
+        items = {item["key"]: item for item in self.list()}
+
+        def pack(key, default):
+            row = items.get(key)
+            if row is None:
+                return default, 0
+            return row["value"], int(row["revision"])
+
+        enabled, enabled_rev = pack(OPENAI_ENABLED_KEY, False)
+        base_url, base_rev = pack(OPENAI_BASE_URL_KEY, "https://api.openai.com")
+        model, model_rev = pack(OPENAI_MODEL_KEY, "gpt-4.1-mini")
+        timeout, timeout_rev = pack(OPENAI_TIMEOUT_KEY, 30)
+        return {
+            "enabled": bool(enabled),
+            "enabled_revision": enabled_rev,
+            "base_url": str(base_url or "https://api.openai.com"),
+            "base_url_revision": base_rev,
+            "model": str(model or "gpt-4.1-mini"),
+            "model_revision": model_rev,
+            "timeout": int(timeout or 30),
+            "timeout_revision": timeout_rev,
+            "api_key_configured": bool(secret_configured),
+            "ready": bool(enabled) and bool(secret_configured),
+        }
+
     def update(self, key, value, revision):
         normalized_key = str(key).strip()
         if not normalized_key:
             raise ValidationError("Setting key cannot be empty")
         if normalized_key in BOOLEAN_SETTINGS and type(value) is not bool:
             raise ValidationError("Setting value must be a boolean", {"key": normalized_key})
+        if normalized_key in INTEGER_SETTINGS:
+            try:
+                value = int(value)
+            except (TypeError, ValueError) as error:
+                raise ValidationError("Setting value must be an integer", {"key": normalized_key}) from error
+            if normalized_key == OPENAI_TIMEOUT_KEY and value < 5:
+                raise ValidationError("OpenAI timeout must be at least 5 seconds", {"key": normalized_key})
+        if normalized_key in STRING_SETTINGS:
+            if not isinstance(value, str) or not value.strip():
+                raise ValidationError("Setting value must be a non-empty string", {"key": normalized_key})
+            value = value.strip()
+            if normalized_key == OPENAI_BASE_URL_KEY and not (
+                value.startswith("http://") or value.startswith("https://")
+            ):
+                raise ValidationError(
+                    "OpenAI base URL must start with http:// or https://",
+                    {"key": normalized_key},
+                )
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         with SqliteUnitOfWork(self.database_path) as uow:
             row = uow.connection.execute(
@@ -103,7 +160,10 @@ class SettingsService:
                 if updated != 1:
                     raise RevisionConflictError(
                         "Setting was changed by another request",
-                        {"expected_revision": int(revision), "actual_revision": int(row["revision"])},
+                        {
+                            "expected_revision": int(revision),
+                            "actual_revision": int(row["revision"]),
+                        },
                     )
             result = setting_view(
                 uow.connection.execute(

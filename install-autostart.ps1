@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   注册当前用户登录时自动启动 AutoAnime Web + Worker。

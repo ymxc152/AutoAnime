@@ -35,18 +35,67 @@ class CoreScanAdapter:
     def analyze(self, source, library, min_confidence):
         return self.analyze_scoped(source, library, min_confidence, None)
 
+    def _openai_config(self):
+        """Load optional remote agent settings from the Web database."""
+        from autoanime_v3.security.secrets import DpapiSecretStore, EncryptedFileSecretStore
+        from autoanime_v3.services.auth import SecretService
+        from autoanime_v3.services.settings import (
+            OPENAI_API_KEY_SECRET,
+            OPENAI_BASE_URL_KEY,
+            OPENAI_ENABLED_KEY,
+            OPENAI_MODEL_KEY,
+            OPENAI_TIMEOUT_KEY,
+            SettingsService,
+        )
+
+        settings = SettingsService(self.database_path)
+        enabled = bool(settings.get(OPENAI_ENABLED_KEY, False))
+        base_url = str(settings.get(OPENAI_BASE_URL_KEY, "https://api.openai.com") or "https://api.openai.com")
+        model = str(settings.get(OPENAI_MODEL_KEY, "gpt-4.1-mini") or "gpt-4.1-mini")
+        try:
+            timeout = max(5, int(settings.get(OPENAI_TIMEOUT_KEY, 30) or 30))
+        except (TypeError, ValueError):
+            timeout = 30
+        api_key = ""
+        if enabled:
+            try:
+                store = DpapiSecretStore()
+            except OSError:
+                candidates = [
+                    self.database_path.parent / "secret-store",
+                    self.database_path.parent.parent / "secret-store",
+                ]
+                store_path = next((path for path in candidates if path.exists()), candidates[0])
+                store = EncryptedFileSecretStore(store_path)
+            api_key = (
+                SecretService(self.database_path, store).reveal_for_integration(OPENAI_API_KEY_SECRET)
+                or ""
+            )
+        return {
+            "openai_enabled": bool(enabled and api_key),
+            "openai_base_url": base_url,
+            "openai_model": model,
+            "openai_api_key": api_key,
+            "openai_timeout": timeout,
+        }
+
     def analyze_scoped(self, source, library, min_confidence, scope_paths):
         active_rules = RuleService(self.database_path).get_active()
         catalog = TitleCatalog.load(
             self.alias_file,
             overlay=active_rules.document,
         )
+        openai = self._openai_config()
         config = AppConfig(
             database_path=self.cache_path,
             alias_file=self.alias_file,
             min_confidence=min_confidence,
             output_root=library,
-            openai_enabled=False,
+            openai_enabled=openai["openai_enabled"],
+            openai_base_url=openai["openai_base_url"],
+            openai_model=openai["openai_model"],
+            openai_api_key=openai["openai_api_key"],
+            openai_timeout=openai["openai_timeout"],
         )
         with ResolutionCache(self.cache_path) as cache:
             resolver = Resolver(catalog, config, cache)

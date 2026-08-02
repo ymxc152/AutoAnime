@@ -20,3 +20,11 @@ docs/plans/
 *.aam.bak.*
 Thumbs.db
 Desktop.ini
+# Local runtime data and secrets (never commit)
+.dev-data/
+secret-store/
+**/secret-store/
+C:/ProgramData/AutoAnime/
+data/*.sqlite3
+*.sqlite3-*
+webui/dist/

@@ -17,8 +17,14 @@ from autoanime_v3.api.errors import status_for_error
 from autoanime_v3.db.engine import connect_sqlite
 from autoanime_v3.db.migrations import SCHEMA_VERSION, run_migrations
 from autoanime_v3.domain.entities import CreateProfile
-from autoanime_v3.domain.errors import BootstrapLocalOnlyError, DomainError, LocalOnlyError
+from autoanime_v3.domain.errors import (
+    BootstrapLocalOnlyError,
+    DomainError,
+    FolderDialogError,
+    LocalOnlyError,
+)
 from autoanime_v3.jobs.queue import JobQueue
+from autoanime_v3.security.folder_dialog import pick_folder_windows
 from autoanime_v3.security.network import is_loopback_host
 from autoanime_v3.security.secrets import DpapiSecretStore, EncryptedFileSecretStore
 from autoanime_v3.services.auth import (
@@ -26,6 +32,13 @@ from autoanime_v3.services.auth import (
     LOCAL_HOOK_TRUST_KEY,
     AuthService,
     SecretService,
+)
+from autoanime_v3.services.settings import (
+    OPENAI_API_KEY_SECRET,
+    OPENAI_BASE_URL_KEY,
+    OPENAI_ENABLED_KEY,
+    OPENAI_MODEL_KEY,
+    OPENAI_TIMEOUT_KEY,
 )
 from autoanime_v3.services.automation import ScheduleService, WebhookSourceService
 from autoanime_v3.services.backups import BackupService
@@ -120,6 +133,11 @@ class LoginBody(BaseModel):
 class RootBody(BaseModel):
     kind: str
     path: str
+
+
+class FolderPickBody(BaseModel):
+    initial_directory: Optional[str] = None
+    title: str = "选择文件夹"
 
 
 class ProfileBody(BaseModel):
@@ -363,6 +381,26 @@ def create_app(settings, services=None):
     @app.post("/api/v1/roots", status_code=201)
     def create_root(body: RootBody, user=Depends(changing_user)):
         return serialize(services.roots.create_root(body.kind, Path(body.path)))
+
+    @app.post("/api/v1/system/pick-folder")
+    def pick_folder(body: FolderPickBody, request: Request, user=Depends(changing_user)):
+        """Open a native Windows folder dialog on the server host.
+
+        Restricted to loopback clients so a LAN browser cannot pop dialogs on
+        the machine running AutoAnimeWeb.
+        """
+        host = client_host(request)
+        if not is_loopback_host(host):
+            raise LocalOnlyError("Folder picker is only available on the local machine")
+        try:
+            selected = pick_folder_windows(body.initial_directory, body.title)
+        except Exception as error:  # pragma: no cover - OS dialog surface
+            from autoanime_v3.security.folder_dialog import FolderDialogError as NativeFolderDialogError
+
+            if isinstance(error, NativeFolderDialogError):
+                raise FolderDialogError(error.message, {"code": error.code}) from error
+            raise FolderDialogError(str(error) or "Folder dialog failed") from error
+        return {"path": selected, "cancelled": selected is None}
 
     @app.patch("/api/v1/roots/{root_id}")
     def patch_root(root_id: int, body: RootPatchBody, user=Depends(changing_user)):
@@ -617,6 +655,10 @@ def create_app(settings, services=None):
     def settings_view(user=Depends(current_user)):
         items = services.settings.list()
         by_key = {item["key"]: item for item in items}
+        secret_rows = rows(
+            "SELECT key, provider, updated_at, 1 AS configured FROM secret_settings ORDER BY key"
+        )
+        openai_key_configured = any(row["key"] == OPENAI_API_KEY_SECRET for row in secret_rows)
         return {
             "items": items,
             "security": {
@@ -633,7 +675,8 @@ def create_app(settings, services=None):
                     by_key.get(LOCAL_HOOK_TRUST_KEY, {}).get("revision", 0)
                 ),
             },
-            "secrets": rows("SELECT key, provider, updated_at, 1 AS configured FROM secret_settings ORDER BY key"),
+            "openai": services.settings.openai_public_view(openai_key_configured),
+            "secrets": secret_rows,
         }
 
     @app.patch("/api/v1/settings")
@@ -642,6 +685,14 @@ def create_app(settings, services=None):
 
     @app.put("/api/v1/settings/secrets/{key}")
     def update_secret(key: str, body: SecretBody, user=Depends(changing_user)):
+        allowed = {"metadata.api_key", OPENAI_API_KEY_SECRET}
+        if key not in allowed:
+            from autoanime_v3.domain.errors import ValidationError
+
+            raise ValidationError(
+                "Unsupported secret key",
+                {"key": key, "allowed": sorted(allowed)},
+            )
         return serialize(services.secrets.set_secret(key, body.value))
 
     @app.post("/api/v1/backups", status_code=201)

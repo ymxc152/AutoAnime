@@ -50,6 +50,36 @@ class ApiSecurityTests(unittest.TestCase):
         self.assertNotIn("never-return-this-value", serialized)
         self.assertNotIn("ciphertext", serialized)
 
+    def test_openai_settings_and_secret_never_echo_key(self):
+        settings = self.client.get("/api/v1/settings").json()
+        self.assertIn("openai", settings)
+        self.assertFalse(settings["openai"]["enabled"])
+        self.assertFalse(settings["openai"]["api_key_configured"])
+        enabled = self.client.patch(
+            "/api/v1/settings",
+            json={"key": "openai.enabled", "value": True, "revision": settings["openai"]["enabled_revision"]},
+            headers={"X-CSRF-Token": self.csrf},
+        )
+        self.assertEqual(enabled.status_code, 200)
+        secret = self.client.put(
+            "/api/v1/settings/secrets/openai.api_key",
+            json={"value": "sk-test-should-not-echo"},
+            headers={"X-CSRF-Token": self.csrf},
+        )
+        self.assertEqual(secret.status_code, 200)
+        self.assertNotIn("sk-test-should-not-echo", secret.text)
+        latest = self.client.get("/api/v1/settings").json()["openai"]
+        self.assertTrue(latest["enabled"])
+        self.assertTrue(latest["api_key_configured"])
+        self.assertTrue(latest["ready"])
+        self.assertNotIn("sk-test", str(latest))
+        rejected = self.client.put(
+            "/api/v1/settings/secrets/not.allowed",
+            json={"value": "x"},
+            headers={"X-CSRF-Token": self.csrf},
+        )
+        self.assertEqual(rejected.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

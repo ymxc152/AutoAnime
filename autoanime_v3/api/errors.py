@@ -4,6 +4,7 @@ from autoanime_v3.domain.errors import (
     AuthenticationError,
     BootstrapLocalOnlyError,
     CsrfValidationError,
+    FolderDialogError,
     LocalOnlyError,
     LoginThrottledError,
     NotFoundError,
@@ -20,6 +21,6 @@ def status_for_error(error):
         return 404
     if isinstance(error, LoginThrottledError):
         return 429
-    if isinstance(error, ValidationError):
+    if isinstance(error, (ValidationError, FolderDialogError)):
         return 422
     return 409

@@ -58,6 +58,10 @@ class LocalOnlyError(DomainError):
     code = "local_only"
 
 
+class FolderDialogError(DomainError):
+    code = "folder_dialog_failed"
+
+
 class LeaseConflictError(DomainError):
     code = "lease_conflict"
 

@@ -158,3 +158,37 @@ class ApiTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["code"], "bootstrap_local_only")
+
+
+    def test_pick_folder_requires_loopback(self):
+        csrf = self.login_default()
+        with TestClient(self.app, client=("203.0.113.10", 50000)) as remote:
+            login = remote.post(
+                "/api/v1/auth/login",
+                json={"username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD},
+            )
+            self.assertEqual(login.status_code, 200)
+            remote_csrf = login.json()["csrf_token"]
+            response = remote.post(
+                "/api/v1/system/pick-folder",
+                json={"title": "x"},
+                headers={"X-CSRF-Token": remote_csrf},
+            )
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json()["code"], "local_only")
+        from autoanime_v3.api import app as app_module
+
+        original = app_module.pick_folder_windows
+        app_module.pick_folder_windows = lambda initial_directory=None, title="select": r"C:\Anime\Source"
+        try:
+            ok = self.client.post(
+                "/api/v1/system/pick-folder",
+                json={"title": "source"},
+                headers={"X-CSRF-Token": csrf},
+            )
+            self.assertEqual(ok.status_code, 200)
+            self.assertEqual(ok.json()["path"], r"C:\Anime\Source")
+            self.assertFalse(ok.json()["cancelled"])
+        finally:
+            app_module.pick_folder_windows = original
+
