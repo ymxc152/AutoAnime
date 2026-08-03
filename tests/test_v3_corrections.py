@@ -214,5 +214,41 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertTrue(any("测试番B" in str(p) for p in files))
 
 
+    def test_backfill_library_creates_shows_for_prior_executions(self):
+        from autoanime_v3.services.corrections import CorrectionService
+
+        self.organize({"测试番A S01E01.mkv": b"payload-A" * 200})
+        # Simulate a pre-shows-sync execution: library entities are missing.
+        connection = sqlite3.connect(str(self.database))
+        try:
+            connection.execute("DELETE FROM media_assignments")
+            connection.execute("DELETE FROM episodes")
+            connection.execute("DELETE FROM seasons")
+            connection.execute("DELETE FROM shows")
+            connection.commit()
+        finally:
+            connection.close()
+
+        created = CorrectionService(self.database, self.operation_dir).backfill_library()
+
+        self.assertEqual(created, 1)
+        self.assertIsNotNone(self.show_row("测试番A"))
+        connection = sqlite3.connect(str(self.database))
+        try:
+            assignments = connection.execute(
+                "SELECT COUNT(*) FROM media_assignments"
+            ).fetchone()[0]
+            location = connection.execute(
+                "SELECT path FROM file_locations WHERE role = 'library' AND state = 'present'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(assignments, 1)
+        self.assertIn("测试番A", location)
+        # Idempotent: a second pass creates nothing new.
+        again = CorrectionService(self.database, self.operation_dir).backfill_library()
+        self.assertEqual(again, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -263,6 +263,13 @@ def create_app(settings, services=None):
     services = services or ServiceContainer.build(settings)
     # Ensure default security settings exist as soon as the app starts.
     services.settings.ensure_defaults()
+    # Backfill library entries for executions that completed before shows-sync
+    # existed, so already-organized anime shows up on the 资料库 page.
+    try:
+        services.corrections.backfill_library()
+    except Exception:
+        # Backfill is best-effort; a failure must never block startup.
+        pass
     app = FastAPI(title="AutoAnime Web Console", version="3.0")
     app.state.settings = settings
     app.state.services = services

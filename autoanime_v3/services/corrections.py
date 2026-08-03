@@ -672,6 +672,128 @@ class CorrectionService:
                 connection.execute("DELETE FROM seasons WHERE id = ? AND show_id = ?", (sid, show["id"]))
         connection.execute("DELETE FROM shows WHERE id = ?", (show["id"],))
 
+    # -------------------------------------------------------------- backfill
+
+    def backfill_library(self):
+        """Populate shows/seasons/episodes/media_assignments for executions that
+        completed before shows-sync existed. Idempotent: media that already has
+        an assignment is skipped."""
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """
+                SELECT pi.id, pi.destination_root_id, pi.destination_relative_path,
+                       pi.identification_snapshot_json, sr.path AS root_path
+                FROM plan_items pi
+                JOIN storage_roots sr ON sr.id = pi.destination_root_id
+                WHERE pi.execution_status = 'completed'
+                ORDER BY pi.id
+                """
+            ).fetchall()
+            created = 0
+            for row in rows:
+                snapshot = json.loads(row["identification_snapshot_json"])
+                title = str(snapshot.get("title") or "").strip()
+                if not title:
+                    continue
+                destination = Path(row["root_path"]) / row["destination_relative_path"]
+                media_file_id = connection.execute(
+                    """
+                    SELECT media_file_id FROM file_locations
+                    WHERE path = ? AND role = 'library' AND state = 'present'
+                    LIMIT 1
+                    """,
+                    (str(destination),),
+                ).fetchone()
+                if media_file_id is None:
+                    continue
+                media_file_id = int(media_file_id["media_file_id"])
+                if connection.execute(
+                    "SELECT 1 FROM media_assignments WHERE media_file_id = ? LIMIT 1",
+                    (media_file_id,),
+                ).fetchone() is not None:
+                    continue
+                self._upsert_entities(
+                    connection,
+                    media_file_id,
+                    title,
+                    snapshot.get("season"),
+                    snapshot.get("episode"),
+                    bool(snapshot.get("is_movie", False)),
+                    str(snapshot.get("release_tag") or "") or None,
+                )
+                created += 1
+            connection.commit()
+            return created
+        finally:
+            connection.close()
+
+    def _upsert_entities(self, connection, media_file_id, title, season, episode,
+                         is_movie, release_tag):
+        key = alias_key(title)
+        show = connection.execute(
+            "SELECT id FROM shows WHERE normalized_key = ?", (key,)
+        ).fetchone()
+        if show is None:
+            cursor = connection.execute(
+                "INSERT INTO shows(canonical_title, normalized_key, status) VALUES (?, ?, 'active')",
+                (title, key),
+            )
+            show_id = int(cursor.lastrowid)
+        else:
+            show_id = int(show["id"])
+        if is_movie:
+            season_number = 1
+            episode_number = "MOVIE"
+            episode_type = "movie"
+        else:
+            season_number = int(season) if season is not None else 1
+            episode_number = str(episode) if episode is not None else str(season_number)
+            episode_type = "episode"
+        sort_value = int(episode_number) if episode_number.isdigit() else 0
+        season_row = connection.execute(
+            "SELECT id FROM seasons WHERE show_id = ? AND season_number = ?",
+            (show_id, season_number),
+        ).fetchone()
+        if season_row is None:
+            cursor = connection.execute(
+                "INSERT INTO seasons(show_id, season_number) VALUES (?, ?)",
+                (show_id, season_number),
+            )
+            season_id = int(cursor.lastrowid)
+        else:
+            season_id = int(season_row["id"])
+        episode_row = connection.execute(
+            """
+            SELECT id FROM episodes
+            WHERE season_id = ? AND episode_number = ? AND episode_type = ?
+            """,
+            (season_id, episode_number, episode_type),
+        ).fetchone()
+        if episode_row is None:
+            cursor = connection.execute(
+                """
+                INSERT INTO episodes(season_id, episode_number, episode_type, sort_value)
+                VALUES (?, ?, ?, ?)
+                """,
+                (season_id, episode_number, episode_type, sort_value),
+            )
+            episode_id = int(cursor.lastrowid)
+        else:
+            episode_id = int(episode_row["id"])
+        connection.execute(
+            """
+            INSERT INTO media_assignments(
+                media_file_id, show_id, season_id, episode_id, release_label, source
+            ) VALUES (?, ?, ?, ?, ?, 'plan_execution')
+            ON CONFLICT(media_file_id) DO UPDATE SET
+                show_id = excluded.show_id, season_id = excluded.season_id,
+                episode_id = excluded.episode_id, release_label = excluded.release_label,
+                source = excluded.source, updated_at = CURRENT_TIMESTAMP
+            """,
+            (media_file_id, show_id, season_id, episode_id, release_tag),
+        )
+
     # -------------------------------------------------------------- rollback
 
     def rollback(self, batch_id):
