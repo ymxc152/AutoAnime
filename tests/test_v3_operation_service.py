@@ -136,6 +136,89 @@ class OperationServiceTests(unittest.TestCase):
         self.assertEqual(batch.items[0].status, "applied")
         self.assertEqual(batch.items[0].compensation_status, "failed")
 
+    def test_execute_approved_subset_leaves_undecided_items_for_later(self):
+        from autoanime_v3.services.operations import OperationService
+        from autoanime_v3.services.plans import PlanService
+        from autoanime_v3.services.scans import ScanService
+
+        for index, name in enumerate(("测试番 S01E01.mkv", "测试番 S01E02.mkv")):
+            (self.source / name).write_bytes(("file-%s" % index).encode("utf-8") * 1024)
+        outcome = ScanService(self.database).run(self.profile.id)
+        plans = PlanService(self.database)
+        draft = plans.get(outcome.plan_id)
+        approved = draft.items[0]
+        plans.decide_item(draft.id, approved.id, "approved")
+
+        plan, job = plans.enqueue_approved_execution(draft.id)
+        self.assertEqual(job.job_type, "execute_plan")
+        batch = OperationService(self.database).execute(draft.id)
+
+        self.assertEqual(len(batch.items), 1)
+        self.assertEqual(batch.items[0].source_path, approved.source_path)
+        self.assertTrue(Path(approved.destination_path).exists())
+        self.assertFalse(Path(draft.items[1].destination_path).exists())
+        # The undecided item keeps the plan open for more approvals later.
+        self.assertEqual(plans.get(draft.id).status, "ready")
+
+    def test_wholesale_approval_marks_undecided_items_approved(self):
+        from autoanime_v3.services.plans import PlanService
+        from autoanime_v3.services.scans import ScanService
+
+        (self.source / "测试番 S01E01.mkv").write_bytes(b"real-file" * 1024)
+        outcome = ScanService(self.database).run(self.profile.id)
+        plans = PlanService(self.database)
+        approved = plans.approve(outcome.plan_id)
+        self.assertEqual(approved.items[0].decision, "approved")
+
+    def test_successful_execution_syncs_show_and_season_entries(self):
+        import sqlite3
+
+        from autoanime_v3.services.operations import OperationService
+        from autoanime_v3.services.plans import PlanService
+        from autoanime_v3.services.scans import ScanService
+
+        (self.source / "测试番 S01E01.mkv").write_bytes(b"real-file" * 1024)
+        outcome = ScanService(self.database).run(self.profile.id)
+        plans = PlanService(self.database)
+        approved = plans.approve(outcome.plan_id)
+        OperationService(self.database).execute(approved.id)
+
+        connection = sqlite3.connect(str(self.database))
+        try:
+            show = connection.execute(
+                "SELECT * FROM shows WHERE canonical_title = '测试番'"
+            ).fetchone()
+            self.assertIsNotNone(show)
+            show_id = show[0]
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM seasons WHERE show_id = ?", (show_id,)
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM episodes
+                    WHERE season_id = (SELECT id FROM seasons WHERE show_id = ?)
+                    """,
+                    (show_id,),
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) FROM media_assignments
+                    WHERE show_id = ? AND source = 'plan_execution'
+                    """,
+                    (show_id,),
+                ).fetchone()[0],
+                1,
+            )
+        finally:
+            connection.close()
+
 
 if __name__ == "__main__":
     unittest.main()

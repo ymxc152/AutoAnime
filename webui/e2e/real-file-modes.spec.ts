@@ -79,8 +79,8 @@ test('link, copy and move execute and rollback with a real media payload', async
     execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', validationRoot!, '--once'], { cwd: resolve('..') })
     await page.getByRole('link', { name: '待处理', exact: true }).click()
     await page.getByRole('button', { name: /整理计划/ }).click()
-    await expect(page.getByRole('button', { name: '批准并开始整理' })).toBeEnabled()
-    await page.getByRole('button', { name: '批准并开始整理' }).click()
+    await expect(page.getByRole('button', { name: '全部批准并整理' })).toBeEnabled()
+    await page.getByRole('button', { name: '全部批准并整理' }).click()
     execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', validationRoot!, '--once'], { cwd: resolve('..') })
 
     await page.goto('/activity?tab=operations')

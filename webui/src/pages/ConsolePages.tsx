@@ -168,11 +168,12 @@ function PlansPanel({ active = true }: { active?: boolean }) {
   const list = useList('plans', '/plans', 5000, active); const [id, setId] = useState<number | null>(null); const [manualSelection, setManualSelection] = useState(false); const detail = useQuery({ queryKey: ['plan', id], queryFn: () => api.get<PlanDetail>(`/plans/${id}`), enabled: active && id !== null }); const client = useQueryClient()
   const refresh = async () => { await client.invalidateQueries({ queryKey: ['plans'] }); await detail.refetch() }
   const approve = useMutation({ mutationFn: () => api.post(`/plans/${id}/approve`), onSuccess: refresh })
+  const approveApproved = useMutation({ mutationFn: () => api.post(`/plans/${id}/execute-approved`), onSuccess: refresh })
   const approveItem = useMutation({ mutationFn: (itemId: number) => api.post(`/plans/${id}/items/${itemId}/approve`), onSuccess: refresh })
   const rejectItem = useMutation({ mutationFn: ({ itemId, reason }: { itemId: number; reason: string }) => api.post(`/plans/${id}/items/${itemId}/reject`, { reason }), onSuccess: refresh })
   useEffect(() => { const newest = list.data?.items[0]?.id; if (!manualSelection && newest && id !== Number(newest)) setId(Number(newest)) }, [id, list.data?.items, manualSelection])
   if (!list.data?.items.length) return <Empty title="暂无整理计划" description="完成一次扫描后，系统会先生成文件整理预览。" cta={{ label: '开始扫描', to: '/scan' }} />
-  return <><div className="plan-tabs">{list.data.items.map(plan => <button key={plan.id} className={id === plan.id ? 'active' : ''} onClick={() => { setManualSelection(true); setId(plan.id) }}>#{plan.id} <Status value={plan.status} /></button>)}</div>{detail.data ? <PlanWorkspace plan={detail.data} onApprove={() => approve.mutate()} onApproveItem={itemId => approveItem.mutate(itemId)} onRejectItem={(itemId, reason) => rejectItem.mutate({ itemId, reason })} /> : <Empty>正在载入计划…</Empty>}</>
+  return <><div className="plan-tabs">{list.data.items.map(plan => <button key={plan.id} className={id === plan.id ? 'active' : ''} onClick={() => { setManualSelection(true); setId(plan.id) }}>#{plan.id} <Status value={plan.status} /></button>)}</div>{detail.data ? <PlanWorkspace plan={detail.data} onApprove={() => approve.mutate()} onApproveApproved={() => approveApproved.mutate()} onApproveItem={itemId => approveItem.mutate(itemId)} onRejectItem={(itemId, reason) => rejectItem.mutate({ itemId, reason })} /> : <Empty>正在载入计划…</Empty>}</>
 }
 
 export function InboxPage() {

@@ -328,6 +328,15 @@ class PlanService:
             ).rowcount
             if updated != 1:
                 raise PlanConflictError("Plan cannot be approved in its current state")
+            # Wholesale approval marks every undecided item as approved so the
+            # whole plan runs; explicitly rejected items stay excluded.
+            uow.connection.execute(
+                """
+                UPDATE plan_items SET decision = 'approved', decided_by = ?, decided_at = ?
+                WHERE plan_id = ? AND decision IS NULL AND action NOT IN ('skip', 'conflict')
+                """,
+                (user_id, approved_at, plan_id),
+            )
             job = repository.find_by_idempotency_key(idempotency_key)
             if job is None:
                 job = repository.enqueue(
@@ -340,6 +349,65 @@ class PlanService:
             approved = PlanRepository(uow.connection).get(plan_id)
             uow.commit()
             return approved, job
+
+    def enqueue_approved_execution(self, plan_id, user_id=None, current_rule_version=None):
+        """Enqueue execution of only the currently approved items, leaving
+        undecided and rejected items untouched for later decisions."""
+        idempotency_key = "execute-plan:%s" % plan_id
+        with SqliteUnitOfWork(self.database_path) as uow:
+            plan = PlanRepository(uow.connection).get(plan_id)
+            if plan is None:
+                raise NotFoundError("Plan does not exist", {"id": plan_id})
+            profile = uow.connection.execute(
+                "SELECT revision, execution_policy FROM scan_profiles WHERE id = ?",
+                (plan.profile_id,),
+            ).fetchone()
+            if profile is None or int(profile["revision"]) != plan.profile_revision:
+                raise StalePlanError("Scan profile changed after plan creation")
+            if str(profile["execution_policy"]) == "dry_run":
+                raise ExecutionPolicyError(
+                    "Dry-run plans cannot be approved or executed",
+                    {"plan_id": plan_id, "execution_policy": "dry_run"},
+                )
+            if self._rule_version_is_stale(
+                plan,
+                current_rule_version=current_rule_version,
+                connection=uow.connection,
+            ):
+                uow.connection.execute(
+                    "UPDATE plans SET status = 'stale' WHERE id = ? AND status IN ('draft', 'ready', 'approved')",
+                    (plan_id,),
+                )
+                uow.commit()
+                raise StalePlanError("Active rules changed after plan creation")
+            if plan.status not in {"draft", "ready", "approved"}:
+                raise PlanConflictError("Plan cannot be executed in its current state")
+            repository = JobRepository(uow.connection)
+            existing_job = repository.find_by_idempotency_key(idempotency_key)
+            if existing_job is not None and existing_job.status in {"queued", "running", "leased"}:
+                uow.commit()
+                return plan, existing_job
+            approved_count = int(
+                uow.connection.execute(
+                    """
+                    SELECT COUNT(*) FROM plan_items
+                    WHERE plan_id = ? AND decision = 'approved'
+                      AND execution_status = 'pending' AND action NOT IN ('skip', 'conflict')
+                    """,
+                    (plan_id,),
+                ).fetchone()[0]
+            )
+            if approved_count == 0:
+                raise PlanConflictError("Plan has no approved items to organize")
+            job = repository.enqueue(
+                "execute_plan",
+                {"plan_id": plan_id},
+                idempotency_key,
+                0,
+                datetime.now(timezone.utc).isoformat(),
+            )
+            uow.commit()
+            return plan, job
 
     def auto_apply_safe(self, plan_id, current_rule_version=None):
         plan, profile, open_reviews = self._approval_context(plan_id)

@@ -24,6 +24,7 @@ from autoanime_v3.executor import (
     rollback as rollback_log,
 )
 from autoanime_v3.models import MediaFile as CoreMediaFile, PlanEntry, Resolution
+from autoanime_v3.normalize import alias_key
 from autoanime_v3.path_safety import validate_library_destination
 from autoanime_v3.services.plans import PlanService
 from autoanime_v3.services.rules import RuleService
@@ -57,7 +58,8 @@ class OperationService:
         try:
             return connection.execute(
                 """
-                SELECT pi.*, fl.path AS source_path, sr.path AS root_path, p.status AS plan_status
+                SELECT pi.*, fl.path AS source_path, fl.media_file_id AS media_file_id,
+                       sr.path AS root_path, p.status AS plan_status
                 FROM plan_items pi
                 JOIN plans p ON p.id = pi.plan_id
                 JOIN file_locations fl ON fl.id = pi.source_location_id
@@ -70,15 +72,16 @@ class OperationService:
             connection.close()
 
     def _preflight(self, plan, rows):
-        if plan.status != "approved":
-            raise InvalidStateError("Only an approved plan can be executed")
+        if plan.status not in {"draft", "ready", "approved"}:
+            raise InvalidStateError("Only an open plan can be executed")
+        if any(row["action"] == "conflict" for row in rows):
+            raise PlanConflictError("Plan still contains conflicts")
         prepared = []
         for row in rows:
-            if row["decision"] == "rejected":
+            # Only explicitly approved items run; undecided and rejected items wait.
+            if row["decision"] != "approved":
                 continue
-            if row["execution_status"] == "conflict" or row["action"] in {"conflict", "skip"}:
-                if row["action"] == "conflict":
-                    raise PlanConflictError("Plan still contains conflicts")
+            if row["execution_status"] != "pending" or row["action"] in {"conflict", "skip"}:
                 continue
             source = Path(row["source_path"])
             destination = Path(row["root_path"]) / row["destination_relative_path"]
@@ -150,6 +153,7 @@ class OperationService:
 
     def _claim_execution(self, plan_id, requested_by, rows):
         stale = False
+        prior_status = None
         batch_id = None
         with SqliteUnitOfWork(self.database_path) as uow:
             context = uow.connection.execute(
@@ -179,21 +183,25 @@ class OperationService:
                 stale = True
             elif int(context["revision"]) != int(context["profile_revision"]):
                 uow.connection.execute(
-                    "UPDATE plans SET status = 'stale' WHERE id = ? AND status = 'approved'",
+                    "UPDATE plans SET status = 'stale' WHERE id = ? AND status IN ('draft', 'ready', 'approved')",
                     (plan_id,),
                 )
                 uow.commit()
                 stale = True
             else:
-                if str(context["status"]) != "approved":
-                    raise InvalidStateError("Only an approved plan can be executed")
+                if str(context["status"]) not in {"draft", "ready", "approved"}:
+                    raise InvalidStateError("Only an open plan can be executed")
                 for row in rows:
                     validate_library_destination(
                         Path(row["root_path"]),
                         Path(row["root_path"]) / row["destination_relative_path"],
                     )
+                prior_status = str(context["status"])
                 claimed = uow.connection.execute(
-                    "UPDATE plans SET status = 'executing' WHERE id = ? AND status = 'approved'",
+                    """
+                    UPDATE plans SET status = 'executing'
+                    WHERE id = ? AND status IN ('draft', 'ready', 'approved')
+                    """,
                     (plan_id,),
                 ).rowcount
                 if claimed != 1:
@@ -209,11 +217,25 @@ class OperationService:
                 uow.commit()
         if stale:
             raise StalePlanError("Plan inputs changed after plan approval")
-        return batch_id
+        return batch_id, prior_status
 
     def execute(self, plan_id, requested_by=None):
         plan = PlanService(self.database_path).get(plan_id)
         self._validate_rule_version(plan)
+        connection = connect_sqlite(self.database_path)
+        connection.row_factory = __import__("sqlite3").Row
+        try:
+            policy = connection.execute(
+                "SELECT execution_policy FROM scan_profiles WHERE id = ?",
+                (plan.profile_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        if policy is not None and str(policy["execution_policy"]) == "dry_run":
+            raise ExecutionPolicyError(
+                "Dry-run plans cannot be approved or executed",
+                {"plan_id": plan_id, "execution_policy": "dry_run"},
+            )
         rows = self._load_execution_rows(plan_id)
         prepared = self._preflight(plan, rows)
         if not prepared:
@@ -222,7 +244,7 @@ class OperationService:
         if len(modes) != 1:
             raise InvalidStateError("One operation batch must use a single file mode")
         mode = next(iter(modes))
-        batch_id = self._claim_execution(plan_id, requested_by, rows)
+        batch_id, prior_status = self._claim_execution(plan_id, requested_by, rows)
         try:
             with ResolutionCache(self.cache_path) as cache:
                 log_path = execute_plan(
@@ -373,10 +395,22 @@ class OperationService:
                 """,
                 (json.dumps(summary, ensure_ascii=False), now_iso(), batch_id),
             )
-            uow.connection.execute(
-                "UPDATE plans SET status = 'completed' WHERE id = ? AND status = 'executing'",
+            remaining = uow.connection.execute(
+                """
+                SELECT COUNT(*) FROM plan_items
+                WHERE plan_id = ? AND action NOT IN ('skip', 'conflict')
+                  AND execution_status != 'completed' AND decision IS NOT 'rejected'
+                """,
                 (plan_id,),
+            ).fetchone()[0]
+            # A partial run stays open so more items can be approved later;
+            # a fully resolved plan is finished.
+            final_status = "completed" if int(remaining) == 0 else prior_status
+            uow.connection.execute(
+                "UPDATE plans SET status = ? WHERE id = ? AND status = 'executing'",
+                (final_status, plan_id),
             )
+            self._sync_library_entities(uow.connection, prepared)
             uow.commit()
         facts = LibraryRepository(self.database_path)
         for row, entry in prepared:
@@ -384,6 +418,82 @@ class OperationService:
                 int(row["destination_root_id"]), entry.destination, "library", "video"
             )
         return self.get(batch_id)
+
+    def _sync_library_entities(self, connection, rows_entries):
+        """Create shows/seasons/episodes and media assignments in the Web database
+        so the library page shows anime immediately after a successful execution."""
+        for row, entry in rows_entries:
+            resolution = entry.resolution
+            title = (resolution.canonical_title or "").strip()
+            media_file_id = row["media_file_id"]
+            if not title or not media_file_id:
+                continue
+            key = alias_key(title)
+            show = connection.execute(
+                "SELECT id FROM shows WHERE normalized_key = ?", (key,)
+            ).fetchone()
+            if show is None:
+                cursor = connection.execute(
+                    "INSERT INTO shows(canonical_title, normalized_key, status) VALUES (?, ?, 'active')",
+                    (title, key),
+                )
+                show_id = int(cursor.lastrowid)
+            else:
+                show_id = int(show["id"])
+            if resolution.is_movie:
+                season_number = 1
+                episode_number = "MOVIE"
+                episode_type = "movie"
+            else:
+                season_number = int(resolution.season) if resolution.season is not None else 1
+                episode_number = str(resolution.episode) if resolution.episode is not None else str(season_number)
+                episode_type = "episode"
+            sort_value = int(episode_number) if episode_number.isdigit() else 0
+            season = connection.execute(
+                "SELECT id FROM seasons WHERE show_id = ? AND season_number = ?",
+                (show_id, season_number),
+            ).fetchone()
+            if season is None:
+                cursor = connection.execute(
+                    "INSERT INTO seasons(show_id, season_number) VALUES (?, ?)",
+                    (show_id, season_number),
+                )
+                season_id = int(cursor.lastrowid)
+            else:
+                season_id = int(season["id"])
+            episode = connection.execute(
+                """
+                SELECT id FROM episodes
+                WHERE season_id = ? AND episode_number = ? AND episode_type = ?
+                """,
+                (season_id, episode_number, episode_type),
+            ).fetchone()
+            if episode is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO episodes(season_id, episode_number, episode_type, sort_value)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (season_id, episode_number, episode_type, sort_value),
+                )
+                episode_id = int(cursor.lastrowid)
+            else:
+                episode_id = int(episode["id"])
+            connection.execute(
+                """
+                INSERT INTO media_assignments(
+                    media_file_id, show_id, season_id, episode_id, release_label, source
+                ) VALUES (?, ?, ?, ?, ?, 'plan_execution')
+                ON CONFLICT(media_file_id) DO UPDATE SET
+                    show_id = excluded.show_id,
+                    season_id = excluded.season_id,
+                    episode_id = excluded.episode_id,
+                    release_label = excluded.release_label,
+                    source = excluded.source,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (media_file_id, show_id, season_id, episode_id, resolution.release_tag or None),
+            )
 
     def rollback(self, batch_id, requested_by=None):
         self.validate_rollback(batch_id)

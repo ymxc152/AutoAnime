@@ -80,9 +80,11 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   await page.getByRole('link', { name: '扫描', exact: true }).click()
   await page.getByLabel('目录路径').fill(source)
   await page.getByRole('button', { name: '添加' }).click()
+  await expect(page.getByText(source).first()).toBeVisible()
   await page.getByLabel('目录类型').selectOption('library')
   await page.getByLabel('目录路径').fill(library)
   await page.getByRole('button', { name: '添加' }).click()
+  await expect(page.getByText(library).first()).toBeVisible()
   await page.getByLabel('配置名称').fill('E2E 真实整理')
   await page.getByLabel('下载源').selectOption({ label: source })
   await page.getByLabel('媒体库').selectOption({ label: library })
@@ -100,9 +102,11 @@ test('login, configure, scan, approve, execute and rollback real file', async ({
   await expect(page.getByText('扫描完成')).toBeVisible()
   await page.getByRole('link', { name: '待处理', exact: true }).click()
   await page.getByRole('button', { name: /整理计划/ }).click()
-  await expect(page.getByRole('button', { name: '批准并开始整理' })).toBeEnabled()
-  await page.getByRole('button', { name: '批准并开始整理' }).click()
+  await page.getByRole('button', { name: '全部批准并整理' }).click()
   execFileSync(python, [resolve('../AutoAnimeWorker.py'), '--data-dir', root, '--once'])
+
+  await page.goto('/library')
+  await expect(page.getByText('测试番').first()).toBeVisible()
 
   await page.goto('/activity?tab=operations')
   await expect(page.getByText('已完成').first()).toBeVisible()
@@ -151,6 +155,12 @@ test('library title correction is previewed before approval', async ({ page }) =
     { cwd: resolve('..') },
   )
   await loginExisting(page)
+  // The subprocess commit must be visible to the running server before asserting on the UI.
+  await expect.poll(async () => {
+    const response = await page.request.get('/api/v1/library/shows')
+    const body = await response.json() as { items?: Array<{ canonical_title: string }> }
+    return body.items?.some(item => item.canonical_title === '待纠正标题') ?? false
+  }).toBe(true)
   await page.getByRole('link', { name: '资料库', exact: true }).click()
   await page.getByText('待纠正标题').click()
   await page.getByLabel('新规范标题').fill('已纠正标题')

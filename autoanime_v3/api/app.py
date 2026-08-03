@@ -586,6 +586,11 @@ def create_app(settings, services=None):
         plan, job = services.plans.approve_and_enqueue(plan_id, user.id)
         return {"plan": serialize(plan), "job": serialize(job)}
 
+    @app.post("/api/v1/plans/{plan_id}/execute-approved")
+    def execute_approved_plan(plan_id: int, user=Depends(changing_user)):
+        plan, job = services.plans.enqueue_approved_execution(plan_id, user.id)
+        return {"plan": serialize(plan), "job": serialize(job)}
+
     @app.get("/api/v1/operations")
     def list_operations(user=Depends(current_user)):
         return {"items": rows("SELECT * FROM operation_batches ORDER BY id DESC LIMIT 100"), "next_cursor": None}
