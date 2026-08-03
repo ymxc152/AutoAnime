@@ -43,6 +43,7 @@ from autoanime_v3.services.settings import (
 from autoanime_v3.services.automation import ScheduleService, WebhookSourceService
 from autoanime_v3.services.backups import BackupService
 from autoanime_v3.services.changes import ChangeService
+from autoanime_v3.services.corrections import CorrectionService
 from autoanime_v3.services.jobs import JobService
 from autoanime_v3.services.operations import OperationService
 from autoanime_v3.services.plans import PlanService
@@ -89,6 +90,7 @@ class ServiceContainer:
     operations: OperationService
     rules: RuleService
     changes: ChangeService
+    corrections: "CorrectionService"
     settings: SettingsService
     backups: BackupService
     schedules: ScheduleService
@@ -118,6 +120,9 @@ class ServiceContainer:
             operations=OperationService(settings.database_path, settings.data_directory / "operations"),
             rules=RuleService(settings.database_path),
             changes=ChangeService(settings.database_path),
+            corrections=CorrectionService(
+                settings.database_path, settings.data_directory / "operations"
+            ),
             settings=app_settings,
             backups=BackupService(settings.database_path, settings.data_directory / "backups"),
             schedules=ScheduleService(settings.database_path),
@@ -635,9 +640,17 @@ def create_app(settings, services=None):
             )
         )
 
+    @app.post("/api/v1/library/changes/impact")
+    def library_change_impact(body: LibraryChangeBody, user=Depends(current_user)):
+        return serialize(
+            services.corrections.impact(
+                body.show_id, str(body.patch.get("canonical_title") or "")
+            )
+        )
+
     @app.post("/api/v1/library/changes/{request_id}/approve")
     def approve_library_change(request_id: int, user=Depends(changing_user)):
-        return serialize(services.changes.apply(request_id))
+        return serialize(services.corrections.apply(request_id, user.id))
 
     @app.get("/api/v1/rules")
     def rules(user=Depends(current_user)):

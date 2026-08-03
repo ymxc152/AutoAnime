@@ -496,6 +496,16 @@ class OperationService:
             )
 
     def rollback(self, batch_id, requested_by=None):
+        connection = connect_sqlite(self.database_path)
+        connection.row_factory = __import__("sqlite3").Row
+        try:
+            original = connection.execute(
+                "SELECT kind, status FROM operation_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+        finally:
+            connection.close()
+        if original is not None and str(original["kind"]) == "correction":
+            return self._rollback_correction(batch_id, requested_by)
         self.validate_rollback(batch_id)
         original, rollback_id, log_path = self._claim_rollback(batch_id, requested_by)
         try:
@@ -548,6 +558,71 @@ class OperationService:
                         item.source_path,
                     ),
                 )
+            uow.commit()
+        return self.get(rollback_id)
+
+    def _rollback_correction(self, batch_id, requested_by=None):
+        with SqliteUnitOfWork(self.database_path) as uow:
+            original = uow.connection.execute(
+                "SELECT * FROM operation_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+            if original is None:
+                raise NotFoundError("Operation batch does not exist", {"id": batch_id})
+            if str(original["status"]) != "completed":
+                raise InvalidStateError("Only a completed correction can be rolled back")
+            existing = uow.connection.execute(
+                """
+                SELECT 1 FROM operation_batches
+                WHERE parent_batch_id = ? AND kind = 'manual_rollback'
+                LIMIT 1
+                """,
+                (batch_id,),
+            ).fetchone()
+            if existing is not None:
+                raise InvalidStateError("Operation batch rollback was already claimed")
+            cursor = uow.connection.execute(
+                """
+                INSERT INTO operation_batches(
+                    plan_id, parent_batch_id, kind, status, requested_by, summary_json
+                ) VALUES (NULL, ?, 'manual_rollback', 'running', ?, '{}')
+                """,
+                (batch_id, requested_by),
+            )
+            rollback_id = int(cursor.lastrowid)
+            uow.commit()
+        try:
+            from autoanime_v3.services.corrections import CorrectionService
+
+            CorrectionService(self.database_path, self.operation_dir).rollback(batch_id)
+        except Exception as error:
+            with SqliteUnitOfWork(self.database_path) as uow:
+                uow.connection.execute(
+                    """
+                    UPDATE operation_batches
+                    SET status = 'failed', summary_json = ?, finished_at = ?
+                    WHERE id = ? AND status = 'running'
+                    """,
+                    (
+                        json.dumps({"error": str(error)}, ensure_ascii=False),
+                        now_iso(),
+                        rollback_id,
+                    ),
+                )
+                uow.commit()
+            raise
+        with SqliteUnitOfWork(self.database_path) as uow:
+            uow.connection.execute(
+                """
+                UPDATE operation_batches
+                SET status = 'completed', summary_json = ?, finished_at = ?
+                WHERE id = ? AND status = 'running'
+                """,
+                (
+                    json.dumps({"restored": True, "correction_batch": batch_id}, ensure_ascii=False),
+                    now_iso(),
+                    rollback_id,
+                ),
+            )
             uow.commit()
         return self.get(rollback_id)
 
