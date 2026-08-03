@@ -236,6 +236,9 @@ class ScanService:
                             scan_run_id, media_file_id, review_type, status,
                             dedup_key, payload_json
                         ) VALUES (?, ?, 'low_confidence', 'open', ?, ?)
+                        ON CONFLICT(dedup_key) WHERE status = 'open' DO UPDATE SET
+                            payload_json = excluded.payload_json,
+                            updated_at = CURRENT_TIMESTAMP
                         """,
                         (
                             run_id,

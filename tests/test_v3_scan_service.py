@@ -67,6 +67,35 @@ class ScanServiceTests(unittest.TestCase):
         self.assertEqual(counts["review_items"], 1)
         self.assertEqual(counts["plans"], 1)
 
+    def test_rescanning_an_unidentified_file_updates_review_instead_of_conflicting(self):
+        # An English-named file that cannot be resolved locally lands in review.
+        (self.source / "BLACK TORCH - 01.mkv").write_bytes(b"needs-review")
+
+        from autoanime_v3.services.scans import ScanService
+
+        service = ScanService(self.database)
+        first = service.run(self.profile.id)
+        self.assertEqual(first.review_count, 1)
+
+        # Re-scanning the same file (e.g. after enabling AI or adding aliases)
+        # must refresh the existing open review instead of violating the
+        # partial unique index on open review_items.dedup_key.
+        second = service.run(self.profile.id)
+        self.assertEqual(second.review_count, 1)
+
+        connection = sqlite3.connect(str(self.database))
+        try:
+            open_reviews = connection.execute(
+                "SELECT COUNT(*) FROM review_items WHERE status = 'open'"
+            ).fetchone()[0]
+            payload_rows = connection.execute(
+                "SELECT COUNT(DISTINCT payload_json) FROM review_items WHERE status = 'open'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(open_reviews, 1)
+        self.assertEqual(payload_rows, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
