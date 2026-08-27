@@ -1,5 +1,7 @@
 # AutoAnime v3 Real-Test and Publish Implementation Plan
 
+> **Historical (2026-07-22).** Not current architecture or a runbook. Current product is Web + Worker, Schema v5, Agent 工作台. See `docs/00_文档总目录.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Verify the simplified v3-only repository with real F-drive samples, review the full diff, then publish it on a new branch.

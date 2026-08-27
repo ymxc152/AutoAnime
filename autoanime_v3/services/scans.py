@@ -5,18 +5,13 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from autoanime_v3.cache import ResolutionCache
-from autoanime_v3.catalog import TitleCatalog
-from autoanime_v3.config import AppConfig
 from autoanime_v3.db.migrations import run_migrations
 from autoanime_v3.db.repositories.library import LibraryRepository
 from autoanime_v3.db.repositories.scans import ScanRepository
 from autoanime_v3.db.uow import SqliteUnitOfWork
 from autoanime_v3.domain.entities import ScanOutcome
 from autoanime_v3.domain.errors import NotFoundError, PathOutsideRootError
-from autoanime_v3.planner import build_plan
-from autoanime_v3.resolver import Resolver
-from autoanime_v3.scanner import scan_media
+from autoanime_v3.organize import analyze_with_agent
 from autoanime_v3.services.roots import normalize_windows_path, path_is_within
 from autoanime_v3.services.rules import RuleService
 
@@ -45,6 +40,8 @@ class CoreScanAdapter:
             OPENAI_ENABLED_KEY,
             OPENAI_MODEL_KEY,
             OPENAI_TIMEOUT_KEY,
+            PARSE_AGENT_MODE_KEY,
+            REVIEW_ENABLED_KEY,
             SettingsService,
         )
 
@@ -52,6 +49,8 @@ class CoreScanAdapter:
         enabled = bool(settings.get(OPENAI_ENABLED_KEY, False))
         base_url = str(settings.get(OPENAI_BASE_URL_KEY, "https://api.openai.com") or "https://api.openai.com")
         model = str(settings.get(OPENAI_MODEL_KEY, "gpt-4.1-mini") or "gpt-4.1-mini")
+        review_enabled = bool(settings.get(REVIEW_ENABLED_KEY, False))
+        parse_mode = str(settings.get(PARSE_AGENT_MODE_KEY, "off") or "off")
         try:
             timeout = max(5, int(settings.get(OPENAI_TIMEOUT_KEY, 30) or 30))
         except (TypeError, ValueError):
@@ -77,33 +76,61 @@ class CoreScanAdapter:
             "openai_model": model,
             "openai_api_key": api_key,
             "openai_timeout": timeout,
+            "review_enabled": bool(review_enabled and enabled and api_key),
+            "parse_agent_mode": parse_mode if parse_mode in {"off", "uncertain", "all"} else "off",
         }
 
-    def analyze_scoped(self, source, library, min_confidence, scope_paths):
-        active_rules = RuleService(self.database_path).get_active()
-        catalog = TitleCatalog.load(
-            self.alias_file,
-            overlay=active_rules.document,
+    def _metadata_config(self):
+        """Load optional metadata-site (bangumi/TMDB) settings from the Web database."""
+        from autoanime_v3.security.secrets import DpapiSecretStore, EncryptedFileSecretStore
+        from autoanime_v3.services.auth import SecretService
+        from autoanime_v3.services.settings import (
+            METADATA_BANGUMI_ENABLED_KEY,
+            METADATA_TIMEOUT_KEY,
+            METADATA_TMDB_API_KEY_SECRET,
+            METADATA_TMDB_ENABLED_KEY,
+            SettingsService,
         )
-        openai = self._openai_config()
-        config = AppConfig(
-            database_path=self.cache_path,
-            alias_file=self.alias_file,
-            min_confidence=min_confidence,
-            output_root=library,
-            openai_enabled=openai["openai_enabled"],
-            openai_base_url=openai["openai_base_url"],
-            openai_model=openai["openai_model"],
-            openai_api_key=openai["openai_api_key"],
-            openai_timeout=openai["openai_timeout"],
+
+        settings = SettingsService(self.database_path)
+        bangumi = bool(settings.get(METADATA_BANGUMI_ENABLED_KEY, False))
+        tmdb = bool(settings.get(METADATA_TMDB_ENABLED_KEY, False))
+        try:
+            timeout = max(2, int(settings.get(METADATA_TIMEOUT_KEY, 12) or 12))
+        except (TypeError, ValueError):
+            timeout = 12
+        api_key = ""
+        if tmdb:
+            try:
+                store = DpapiSecretStore()
+            except OSError:
+                candidates = [
+                    self.database_path.parent / "secret-store",
+                    self.database_path.parent.parent / "secret-store",
+                ]
+                store_path = next((path for path in candidates if path.exists()), candidates[0])
+                store = EncryptedFileSecretStore(store_path)
+            api_key = (
+                SecretService(self.database_path, store).reveal_for_integration(METADATA_TMDB_API_KEY_SECRET)
+                or ""
+            )
+        return {
+            "metadata_bangumi_enabled": bool(bangumi),
+            "metadata_tmdb_enabled": bool(tmdb and api_key),
+            "metadata_tmdb_api_key": api_key,
+            "metadata_timeout": timeout,
+        }
+
+    def analyze_scoped(self, source, library, min_confidence, scope_paths, on_unit=None, on_started=None):
+        return analyze_with_agent(
+            self,
+            source,
+            library,
+            min_confidence,
+            scope_paths,
+            on_unit=on_unit,
+            on_started=on_started,
         )
-        with ResolutionCache(self.cache_path) as cache:
-            resolver = Resolver(catalog, config, cache)
-            resolutions = [
-                resolver.resolve(media)
-                for media in scan_media(source, library, scope_paths=scope_paths)
-            ]
-        return active_rules.content_hash, resolutions, build_plan(resolutions, library)
 
 
 class ScanService:
@@ -112,7 +139,7 @@ class ScanService:
         run_migrations(self.database_path)
         self.adapter = adapter or CoreScanAdapter(self.database_path)
 
-    def run(self, profile_id, scope_paths=None):
+    def run(self, profile_id, scope_paths=None, on_unit=None, on_started=None):
         with SqliteUnitOfWork(self.database_path) as uow:
             profile = uow.connection.execute(
                 "SELECT * FROM scan_profiles WHERE id = ?", (profile_id,)
@@ -138,13 +165,27 @@ class ScanService:
                     {"root": str(source), "target": str(target)},
                 )
             normalized_scope.append(target)
-        if normalized_scope and hasattr(self.adapter, "analyze_scoped"):
-            rule_version, resolutions, entries = self.adapter.analyze_scoped(
-                source,
-                library,
-                int(profile["min_confidence"]) / 100.0,
-                normalized_scope,
-            )
+        analyze_kwargs = {}
+        if on_unit is not None:
+            analyze_kwargs["on_unit"] = on_unit
+        if on_started is not None:
+            analyze_kwargs["on_started"] = on_started
+        if hasattr(self.adapter, "analyze_scoped"):
+            try:
+                rule_version, resolutions, entries = self.adapter.analyze_scoped(
+                    source,
+                    library,
+                    int(profile["min_confidence"]) / 100.0,
+                    normalized_scope or None,
+                    **analyze_kwargs,
+                )
+            except TypeError:
+                rule_version, resolutions, entries = self.adapter.analyze_scoped(
+                    source,
+                    library,
+                    int(profile["min_confidence"]) / 100.0,
+                    normalized_scope or None,
+                )
         else:
             rule_version, resolutions, entries = self.adapter.analyze(
                 source, library, int(profile["min_confidence"]) / 100.0
@@ -204,7 +245,7 @@ class ScanService:
                         resolution.canonical_title,
                         resolution.season,
                         str(resolution.episode) if resolution.episode is not None else None,
-                        "movie" if resolution.is_movie else "episode",
+                        resolution.media_type or ("movie" if resolution.is_movie else "episode"),
                         int(round(resolution.confidence * 100)),
                         int(resolution.accepted),
                     ),

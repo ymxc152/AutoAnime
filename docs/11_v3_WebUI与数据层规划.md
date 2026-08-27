@@ -1,16 +1,30 @@
-# AutoAnime v3：WebUI 与数据层完整设计
+# AutoAnime v3：WebUI 与数据层
 
 ## 1. 文档状态
 
-- 目标版本：AutoAnime v3 Web Console
-- 目标平台：Windows 常驻服务器、局域网访问
-- 用户模型：单管理员账号
-- 产品范围：完整接管扫描、识别、审核、计划、执行、回滚、资料库查看与修改
-- 存储范围：Windows 本地磁盘，多下载根、多媒体库根、逐目录策略
-- 自动化范围：手动扫描、定时扫描、目录监听、通用下载器回调
-- 外部集成：qBittorrent、Transmission、Emby、Jellyfin、Plex 首期只保留适配器边界
-- 元数据范围：文件识别事实是核心；海报、简介和放送状态只作附加展示
-- 数据迁移：采用新 Schema；提供可回滚迁移工具，不要求保留现有生产数据
+本文描述 **已经落地** 的 Web 控制台（Agent 工作台），不是待办设计稿。细节以 `autoanime_v3/db/schema.py`、`autoanime_v3/api/app.py`、`webui/src/` 为准。
+
+- 版本：v3 Web Console，`SCHEMA_VERSION = 5`
+- 平台：Windows 常驻；控制台 `http://127.0.0.1:8765`，静态资源来自 `webui/dist`
+- 用户模型：单管理员；本机 loopback 默认可免密
+- 产品形态：**Agent 工作台**（识别进度 + 记忆 + 绑定纠错会话），不是全局聊天首页
+- 存储：多下载根、多媒体库根；**每个扫描方案只绑一对源/库**
+- 无人值守：默认 qB `POST /api/v1/hooks/downloaders/{token}`；备选定时扫描；Worker 必须常驻
+- 元数据：识别事实是核心；Bangumi/TMDB 海报简介只作附加展示
+- 备份：可 `POST/GET /api/v1/backups` 做 SQLite 在线备份；**没有 restore HTTP API**
+
+### 1.1 已实现的关键行为
+
+1. `OrganizeAgent`（`autoanime_v3/organize.py`）编排 `group_work_units` → `resolve_unit` → `remember_resolution` → `planner.build_plan`。
+2. 生产识别走 IdentifyAgent 批量，不在扫描中逐文件 aiparse。
+3. `learned_show_memory` 覆盖层；纠正与审核应用会写记忆。`TitleCatalog.version` 变化使旧识别失效。
+4. 向导创建 webhook/定时时 PATCH 该方案为 `execution_policy=auto_apply_safe`、`mode=link`。`CreateProfile` 默认仍是 `review_all`。
+5. `auto_apply_safe` 条件：计划 `ready`、无 open review、无 conflict、`risk_level in {normal}`；通过后入队 `execute_plan`。
+6. 纠错会话表 `agent_sessions` / `agent_messages`；未关闭会话对 `(kind, target_id)` 有部分唯一索引 `uq_agent_sessions_open`。
+7. 提案允许：`title`、`media_type`、`season`、`episode`、`release_tag`、`aliases`、`reason`（`title_zh` 映射为 `title`）。禁止：`destination` / `dest` / `path` / `action` / `source` / `destination_path` / `destination_relative_path`。
+8. `review` 应用 → `ReviewService.resolve`；`library` 应用 → `ChangeService.preview_show_change` + `CorrectionService.apply`。
+9. Webhook body `extra=ignore`，路径别名：`path` / `paths` / `save_path` / `savePath` / `content_path` / `contentPath` / `folder`。路径必须在绑定源根内，否则 409（`PathOutsideRootError` 未单独映射，走默认 409）。
+10. 导航：首页 / 扫描 / 待处理 / 运行记录 / 资料库 / 设置。待处理分页：需要确认 / 整理计划。锁定文案：`手动扫描`、`需要确认`、`全部批准并整理`、`开始整理已批准项`、`创建 Webhook`、`创建扫描方案`、`保存配置`。
 
 ## 2. 目标与非目标
 
@@ -85,65 +99,29 @@ flowchart LR
 
 ```text
 autoanime_v3/
-├─ scanner.py
-├─ parser.py
-├─ resolver.py
-├─ planner.py
-├─ executor.py
-├─ domain/
-│  ├─ enums.py
-│  ├─ entities.py
-│  ├─ commands.py
-│  └─ events.py
-├─ db/
-│  ├─ engine.py
-│  ├─ schema.py
-│  ├─ migrations.py
-│  └─ repositories/
+├─ organize.py / identify.py / identify_units.py / resolver.py
+├─ scanner.py / parser.py / planner.py / executor.py / catalog.py
+├─ aiparse.py / review.py / metadata.py
+├─ db/schema.py          SCHEMA_VERSION 5
+├─ db/migrations.py
 ├─ services/
-│  ├─ auth.py
-│  ├─ library.py
-│  ├─ profiles.py
-│  ├─ scans.py
-│  ├─ reviews.py
-│  ├─ plans.py
-│  ├─ operations.py
-│  ├─ rules.py
-│  ├─ settings.py
-│  └─ backups.py
-├─ jobs/
-│  ├─ queue.py
-│  ├─ worker.py
-│  ├─ scheduler.py
-│  └─ watcher.py
-├─ api/
-│  ├─ app.py
-│  ├─ dependencies.py
-│  ├─ errors.py
-│  └─ routes/
-├─ security/
-│  ├─ passwords.py
-│  ├─ sessions.py
-│  ├─ csrf.py
-│  └─ secrets.py
-└─ integrations/
-   ├─ metadata.py
-   ├─ downloaders.py
-   └─ media_servers.py
+│  ├─ scans.py / plans.py / operations.py / reviews.py
+│  ├─ profiles.py / roots.py / webhooks.py / automation.py
+│  ├─ agent_chat.py / memory.py / corrections.py / changes.py
+│  ├─ settings.py / auth.py / backups.py（create/list；无 HTTP restore）
+│  └─ metadata.py / rules.py / jobs.py
+├─ api/app.py            /api/v1 单文件路由
+├─ jobs/queue.py / worker.py
+└─ integrations/metadata.py
 
-webui/
-├─ src/
-│  ├─ app/
-│  ├─ api/
-│  ├─ components/
-│  ├─ features/
-│  ├─ pages/
-│  ├─ styles/
-│  └─ test/
-└─ vite.config.ts
+webui/src/
+├─ app/App.tsx
+├─ features/agent / automation / dashboard / …
+├─ pages/ConsolePages.tsx
+└─ api/client.ts
 ```
 
-现有 `library_service.py` 拆入按业务能力组织的 service。现有 `repository.py` 不再只是 `ResolutionCache` 别名，而是明确的 repository 接口集合。
+CLI 仍保留 `library_service.py` / `repository.py` 作为一次性整理入口的边界；Web 不经这些模块改文件。
 
 ## 5. 数据层
 
@@ -373,6 +351,20 @@ API 只返回是否已配置和更新时间，不返回密文或明文。
 - 激活版本生成内容哈希并进入识别决策指纹。
 - 支持导入、导出、校验、激活和回退。
 - 激活新规则不会自动移动已有文件，只会让相关识别结果失效并产生重新审核任务。
+- 扫描过程 **不会** 调用 `RuleService.activate` 来持久化学到的别名。
+
+### 5.9 记忆与纠错会话（Schema v5）
+
+#### `learned_show_memory`
+
+- 主键 `alias_key`，`canonical_title`，`source`（如 `identify_batch` / `review` / `library_correction`），`confidence`，`updated_at`。
+- 作为 Identify / Organize 的覆盖层；`GET /api/v1/memory` 只读列出。
+
+#### `agent_sessions` / `agent_messages`
+
+- `kind ∈ {review, library}`，`status ∈ {open, applied, abandoned}`。
+- 部分唯一索引：`uq_agent_sessions_open ON (kind, target_id) WHERE status = 'open'`。
+- 消息 `role ∈ {user, assistant, system}`，提案在 `proposal_json`，服务端剥离路径类字段。
 
 ## 6. 状态机
 
@@ -466,113 +458,110 @@ Watcher 必须：
 
 统一前缀 `/api/v1`，同源部署，不开放任意 CORS。
 
+进程级：
+
 ```text
-POST   /auth/login
-POST   /auth/logout
-GET    /auth/me
+GET    /health/live
+GET    /health/ready          # {status, schema_version}
+```
+
+`/api/v1`（与 `autoanime_v3/api/app.py` 对齐，省略未实现项）：
+
+```text
+POST   /auth/login | /auth/logout | /auth/bootstrap | /auth/local-session
+GET    /auth/me | /auth/bootstrap-status
 
 GET    /dashboard
-GET    /system/health
-GET    /system/version
+GET    /memory
 
-GET    /roots
-POST   /roots
-PATCH  /roots/{id}
+POST   /agent/sessions
+GET    /agent/sessions/{id}
+POST   /agent/sessions/{id}/messages
+POST   /agent/sessions/{id}/apply
+POST   /agent/sessions/{id}/abandon
+
+GET|POST /roots
 POST   /roots/{id}/validate
+PATCH|DELETE /roots/{id}
+POST   /system/pick-folder
 
-GET    /profiles
-POST   /profiles
-PATCH  /profiles/{id}
+GET|POST /profiles
+PATCH|DELETE /profiles/{id}     # PATCH 可改绑 source_root_id / library_root_id，revision+1
+
+GET|POST /schedules
+PATCH|DELETE /schedules/{id}
+GET|POST /webhook-sources
+PATCH|DELETE /webhook-sources/{id}
+POST   /hooks/downloaders/{token}   # 202；body 路径别名见 1.1
+POST   /hooks/local                 # 本机信任开关 hooks.local_trust
 
 POST   /jobs/scans
-GET    /jobs
-GET    /jobs/{id}
+GET    /jobs | /jobs/{id} | /jobs/{id}/events
 POST   /jobs/{id}/cancel
-POST   /jobs/{id}/retry
-GET    /jobs/{id}/events
 
 GET    /reviews
 POST   /reviews/{id}/resolve
-POST   /reviews/bulk-resolve
 
-GET    /plans
-GET    /plans/{id}
+GET    /plans | /plans/{id}
+DELETE /plans/{id}
 POST   /plans/{id}/approve
-POST   /plans/{id}/cancel
+POST   /plans/{id}/execute-approved
+POST   /plans/{id}/items/{item_id}/approve|reject
 
-GET    /library/shows
-GET    /library/shows/{id}
-GET    /library/files/{id}
-POST   /library/changes/preview
+GET    /operations | /operations/{id}
+POST   /operations/{id}/rollback    # 202 入队 rollback_operation
+
+GET    /library/shows | /library/shows/{id} | /library/files/{id}
+POST   /library/changes/preview | /library/changes/impact
 POST   /library/changes/{id}/approve
 
-GET    /operations
-GET    /operations/{id}
-POST   /operations/{id}/rollback
-
-GET    /rules
-POST   /rules/revisions
-POST   /rules/revisions/{id}/validate
-POST   /rules/revisions/{id}/activate
-POST   /rules/revisions/{id}/rollback
-
-GET    /settings
-PATCH  /settings
+GET|POST /rules
+POST   /rules/revisions …
+GET|PATCH /settings
 PUT    /settings/secrets/{key}
 
 POST   /backups
 GET    /backups
-POST   /backups/{id}/restore
+# 没有 POST /backups/{id}/restore
+```
 
-POST   /hooks/downloaders/{token}
+qBittorrent「Torrent 完成时运行」模板（工作台会生成，`%F` 为完成路径）：
+
+```text
+curl -s -X POST "http://127.0.0.1:8765/api/v1/hooks/downloaders/<token>" -H "Content-Type: application/json" -d "{\"path\": \"%F\"}"
 ```
 
 约束：
 
-- 写请求支持 `Idempotency-Key`。
-- 更新使用 ETag/`If-Match` 或明确修订号。
-- 列表使用游标分页。
-- 错误统一返回 `code`、`message`、`details`、`trace_id`。
-- SSE 支持 `Last-Event-ID` 断线续传。
+- 写请求使用 CSRF；配置类更新带 `revision` 乐观并发。
+- 列表当前实现为全量 `items` + `next_cursor: null`，不是完整游标协议。
+- 错误返回 `code`、`message`、`details`。
+- Job events 可供 SSE 续读。
 
 ## 11. WebUI 页面
 
 ### 11.1 视觉系统
 
-- 浅色 Windows 运维控制台。
-- 真实白色或中性近白背景、石墨色文本、深靛蓝主色。
-- 琥珀色表示待处理，红色表示危险或失败。
-- 侧边栏约 220px，主体使用开放式列表、表格和信息轨。
-- 避免嵌套卡片、bento grid、玻璃拟态、霓虹和装饰性动画。
-- 8px 圆角；阴影只用于弹窗、抽屉等覆盖层。
-- 使用一致的细线 outline 图标。
+深色运维工作台：识别进度、发行文件夹和记忆条数是主角，而不是浅色九宫格仪表盘。
 
 ### 11.2 导航
 
-- 概览
-- 扫描配置
-- 任务中心
-- 审核队列
-- 整理计划
-- 资料库
-- 规则与别名
-- 操作历史
-- 系统设置
+- 首页（skill 卡：未配目录 → 配目录；未配触发 → 配置 qB 通知 / 定时扫描；识别中 → 进度；待确认 → 问 Agent）
+- 扫描（多根目录 + 方案列表「源 path → 库 path」；编辑可改绑；`手动扫描`）
+- 待处理（`需要确认` / 整理计划；行内「问 Agent」打开纠错会话）
+- 运行记录（jobs / operations，回滚）
+- 资料库（搜索、标题纠正、问 Agent）
+- 设置（general / automation / advanced：AI、规则、记忆表、本机免密与 Hook 信任）
+
+规则、备份、原始 JSON 设置放在设置的高级页，不再占主导航。
 
 ### 11.3 关键页面
 
-- 首次启动：创建管理员、添加根目录、验证权限和卷、创建第一个 profile。
-- 概览：活动任务、待审核、冲突、失败、根目录健康和系统心跳。
-- 扫描配置：多根目录映射、模式、阈值、监听、定时和执行策略。
-- 任务中心：实时阶段、进度、当前文件、事件日志、取消和重试。
-- 审核队列：证据对比、人工字段、批量处理和人工锁。
-- 整理计划：文件级差异、冲突、预计大小、批准和执行状态。
-- 资料库：番剧、季度、剧集、多版本、所有文件位置、证据和附加元数据。
-- 规则与别名：草稿、校验、激活、回退和影响预览。
-- 操作历史：执行、自动回滚、手动回滚和人工恢复说明。
-- 系统设置：密码、密钥、备份、健康、日志和维护模式。
-
-桌面浏览器提供完整功能。移动端支持状态查看、简单审核和任务观察，复杂批量路径操作以桌面端为主。
+- 扫描方案：1 源 + 1 库；多源进同一库用多个方案。
+- 无人值守向导：创建 Webhook 或定时后自动把该方案改为硬链接 + 安全项自动执行。
+- 审核：证据源文件名 vs 识别名；纠错会话 dock。
+- 计划：可全部批准或按项批准/拒绝；`全部批准并整理` / `开始整理已批准项`。
+- 资料库纠正已真实改文件并合并误命名作品（预览 → 批准）。
 
 ## 12. 安全
 
@@ -589,35 +578,44 @@ POST   /hooks/downloaders/{token}
 
 ## 13. Windows 部署
 
-建议生产环境使用 Python 3.11 或更高版本。开发和迁移阶段的核心解析器继续保持可测试的 Python 3.8 兼容性，Web 服务依赖在独立环境中运行。
+生产运行需要 Python 3.11+。前端构建需要 Node.js 20+（本机可用 npm 或 pnpm）。
+
+双击根目录 `start-autoanime.bat`（实现见 `scripts/autoanime.ps1`）：
+
+- 启动 **同一 `--data-dir` 的 Web + Worker**
+- 等待 `GET /health/live`
+- PID 写在 `%DataDir%\run\web.pid` 与 `worker.pid`，停止只杀这一实例
+- 前端 dist 仅在源码比产物新时重建；`-NoBuild` 跳过
+- 端口占用会报 PID，不会把 e2e 残留进程当成“已经启动”
 
 ```text
 C:\ProgramData\AutoAnime\
-├─ config\
 ├─ data\library.sqlite3
-├─ backups\
 ├─ logs\
 ├─ operations\
-└─ metadata-cache\
+├─ run\web.pid
+└─ run\worker.pid
 ```
 
-服务：
+自定义：
 
-- `AutoAnimeWeb`
-- `AutoAnimeWorker`
-- 可选 `Caddy`
+```powershell
+.\start-autoanime.bat -DataDir "D:\AutoAnimeData" -Port 8765 -NoBuild
+.\status-autoanime.bat
+.\stop-autoanime.bat
+.\stop-autoanime.bat -Force   # 结束所有 AutoAnimeWeb/Worker，含测试残留
+```
 
-使用 WinSW 注册服务并配置失败重启。前端构建产物由 FastAPI 静态托管。
+WinSW 模板在 `deploy/windows/`。生产建议 Web 只绑 `127.0.0.1`，用 Caddy 提供 HTTPS，不要加 `--insecure-http`。
 
-## 14. 备份、恢复和诊断
+隔离测试数据应放在如 `F:\test\…`，不要用测试去写生产 `C:\ProgramData\AutoAnime` 或用户的正式媒体库。
 
-- 使用 SQLite Online Backup API。
-- 默认保留 14 个日备份和 8 个周备份。
-- 恢复前进入维护模式并停止 Worker/Watcher。
-- 恢复后执行外键、Schema、目录和文件位置核对。
-- DPAPI 密文跨机器恢复后要求重新录入密钥。
-- 提供数据库完整性检查、孤儿 staging 扫描和文件位置重新核对。
-- 数据库备份不等同于媒体文件备份，UI 必须明确提示。
+## 14. 备份和诊断
+
+- `BackupService.create` 使用 SQLite Online Backup API；API 可创建和列出。
+- `BackupService.restore` 存在于服务层且要求 maintenance_mode，**未挂 HTTP**。不要文档化一键恢复按钮。
+- DPAPI 密文不能跨机器直接用。
+- 数据库备份 ≠ 媒体文件备份。
 
 ## 15. 日志和可观测性
 
@@ -672,14 +670,6 @@ C:\ProgramData\AutoAnime\
 - 元数据不可用不阻塞整理。
 - 完整自动化测试、前端构建和浏览器核心流程通过。
 
-## 17. 实施顺序
+## 17. 实施状态
 
-1. Schema v3、迁移、repository 和领域状态机。
-2. 认证、配置、根目录和安全边界。
-3. 持久化任务、Worker、SSE 和手动扫描。
-4. 资料库、审核队列和不可变计划。
-5. 批准、文件执行、操作批次和回滚。
-6. 资料库修改和规则版本管理。
-7. 定时、Watcher 和通用 Webhook。
-8. 元数据、备份、诊断和 Windows 服务部署。
-9. 完整 WebUI、响应式、可访问性和视觉一致性验证。
+上列 1–9 已在当前分支落地（含 Schema v5、OrganizeAgent、纠错会话、qB 向导）。后续只改代码与测试，不再把本文当施工清单。历史计划见 `docs/superpowers/plans/`。

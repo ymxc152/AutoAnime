@@ -21,8 +21,10 @@ AutoAnime 是一个面向 Emby、Jellyfin、Plex 等媒体库的番剧识别与�
 AutoAnimeMv3.py              CLI 入口
 AutoAnimeWeb.py              Web/API 入口
 AutoAnimeWorker.py           持久任务 Worker 入口
-start-autoanime.bat          Windows 一键启动（根目录）
-stop-autoanime.bat           Windows 一键停止
+start-autoanime.bat          Windows 启动 Web + Worker
+stop-autoanime.bat           停止本数据目录实例
+status-autoanime.bat         查看 PID / 端口 / health
+scripts/autoanime.ps1        实际启动逻辑
 autoanime_v3/
 ├─ scanner.py                单文件/季度目录扫描
 ├─ parser.py                 文件名与季集解析
@@ -164,44 +166,60 @@ python AutoAnimeMv3.py --rollback ".\.autoanime-v3\operations\20260722_xxxxxx.js
 
 命令行的 `--output`、`--mode` 会覆盖配置文件。
 
-## Web 管理控制台
+## Web 管理控制台（Agent 工作台）
 
-WebUI 面向 Windows 常驻服务器和局域网内的单管理员使用。它可以查看并修改：
+日常整理走浏览器，不是 CLI。控制台是 **Agent 工作台**：识别与安全项自动执行由 Worker 完成；出错时在待处理/资料库打开绑定的多轮纠错会话。首页不是全局聊天。
 
-- 多下载根、多媒体库根及逐 profile 的 link/copy/move、审核策略、置信度、稳定窗口和目录监听开关；
-- 持久扫描任务、任务事件、审核项、不可变整理计划和操作批次；
-- 番剧资料、海报/简介/放送状态（可选元数据），以及带修订检查的人工标题纠正；
-- 版本化 JSON 规则的草稿、校验、激活和回退；
-- 普通 JSON 设置、DPAPI 加密密钥状态和 SQLite 在线备份；
-- 本机免密登录与本机 Hook 信任策略（可在系统设置中关闭）。
+- 导航：首页 / 扫描 / 待处理 / 运行记录 / 资料库 / 设置
+- 一个扫描方案 = 一个下载源 + 一个资料库；多源用多个方案。编辑方案可改绑，改绑会提高 `revision`。
+- 默认无人值守：qBittorrent 下载完成 webhook；备选是设置里的定时扫描。向导会把该方案改为 **硬链接 + 安全项自动执行**。
+- **Web 与 Worker 必须同时运行**，且 `--data-dir` 相同。没有 Worker，扫描/执行/回滚只会排队。
+- Agent 不发明目标路径；目的地只来自整理计划。纠错提案只能改标题/季集等识别字段。
+- 本机免密登录与本机 Hook 信任可在设置中关闭。密钥只显示是否已配置。
 
 ### Windows 一键启动
 
-打开项目文件夹后，根目录即可看到：
-
 | 文件 | 作用 |
 |------|------|
-| `start-autoanime.bat` | 启动 Web + Worker |
-| `stop-autoanime.bat` | 停止服务 |
+| `start-autoanime.bat` | 启动 Web + Worker，等到 `/health/live` |
+| `stop-autoanime.bat` | 只停这一数据目录的实例（不误杀 e2e） |
+| `status-autoanime.bat` | PID、端口、健康检查 |
 
-默认：
+默认：控制台 `http://127.0.0.1:8765`，数据 `C:\ProgramData\AutoAnime`，日志 `logs\`，PID `run\web.pid` / `run\worker.pid`。
 
-- 控制台：`http://127.0.0.1:8765`
-- 数据目录：`C:\ProgramData\AutoAnime`
-- 日志：`C:\ProgramData\AutoAnime\logs\`
+```powershell
+# 双击 start-autoanime.bat，或：
+.\start-autoanime.bat
+.\start-autoanime.bat -NoBuild
+.\start-autoanime.bat -DataDir "D:\AutoAnimeData" -Port 8765
+.\status-autoanime.bat
+.\stop-autoanime.bat
+.\stop-autoanime.bat -Force    # 结束全部 AutoAnimeWeb/Worker
+```
 
+前端只在 `webui/src` 比 `webui/dist` 新时重建。端口被别的进程占用会报 PID，而不会静默跳过。
+
+### 无人值守（qB 完成通知）
+
+1. 添加下载源和媒体库，创建扫描方案。
+2. 设置 → 自动化 → **创建 Webhook**（会切到 hardlink + `auto_apply_safe`）。
+3. 把工作台给出的 curl 填进 qB「Torrent 完成时运行」。`%F` 是完成路径。
+4. 路径必须落在该方案的下载源内。Linux 风格路径在 Windows 源上会 HTTP 409，没有自动盘符翻译。
+5. 高置信、无待确认、风险为 normal 时自动硬链接；否则进「需要确认」。点 **问 Agent** 纠错，确认后下次扫描会走记忆。
+
+本机也可用 `POST /api/v1/hooks/local`（需开启本机 Hook 信任）。
 
 ### 从旧版整理迁移到 Web 控制台
 
-仓库已收敛为单一 v3 实现（`AutoAnimeMv3.py` + Web/Worker）。没有自动导入旧 v2 数据库的迁移器；按下面步骤即可用 WebUI 接替日常整理：
+仓库已收敛为单一 v3 实现。没有自动导入旧 v2 数据库的迁移器。
 
 1. **停掉旧定时任务/脚本**，避免两边同时 move 同一目录。
-2. **启动 Web + Worker**（本机开发可开 `http://127.0.0.1:5173`，生产用 `start-autoanime.bat` → `http://127.0.0.1:8765`）。
-3. **扫描配置**：添加「下载源」与「媒体库」根目录（本机点 **浏览…** 弹出 Windows 选文件夹；局域网请粘贴路径）。
-4. **创建配置**：模式建议先 `link`（保种）或你原来的 `copy`/`move`；执行策略先用 **全部审核**，确认识别稳定后再改「安全项自动执行」。
-5. **手动扫描 → 审核队列 → 整理计划 → 批准执行**；需要回滚时在「操作历史」。
-6. **自动化（可选）**：系统设置里加定时扫描，或创建下载器 Webhook；本机也可用 `POST /api/v1/hooks/local`。
-7. CLI 仍可用同一套识别/执行引擎做一次性预览：`python AutoAnimeMv3.py "下载目录" --output "媒体库"`（加 `--apply` 才改文件）。Web 与 CLI 使用各自数据目录下的 SQLite，**不要假设自动共享缓存**。
+2. **启动 Web + Worker**（`start-autoanime.bat` → `http://127.0.0.1:8765`）。不要把 Vite 5173 当成生产控制台。
+3. **扫描页**：添加下载源与媒体库（本机 **浏览…**；局域网粘贴路径）。
+4. **创建扫描方案**：保种用 `link`。先「全部审核」，稳定后再靠 webhook 向导切到安全项自动执行。
+5. **手动扫描** → 待处理（需要确认 / 整理计划）→ **全部批准并整理**；回滚在运行记录。
+6. **自动化**：优先 qB webhook，其次定时扫描。
+7. CLI 仍可一次性预览：`python AutoAnimeMv3.py "下载目录" --output "媒体库"`（加 `--apply` 才改文件）。Web 与 CLI **不共享** SQLite。
 
 ### 本机选择文件夹
 
@@ -244,19 +262,14 @@ pnpm --dir webui install
 pnpm --dir webui build
 ```
 
-本机或可信局域网内直接使用 HTTP：
+本机或可信局域网内直接使用 HTTP（必须两个进程、同一数据目录）：
 
 ```powershell
-# 推荐：双击根目录 start-autoanime.bat
-# 或手动：
-# 终端 1：Web/API；--insecure-http 只用于没有 HTTPS 的可信内网
 python AutoAnimeWeb.py --data-dir C:\ProgramData\AutoAnime --insecure-http
-
-# 终端 2：Worker
 python AutoAnimeWorker.py --data-dir C:\ProgramData\AutoAnime
 ```
 
-访问 `http://127.0.0.1:8765` 即可进入控制台（默认本机免密）。局域网访问使用 `http://服务器IP:8765` 并输入默认账号密码。生产部署建议让 Web 仅监听 `127.0.0.1`，通过 `deploy/windows/Caddyfile.example` 提供局域网 HTTPS；Caddy 示例也会拒绝远程 bootstrap 请求，此时不要传 `--insecure-http`。WinSW 服务模板位于 `deploy/windows/`；应使用可访问下载目录和媒体库、但权限尽量小的专用 Windows 服务账号，并限制防火墙只允许可信子网访问。
+访问 `http://127.0.0.1:8765`（默认本机免密）。局域网用 `http://服务器IP:8765` 并输入账号密码。生产建议 Web 只监听 `127.0.0.1`，用 `deploy/windows/Caddyfile.example` 提供 HTTPS，不要传 `--insecure-http`。WinSW 模板在 `deploy/windows/`。
 
 完整安全和数据设计见 [docs/11_v3_WebUI与数据层规划.md](./docs/11_v3_WebUI与数据层规划.md)。密钥只返回“是否已配置”和更新时间，永不通过 API 或页面回显明文/密文。
 

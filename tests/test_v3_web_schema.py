@@ -71,6 +71,9 @@ class WebSchemaTests(unittest.TestCase):
             "change_requests",
             "rule_sets",
             "rule_revisions",
+            "learned_show_memory",
+            "agent_sessions",
+            "agent_messages",
             "backup_records",
         }
         self.assertTrue(expected.issubset(self.table_names()))
@@ -88,7 +91,7 @@ class WebSchemaTests(unittest.TestCase):
             ).fetchall()
         finally:
             connection.close()
-        self.assertEqual(rows, [(3,)])
+        self.assertEqual(rows, [(5,)])
 
     def test_migration_adds_plan_item_decision_columns_to_existing_table(self):
         migrations = self.migration_module()
@@ -135,6 +138,33 @@ class WebSchemaTests(unittest.TestCase):
         self.assertEqual(foreign_keys, 1)
         self.assertEqual(str(journal_mode).casefold(), "wal")
         self.assertGreaterEqual(int(busy_timeout), 5000)
+
+    def test_agent_session_tables_have_columns_and_unique_open_index(self):
+        migrations = self.migration_module()
+        migrations.run_migrations(self.database)
+        connection = sqlite3.connect(str(self.database))
+        try:
+            session_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(agent_sessions)").fetchall()
+            }
+            message_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(agent_messages)").fetchall()
+            }
+            index_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'uq_agent_sessions_open'"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertTrue(
+            {"id", "kind", "target_id", "status", "created_at", "updated_at"}.issubset(session_columns)
+        )
+        self.assertTrue(
+            {"id", "session_id", "role", "content", "proposal_json", "created_at"}.issubset(message_columns)
+        )
+        self.assertIsNotNone(index_sql)
+        self.assertIn("kind", index_sql[0])
+        self.assertIn("target_id", index_sql[0])
+        self.assertIn("status = 'open'", index_sql[0].replace('"', "'"))
 
 
 if __name__ == "__main__":

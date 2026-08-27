@@ -613,6 +613,76 @@ class ExecutionPolicyTests(unittest.TestCase):
         self.assertTrue(media.exists())
         self.assertFalse(any(path.is_file() for path in self.library.rglob("*")))
 
+    def test_auto_apply_safe_executes_hardlinks_and_rollback_keeps_source(self):
+        from autoanime_v3.services.operations import OperationService
+        from autoanime_v3.services.plans import PlanService
+
+        unused_profile, media, outcome = self.scan_safe_file("auto_apply_safe")
+        plan = PlanService(self.database).get(outcome.plan_id)
+        self.assertEqual(outcome.plan_status, "approved")
+        executable = [item for item in plan.items if item.action not in {"skip", "conflict"}]
+        self.assertTrue(executable)
+
+        operations = OperationService(self.database, self.root / "operations")
+        batch = operations.execute(outcome.plan_id)
+        destination = Path(executable[0].destination_path)
+
+        self.assertEqual(batch.status, "completed")
+        self.assertTrue(destination.is_file())
+        self.assertTrue(destination.resolve().is_relative_to(self.library.resolve()))
+        self.assertTrue(os.path.samefile(media, destination))
+        self.assertTrue(media.exists())
+
+        rollback = operations.rollback(batch.id)
+        self.assertEqual(rollback.status, "completed")
+        self.assertFalse(destination.exists())
+        self.assertTrue(media.exists())
+
+    def test_agent_chat_apply_auto_applies_then_execute_and_rollback(self):
+        from autoanime_v3.services.agent_chat import AgentChatService
+        from autoanime_v3.services.operations import OperationService
+        from autoanime_v3.services.plans import PlanService
+        from autoanime_v3.services.reviews import ReviewService
+        from autoanime_v3.services.scans import ScanService
+
+        profile = self.create_profile("auto_apply_safe")
+        media = self.source / "Unknown Show - 02.mkv"
+        media.write_bytes(b"needs-review" * 64)
+        ScanService(self.database).run(profile.id)
+        review = ReviewService(self.database).list_open()[0]
+        service = AgentChatService(
+            self.database,
+            chat_completion=lambda unused_messages: (
+                '{"title":"人工确认番剧","media_type":"episode","season":1,"episode":2,'
+                '"destination":"D:/invented/path","action":"move","reason":"人工判断"}'
+            ),
+        )
+        session = service.open_session("review", review.id)
+        updated = service.add_message(session["id"], "请确认这部番")
+        self.assertEqual(updated["proposal"]["title"], "人工确认番剧")
+        self.assertNotIn("destination", updated["proposal"])
+        self.assertNotIn("action", updated["proposal"])
+
+        applied = service.apply(session["id"])
+        self.assertTrue(applied["applied"])
+        self.assertNotEqual(ReviewService(self.database).get(review.id).status, "open")
+        plan = PlanService(self.database).get(applied["result"]["id"])
+        self.assertEqual(plan.status, "approved")
+        self.assertEqual(len(self.execute_jobs()), 1)
+        executable = [item for item in plan.items if item.action not in {"skip", "conflict"}]
+        self.assertTrue(executable)
+
+        operations = OperationService(self.database, self.root / "operations")
+        batch = operations.execute(plan.id)
+        destination = Path(executable[0].destination_path)
+        self.assertEqual(batch.status, "completed")
+        self.assertTrue(os.path.samefile(media, destination))
+        self.assertTrue(destination.resolve().is_relative_to(self.library.resolve()))
+
+        operations.rollback(batch.id)
+        self.assertFalse(destination.exists())
+        self.assertTrue(media.exists())
+
     def test_auto_apply_safe_leaves_a_conflicting_plan_unapproved_and_unqueued(self):
         from autoanime_v3.services.plans import PlanService
         from autoanime_v3.services.scans import CoreScanAdapter, ScanService

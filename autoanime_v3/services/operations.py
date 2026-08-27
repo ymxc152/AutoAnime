@@ -123,6 +123,7 @@ class OperationService:
                 release_tag=str(snapshot.get("release_tag") or ""),
                 fingerprint=str(snapshot.get("fingerprint") or ""),
                 media_type=str(snapshot.get("media_type") or ""),
+                manual_lock=bool(snapshot.get("manual_lock", False)),
             )
             prepared.append(
                 (
@@ -410,8 +411,15 @@ class OperationService:
                 "UPDATE plans SET status = ? WHERE id = ? AND status = 'executing'",
                 (final_status, plan_id),
             )
-            self._sync_library_entities(uow.connection, prepared)
+            touched = self._sync_library_entities(uow.connection, prepared)
             uow.commit()
+        if touched:
+            try:
+                from autoanime_v3.services.metadata import MetadataEnrichmentService
+
+                MetadataEnrichmentService(self.database_path).enrich_shows(touched)
+            except Exception:
+                pass  # 元数据补全失败绝不阻断文件整理
         facts = LibraryRepository(self.database_path)
         for row, entry in prepared:
             facts.observe_path(
@@ -421,7 +429,9 @@ class OperationService:
 
     def _sync_library_entities(self, connection, rows_entries):
         """Create shows/seasons/episodes and media assignments in the Web database
-        so the library page shows anime immediately after a successful execution."""
+        so the library page shows anime immediately after a successful execution.
+        Returns [(show_id, canonical_title)] for the optional metadata enrichment pass."""
+        touched = []
         for row, entry in rows_entries:
             resolution = entry.resolution
             title = (resolution.canonical_title or "").strip()
@@ -432,18 +442,30 @@ class OperationService:
             show = connection.execute(
                 "SELECT id FROM shows WHERE normalized_key = ?", (key,)
             ).fetchone()
+            locked = int(bool(getattr(resolution, "manual_lock", False)))
             if show is None:
                 cursor = connection.execute(
-                    "INSERT INTO shows(canonical_title, normalized_key, status) VALUES (?, ?, 'active')",
-                    (title, key),
+                    "INSERT INTO shows(canonical_title, normalized_key, status, title_locked) VALUES (?, ?, 'active', ?)",
+                    (title, key, locked),
                 )
                 show_id = int(cursor.lastrowid)
             else:
                 show_id = int(show["id"])
-            if resolution.is_movie:
+                if locked:
+                    connection.execute(
+                        "UPDATE shows SET title_locked = 1 WHERE id = ? AND title_locked = 0",
+                        (show_id,),
+                    )
+            touched.append((show_id, title))
+            media_type = resolution.media_type or ("movie" if resolution.is_movie else "episode")
+            if media_type == "movie" or resolution.is_movie:
                 season_number = 1
                 episode_number = "MOVIE"
                 episode_type = "movie"
+            elif media_type == "special":
+                season_number = int(resolution.season) if resolution.season is not None else 0
+                episode_number = str(resolution.episode) if resolution.episode is not None else "SP01"
+                episode_type = "special"
             else:
                 season_number = int(resolution.season) if resolution.season is not None else 1
                 episode_number = str(resolution.episode) if resolution.episode is not None else str(season_number)
@@ -494,6 +516,7 @@ class OperationService:
                 """,
                 (media_file_id, show_id, season_id, episode_id, resolution.release_tag or None),
             )
+        return touched
 
     def rollback(self, batch_id, requested_by=None):
         connection = connect_sqlite(self.database_path)

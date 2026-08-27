@@ -11,6 +11,10 @@ export function setCsrfToken(token: string | null) {
   else sessionStorage.removeItem(CSRF_KEY)
 }
 
+export function hasCsrfToken(): boolean {
+  return Boolean(sessionStorage.getItem(CSRF_KEY))
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
@@ -36,5 +40,6 @@ export const api = {
   post: <T,>(path: string, body?: unknown, headers?: HeadersInit) => apiFetch<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body), headers }),
   put: <T,>(path: string, body: unknown) => apiFetch<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   patch: <T,>(path: string, body: unknown) => apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  delete: <T,>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'DELETE', body: body === undefined ? undefined : JSON.stringify(body) }),
   text: (path: string) => apiText(path),
 }

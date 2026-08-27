@@ -1,5 +1,7 @@
 # AutoAnime WebUI Release Readiness Implementation Plan
 
+> **Historical (2026-08-02).** Release-readiness record, not the product spec. Later work added Agent 工作台, Schema v5, qB webhook aliases, and bound chat. Unchecked publish steps below are stale.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the current `codex/webui-full-console` working tree into a committed, security-audited, Windows-tested release candidate and publish it as a pull request to `main`.

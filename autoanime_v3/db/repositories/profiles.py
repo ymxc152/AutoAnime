@@ -52,6 +52,8 @@ class ProfileRepository:
     def update(self, profile_id, revision, patch):
         allowed = {
             "name",
+            "source_root_id",
+            "library_root_id",
             "mode",
             "execution_policy",
             "min_confidence",

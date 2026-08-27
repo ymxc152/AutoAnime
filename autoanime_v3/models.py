@@ -26,6 +26,7 @@ class ParsedName:
     title_candidates: Tuple[str, ...] = ()
     release_tag: str = ""
     warnings: Tuple[str, ...] = ()
+    ai_candidates: Tuple[Tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,8 @@ class Resolution:
     warnings: List[str] = field(default_factory=list)
     fingerprint: str = ""
     media_type: str = ""
+    candidates: List[Dict[str, Any]] = field(default_factory=list)
+    manual_lock: bool = False
 
     def identity_key(self) -> Tuple[Any, ...]:
         media_type = self.media_type or ("movie" if self.is_movie else "episode")
@@ -75,6 +78,8 @@ class Resolution:
             "warnings": list(self.warnings),
             "evidence": [e.__dict__ for e in self.evidence],
             "fingerprint": self.fingerprint,
+            "candidates": list(self.candidates),
+            "manual_lock": bool(self.manual_lock),
         }
 
 

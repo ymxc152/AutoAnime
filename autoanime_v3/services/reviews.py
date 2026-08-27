@@ -18,6 +18,7 @@ from autoanime_v3.domain.errors import (
 )
 from autoanime_v3.models import MediaFile as CoreMediaFile, Resolution
 from autoanime_v3.planner import build_plan
+from autoanime_v3.services.memory import ShowMemoryService
 from autoanime_v3.services.roots import normalize_windows_path
 
 
@@ -258,6 +259,7 @@ class ReviewService:
                 release_tag=normalized["release_tag"],
                 fingerprint="manual-review-%s" % review_id,
                 media_type=normalized["media_type"],
+                manual_lock=bool(normalized.get("manual_lock", True)),
             )
             entries = build_plan([accepted], library_path)
             existing_destinations = {
@@ -313,6 +315,17 @@ class ReviewService:
                 )
 
             identification_snapshot = json.dumps(accepted.to_dict(), ensure_ascii=False)
+            aliases = [normalized["title"], snapshot.get("context_name", "")]
+            payload = review.payload if isinstance(review.payload, dict) else {}
+            aliases.append(str(payload.get("title") or ""))
+            aliases.append(Path(snapshot.get("path", "")).stem)
+            ShowMemoryService(self.database_path).remember(
+                aliases,
+                normalized["title"],
+                source="review",
+                confidence=100,
+                connection=uow.connection,
+            )
             for entry, source_fact, relative_destination in prepared_entries:
                 action = str(profile["mode"]) if entry.action == "organize" else entry.action
                 is_conflict = entry.action == "conflict"

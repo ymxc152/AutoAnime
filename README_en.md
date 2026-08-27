@@ -55,25 +55,48 @@ Database reset does not modify media files.
 The repo is a single v3 stack (`AutoAnimeMv3.py` + Web/Worker). There is no automatic v2 database importer. Typical cutover:
 
 1. Stop old schedulers so two tools do not move the same tree.
-2. Start Web + Worker (`start-autoanime.bat` or dev Vite on port 5173).
+2. Start Web + Worker (`start-autoanime.bat` → `http://127.0.0.1:8765`). Vite 5173 is not the production console.
 3. In **Scan profiles**, add source and library roots. On the host machine, use **Browse…** for the Windows folder picker; from another PC on the LAN, paste paths.
 4. Create a profile (prefer `link` if you seed torrents). Start with **review all**, then switch to auto-apply once results look right.
 5. Flow: manual scan → reviews → plans → approve/execute → rollback from operation history if needed.
 6. Optional automation: schedules and downloader webhooks under Settings; local trusted hook at `POST /api/v1/hooks/local`.
 7. CLI still works for one-off dry runs; it does not automatically share the Web data directory SQLite.
 
-## Web console
+## Web console (agent workbench)
+
+Daily use is the browser console, not the CLI. Identification and safe auto-apply run in the Worker. Bound multi-turn chat exists only on a review item or library show — there is no global chat homepage.
+
+- One scan profile binds one source root and one library root. Rebinding bumps `revision`.
+- Default unattended trigger is a qBittorrent completion webhook; scheduled scan is the fallback. The wizard sets that profile to `auto_apply_safe` + `mode=link`.
+- Web and Worker must share `--data-dir`. Without the Worker, scan/execute/rollback stay queued.
+- Agents never invent destination paths. Chat proposals may only change identification fields.
 
 ### Windows one-click start
 
-Root-level scripts (visible as soon as you open the project folder):
-
 | File | Purpose |
 |------|---------|
-| `start-autoanime.bat` | Start Web + Worker |
-| `stop-autoanime.bat` | Stop services |
+| `start-autoanime.bat` | Start Web + Worker and wait for `/health/live` |
+| `stop-autoanime.bat` | Stop this data-dir instance only |
+| `status-autoanime.bat` | PID, port, health |
 
-Defaults: `http://127.0.0.1:8765`, data under `C:\ProgramData\AutoAnime`.
+Defaults: `http://127.0.0.1:8765`, data under `C:\ProgramData\AutoAnime`. Implementation: `scripts/autoanime.ps1`.
+
+```powershell
+.\start-autoanime.bat
+.\start-autoanime.bat -NoBuild
+.\start-autoanime.bat -DataDir "D:\AutoAnimeData" -Port 8765
+.\stop-autoanime.bat
+```
+
+Do not treat Vite port 5173 as the production console. FastAPI serves `webui/dist` on 8765.
+
+qB “Run on torrent completion” template (workbench generates this; `%F` is the finished path):
+
+```text
+curl -s -X POST "http://127.0.0.1:8765/api/v1/hooks/downloaders/<token>" -H "Content-Type: application/json" -d "{\"path\": \"%F\"}"
+```
+
+Paths must fall inside the bound source root. Linux-style paths on a Windows source return HTTP 409; there is no path translator.
 
 ### Default credentials and local passwordless login
 

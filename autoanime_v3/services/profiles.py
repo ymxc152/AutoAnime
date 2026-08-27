@@ -6,8 +6,14 @@ from autoanime_v3.db.migrations import run_migrations
 from autoanime_v3.db.repositories.profiles import ProfileRepository
 from autoanime_v3.db.repositories.roots import RootRepository
 from autoanime_v3.db.uow import SqliteUnitOfWork
-from autoanime_v3.domain.errors import NotFoundError, RevisionConflictError, ValidationError
+from autoanime_v3.domain.errors import (
+    NotFoundError,
+    RevisionConflictError,
+    UnsafeRootError,
+    ValidationError,
+)
 from autoanime_v3.domain.enums import ExecutionPolicy, OperationMode, RootKind
+from autoanime_v3.services.roots import path_is_within
 
 
 class ProfileService:
@@ -38,9 +44,48 @@ class ProfileService:
             uow.commit()
             return profile
 
+    def delete_profile(self, profile_id, revision):
+        with SqliteUnitOfWork(self.database_path) as uow:
+            repository = ProfileRepository(uow.connection)
+            existing = repository.get(profile_id)
+            if existing is None:
+                raise NotFoundError("Scan profile does not exist", {"id": profile_id})
+            if int(existing.revision) != int(revision):
+                raise RevisionConflictError(
+                    "Scan profile was changed by another request",
+                    {"expected_revision": revision, "actual_revision": existing.revision},
+                )
+            scan_runs = int(
+                uow.connection.execute(
+                    "SELECT COUNT(*) FROM scan_runs WHERE profile_id = ?", (profile_id,)
+                ).fetchone()[0]
+            )
+            if scan_runs > 0:
+                raise ValidationError(
+                    "Scan profile has scan history and cannot be deleted; disable it instead",
+                    {"profile_id": profile_id, "scan_runs": scan_runs},
+                )
+            plans = int(
+                uow.connection.execute(
+                    "SELECT COUNT(*) FROM plans WHERE profile_id = ?", (profile_id,)
+                ).fetchone()[0]
+            )
+            if plans > 0:
+                raise ValidationError(
+                    "Scan profile has plan history and cannot be deleted; disable it instead",
+                    {"profile_id": profile_id, "plans": plans},
+                )
+            uow.connection.execute(
+                "DELETE FROM scan_profiles WHERE id = ?", (profile_id,)
+            )
+            uow.commit()
+            return {"id": profile_id, "deleted": True}
+
     def update_profile(self, profile_id, revision, patch):
         allowed = {
             "name",
+            "source_root_id",
+            "library_root_id",
             "mode",
             "execution_policy",
             "min_confidence",
@@ -78,6 +123,20 @@ class ProfileService:
             existing = repository.get(profile_id)
             if existing is None:
                 raise NotFoundError("Scan profile does not exist", {"id": profile_id})
+            roots = RootRepository(uow.connection)
+            source = roots.get(patch.get("source_root_id", existing.source_root_id))
+            library = roots.get(patch.get("library_root_id", existing.library_root_id))
+            if source is None or source.kind != RootKind.SOURCE.value:
+                raise ValidationError("Profile source must reference a source root")
+            if library is None or library.kind != RootKind.LIBRARY.value:
+                raise ValidationError("Profile library must reference a library root")
+            if path_is_within(library.path, source.path) or path_is_within(
+                source.path, library.path
+            ):
+                raise UnsafeRootError(
+                    "Source and library roots cannot be equal or nested",
+                    {"source": source.path, "library": library.path},
+                )
             profile, updated = repository.update(profile_id, revision, patch)
             if not updated:
                 raise RevisionConflictError(

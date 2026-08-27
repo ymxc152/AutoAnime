@@ -11,6 +11,8 @@ class MetadataResult:
     poster_url: Optional[str] = None
     synopsis: Optional[str] = None
     broadcast_status: Optional[str] = None
+    provider: Optional[str] = None
+    provider_id: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -29,6 +31,8 @@ class SafeMetadataAdapter:
                 value.get("poster_url"),
                 value.get("synopsis"),
                 value.get("broadcast_status"),
+                value.get("provider"),
+                value.get("provider_id"),
             )
         except Exception as error:
             return MetadataResult(False, "unavailable", error=str(error))

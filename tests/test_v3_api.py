@@ -237,3 +237,365 @@ class ApiTests(unittest.TestCase):
         finally:
             app_module.pick_folder_windows = original
 
+    def test_delete_root_blocks_in_use_and_deletes_free_root(self):
+        csrf = self.login_default()
+        base = Path(self.temporary_directory.name)
+        source = base / "del-source"
+        library = base / "del-library"
+        spare = base / "del-spare"
+        for path in (source, library, spare):
+            path.mkdir()
+        from autoanime_v3.domain.entities import CreateProfile
+        from autoanime_v3.services.profiles import ProfileService
+        from autoanime_v3.services.roots import RootService
+
+        roots = RootService(self.settings.database_path)
+        source_root = roots.create_root("source", source)
+        library_root = roots.create_root("library", library)
+        spare_root = roots.create_root("operations", spare)
+        ProfileService(self.settings.database_path).create_profile(
+            CreateProfile("del-profile", source_root.id, library_root.id)
+        )
+        headers = {"X-CSRF-Token": csrf}
+        # A root referenced by a profile cannot be deleted.
+        blocked = self.client.delete(
+            "/api/v1/roots/%s" % library_root.id, headers=headers
+        )
+        self.assertEqual(blocked.status_code, 422)
+        # A free root (operations log) can be deleted.
+        deleted = self.client.delete("/api/v1/roots/%s" % spare_root.id, headers=headers)
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(len(self.client.get("/api/v1/roots").json()["items"]), 2)
+        # Mutating requires CSRF.
+        self.assertEqual(
+            self.client.delete("/api/v1/roots/%s" % spare_root.id).status_code, 403
+        )
+        # After the referencing profile is deleted the root becomes deletable.
+        self.assertEqual(
+            self.client.request(
+                "DELETE",
+                "/api/v1/profiles/1",
+                json={"revision": 1},
+                headers=headers,
+            ).status_code,
+            204,
+        )
+        self.assertEqual(
+            self.client.delete("/api/v1/roots/%s" % library_root.id, headers=headers).status_code,
+            204,
+        )
+
+    def test_delete_profile_blocks_history_and_deletes_fresh(self):
+        csrf = self.login_default()
+        base = Path(self.temporary_directory.name)
+        source = base / "p-source"
+        library = base / "p-library"
+        source.mkdir()
+        library.mkdir()
+        from autoanime_v3.domain.entities import CreateProfile
+        from autoanime_v3.services.profiles import ProfileService
+        from autoanime_v3.services.roots import RootService
+        from autoanime_v3.services.scans import ScanService
+
+        roots = RootService(self.settings.database_path)
+        source_root = roots.create_root("source", source)
+        library_root = roots.create_root("library", library)
+        profiles = ProfileService(self.settings.database_path)
+        used = profiles.create_profile(
+            CreateProfile("used-profile", source_root.id, library_root.id)
+        )
+        (source / "删除测试 S01E01.mkv").write_bytes(b"x" * 512)
+        ScanService(self.settings.database_path).run(used.id)
+        headers = {"X-CSRF-Token": csrf}
+        # A profile with scan/plan history cannot be deleted.
+        blocked = self.client.request(
+            "DELETE",
+            "/api/v1/profiles/%s" % used.id,
+            json={"revision": used.revision},
+            headers=headers,
+        )
+        self.assertEqual(blocked.status_code, 422)
+        # A fresh profile without history can be deleted.
+        fresh = profiles.create_profile(
+            CreateProfile("fresh-profile", source_root.id, library_root.id)
+        )
+        deleted = self.client.request(
+            "DELETE",
+            "/api/v1/profiles/%s" % fresh.id,
+            json={"revision": fresh.revision},
+            headers=headers,
+        )
+        self.assertEqual(deleted.status_code, 204)
+        remaining = self.client.get("/api/v1/profiles").json()["items"]
+        self.assertEqual([item["id"] for item in remaining], [used.id])
+        # Stale revision is rejected.
+        stale = self.client.request(
+            "DELETE",
+            "/api/v1/profiles/%s" % used.id,
+            json={"revision": 0},
+            headers=headers,
+        )
+        self.assertEqual(stale.status_code, 409)
+
+    def test_delete_plan_dismisses_stale_and_guards_open_reviews(self):
+        csrf = self.login_default()
+        base = Path(self.temporary_directory.name)
+        source = base / "plan-source"
+        library = base / "plan-library"
+        source.mkdir()
+        library.mkdir()
+        import sqlite3
+
+        from autoanime_v3.domain.entities import CreateProfile
+        from autoanime_v3.services.profiles import ProfileService
+        from autoanime_v3.services.roots import RootService
+        from autoanime_v3.services.scans import ScanService
+
+        roots = RootService(self.settings.database_path)
+        source_root = roots.create_root("source", source)
+        library_root = roots.create_root("library", library)
+        profile = ProfileService(self.settings.database_path).create_profile(
+            CreateProfile("plan-profile", source_root.id, library_root.id)
+        )
+        (source / "计划测试 S01E01.mkv").write_bytes(b"x" * 512)
+        outcome = ScanService(self.settings.database_path).run(profile.id)
+        plan_id = outcome.plan_id
+        headers = {"X-CSRF-Token": csrf}
+        # An active plan cannot be dismissed.
+        active = self.client.delete("/api/v1/plans/%s" % plan_id, headers=headers)
+        self.assertEqual(active.status_code, 422)
+        # Once stale, dismissal succeeds.
+        connection = sqlite3.connect(str(self.settings.database_path))
+        connection.execute("UPDATE plans SET status = 'stale' WHERE id = ?", (plan_id,))
+        connection.commit()
+        connection.close()
+        deleted = self.client.delete("/api/v1/plans/%s" % plan_id, headers=headers)
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(self.client.get("/api/v1/plans/%s" % plan_id).status_code, 404)
+
+    def test_delete_plan_blocked_while_scan_run_has_open_reviews(self):
+        csrf = self.login_default()
+        base = Path(self.temporary_directory.name)
+        source = base / "review-source"
+        library = base / "review-library"
+        source.mkdir()
+        library.mkdir()
+        import sqlite3
+
+        from autoanime_v3.domain.entities import CreateProfile
+        from autoanime_v3.services.profiles import ProfileService
+        from autoanime_v3.services.roots import RootService
+        from autoanime_v3.services.scans import ScanService
+
+        roots = RootService(self.settings.database_path)
+        source_root = roots.create_root("source", source)
+        library_root = roots.create_root("library", library)
+        profile = ProfileService(self.settings.database_path).create_profile(
+            CreateProfile("review-profile", source_root.id, library_root.id)
+        )
+        (source / "计划测试 S01E01.mkv").write_bytes(b"x" * 512)
+        outcome = ScanService(self.settings.database_path).run(profile.id)
+        connection = sqlite3.connect(str(self.settings.database_path))
+        connection.execute(
+            """
+            INSERT INTO review_items(scan_run_id, review_type, status, dedup_key, payload_json)
+            VALUES (?, 'low_confidence', 'open', 'delete-plan-guard-test', '{}')
+            """,
+            (outcome.scan_run_id,),
+        )
+        connection.execute(
+            "UPDATE plans SET status = 'stale' WHERE id = ?", (outcome.plan_id,)
+        )
+        connection.commit()
+        connection.close()
+        blocked = self.client.delete(
+            "/api/v1/plans/%s" % outcome.plan_id, headers={"X-CSRF-Token": csrf}
+        )
+        self.assertEqual(blocked.status_code, 422)
+
+    def test_library_shows_search_filter_and_recent_sort(self):
+        self.login_default()
+        from autoanime_v3.services.changes import ChangeService
+
+        changes = ChangeService(self.settings.database_path)
+        changes.create_show("第一个番剧")
+        changes.create_show("第二个番剧")
+        changes.create_show("电影合集")
+        matched = self.client.get("/api/v1/library/shows", params={"q": "番剧"}).json()[
+            "items"
+        ]
+        self.assertEqual(
+            [item["canonical_title"] for item in matched],
+            ["第一个番剧", "第二个番剧"],
+        )
+        recent = self.client.get("/api/v1/library/shows", params={"sort": "recent"}).json()[
+            "items"
+        ]
+        self.assertEqual(len(recent), 3)
+        self.assertTrue(all("recent_activity" in item for item in recent))
+        self.assertTrue(all("season_count" in item and "episode_count" in item for item in recent))
+
+    def test_library_show_detail_includes_episodes_and_file_paths(self):
+        self.login_default()
+        import sqlite3
+
+        from autoanime_v3.services.changes import ChangeService
+
+        changes = ChangeService(self.settings.database_path)
+        show = changes.create_show("季度番剧")
+        library = Path(self.temporary_directory.name) / "detail-library"
+        library.mkdir()
+        connection = sqlite3.connect(str(self.settings.database_path))
+        root_id = connection.execute(
+            "INSERT INTO storage_roots(kind, path, normalized_path) VALUES ('library', ?, ?)",
+            (str(library), str(library).casefold()),
+        ).lastrowid
+        media_id = connection.execute(
+            "INSERT INTO media_files(size, mtime_ns, media_kind) VALUES (100, 1, 'video')"
+        ).lastrowid
+        season_id = connection.execute(
+            "INSERT INTO seasons(show_id, season_number) VALUES (?, 1)", (show.id,)
+        ).lastrowid
+        episode_id = connection.execute(
+            "INSERT INTO episodes(season_id, episode_number, episode_type, sort_value) VALUES (?, '1', 'episode', 1)",
+            (season_id,),
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO media_assignments(media_file_id, show_id, season_id, episode_id, source) VALUES (?, ?, ?, ?, 'test')",
+            (media_id, show.id, season_id, episode_id),
+        )
+        destination = library / "季度番剧" / "Season 01" / "S01E01.mkv"
+        connection.execute(
+            "INSERT INTO file_locations(media_file_id, root_id, path, normalized_path, role, state) VALUES (?, ?, ?, ?, 'library', 'present')",
+            (media_id, root_id, str(destination), str(destination).casefold()),
+        )
+        connection.commit()
+        connection.close()
+        detail = self.client.get("/api/v1/library/shows/%s" % show.id).json()
+        season = detail["seasons"][0]
+        self.assertEqual(season["season_number"], 1)
+        episode = season["episodes"][0]
+        self.assertEqual(episode["episode_number"], "1")
+        self.assertTrue(episode["files"])
+        self.assertTrue(episode["files"][0]["path"].endswith("S01E01.mkv"))
+
+    def test_settings_include_metadata_block(self):
+        csrf = self.login_default()
+        view = self.client.get("/api/v1/settings").json()
+        metadata = view["metadata"]
+        self.assertFalse(metadata["bangumi_enabled"])
+        self.assertFalse(metadata["tmdb_enabled"])
+        self.assertEqual(metadata["timeout"], 12)
+        self.assertFalse(metadata["tmdb_api_key_configured"])
+        self.assertFalse(metadata["ready"])
+
+    def test_review_enabled_toggle_and_public_view(self):
+        csrf = self.login_default()
+        view = self.client.get("/api/v1/settings").json()
+        openai = view["openai"]
+        self.assertIn("review_enabled", openai)
+        self.assertFalse(openai["review_enabled"])
+
+        response = self.client.patch(
+            "/api/v1/settings",
+            json={
+                "key": "review.enabled",
+                "value": True,
+                "revision": openai["review_enabled_revision"],
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["value"])
+        refreshed = self.client.get("/api/v1/settings").json()
+        self.assertTrue(refreshed["openai"]["review_enabled"])
+
+    def test_parse_agent_mode_toggle_and_validation(self):
+        csrf = self.login_default()
+        view = self.client.get("/api/v1/settings").json()
+        openai = view["openai"]
+        self.assertIn("parse_agent_mode", openai)
+        self.assertEqual(openai["parse_agent_mode"], "off")
+
+        ok = self.client.patch(
+            "/api/v1/settings",
+            json={
+                "key": "parse.agent_mode",
+                "value": "all",
+                "revision": openai["parse_agent_mode_revision"],
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["value"], "all")
+        refreshed = self.client.get("/api/v1/settings").json()
+        self.assertEqual(refreshed["openai"]["parse_agent_mode"], "all")
+
+        bad = self.client.patch(
+            "/api/v1/settings",
+            json={
+                "key": "parse.agent_mode",
+                "value": "bogus",
+                "revision": openai["parse_agent_mode_revision"],
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(bad.status_code, 422)
+
+    def test_metadata_toggles_and_timeout_validation(self):
+        csrf = self.login_default()
+        current = self.client.get("/api/v1/settings").json()["metadata"]
+        response = self.client.patch(
+            "/api/v1/settings",
+            json={
+                "key": "metadata.bangumi_enabled",
+                "value": True,
+                "revision": current["bangumi_enabled_revision"],
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["value"])
+
+        # 时间过短 -> 422
+        short = self.client.patch(
+            "/api/v1/settings",
+            json={"key": "metadata.timeout", "value": 1, "revision": current["timeout_revision"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(short.status_code, 422)
+
+        # 合法超时 -> 200
+        ok = self.client.patch(
+            "/api/v1/settings",
+            json={"key": "metadata.timeout", "value": 15, "revision": current["timeout_revision"]},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["value"], 15)
+        refreshed = self.client.get("/api/v1/settings").json()
+        self.assertTrue(refreshed["metadata"]["bangumi_enabled"])
+
+    def test_metadata_tmdb_secret_allowlist(self):
+        csrf = self.login_default()
+        response = self.client.put(
+            "/api/v1/settings/secrets/metadata.tmdb_api_key",
+            json={"value": "tmdb-secret-abc"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(response.status_code, 200)
+        refreshed = self.client.get("/api/v1/settings").json()
+        self.assertTrue(refreshed["metadata"]["tmdb_api_key_configured"])
+        self.assertFalse(any(
+            item.get("key") == "metadata.tmdb_api_key"
+            for item in refreshed["secrets"]
+            if not item.get("configured")
+        ))
+
+        unknown = self.client.put(
+            "/api/v1/settings/secrets/nope.secret",
+            json={"value": "x"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        self.assertEqual(unknown.status_code, 422)
+

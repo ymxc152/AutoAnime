@@ -29,6 +29,7 @@ from autoanime_v3.domain.errors import NotFoundError, RevisionConflictError, Val
 from autoanime_v3.normalize import alias_key, safe_component
 from autoanime_v3.path_safety import validate_library_destination
 from autoanime_v3.services.changes import show_view
+from autoanime_v3.services.memory import ShowMemoryService
 from autoanime_v3.services.roots import normalize_windows_path
 
 
@@ -324,15 +325,36 @@ class CorrectionService:
 
         if not assignments:
             if target is not None:
-                return self._apply_empty_merge(request_id, show, target)
-            return self._apply_title_only(request_id, new_title, patch)
+                result = self._apply_empty_merge(request_id, show, target)
+                self._remember_correction(show, result.canonical_title if hasattr(result, "canonical_title") else target["canonical_title"], patch)
+                return result
+            result = self._apply_title_only(request_id, new_title, patch)
+            self._remember_correction(show, new_title, patch)
+            return result
 
         plan = self.build_plan(show, target, new_title, assignments)
         if not plan["steps"]:
-            return self._apply_title_only(request_id, new_title, patch)
+            result = self._apply_title_only(request_id, new_title, patch)
+            self._remember_correction(show, new_title, patch)
+            return result
         target_show_id = plan["target_show_id"] or show["id"]
         self._execute(request_id, show, target, new_title, patch, plan, requested_by)
-        return show_view(self._show_by_id(target_show_id))
+        result = show_view(self._show_by_id(target_show_id))
+        self._remember_correction(show, new_title, patch)
+        return result
+
+    def _remember_correction(self, show, new_title, patch):
+        aliases = [
+            new_title,
+            show["canonical_title"] if show is not None else "",
+            show["normalized_key"] if show is not None else "",
+        ]
+        extra = patch.get("aliases") if isinstance(patch, dict) else None
+        if extra:
+            aliases.extend(list(extra))
+        ShowMemoryService(self.database_path).remember(
+            aliases, new_title, source="library_correction", confidence=100
+        )
 
     def _apply_empty_merge(self, request_id, show, target):
         """An empty duplicate show merged into an existing one: just drop it."""

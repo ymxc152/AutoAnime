@@ -120,6 +120,16 @@ class ApiManagementTests(unittest.TestCase):
         self.assertEqual(accepted.status_code, 202)
         self.assertEqual(accepted.json()["payload"]["paths"], [str(target.resolve())])
 
+        aliased = self.client.post(
+            "/api/v1/hooks/downloaders/%s" % token,
+            json={"savePath": str(target), "foo": 1},
+        )
+        self.assertEqual(aliased.status_code, 202)
+
+        memory = self.client.get("/api/v1/memory")
+        self.assertEqual(memory.status_code, 200)
+        self.assertIsInstance(memory.json()["items"], list)
+
         disabled = self.client.patch(
             "/api/v1/webhook-sources/%s" % created.json()["id"],
             json={"revision": created.json()["revision"], "patch": {"enabled": False}},

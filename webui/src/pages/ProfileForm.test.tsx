@@ -23,10 +23,18 @@ describe('ProfileForm', () => {
           watch_enabled: 0,
           enabled: 1,
         }}
-        roots={[]}
+        roots={[
+          { id: 1, kind: 'source', path: 'F:\\src', enabled: 1 },
+          { id: 2, kind: 'library', path: 'F:\\lib', enabled: 1 },
+        ]}
         onSave={onSave}
       />,
     )
+
+    // 编辑态：标题条 + 可重新绑定目录
+    expect(screen.getByText(/正在编辑扫描方案「默认配置」/)).toBeInTheDocument()
+    expect(screen.getByLabelText('下载源')).toHaveValue('1')
+    expect(screen.getByLabelText('媒体库')).toHaveValue('2')
 
     expect(screen.queryByLabelText('最低置信度')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '更多选项' }))
@@ -44,6 +52,8 @@ describe('ProfileForm', () => {
       stability_seconds: 45,
       watch_enabled: false,
       enabled: true,
+      source_root_id: 1,
+      library_root_id: 2,
     }))
   })
 })

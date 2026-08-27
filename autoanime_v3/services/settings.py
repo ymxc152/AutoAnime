@@ -16,6 +16,15 @@ OPENAI_MODEL_KEY = "openai.model"
 OPENAI_TIMEOUT_KEY = "openai.timeout"
 OPENAI_API_KEY_SECRET = "openai.api_key"
 
+REVIEW_ENABLED_KEY = "review.enabled"
+
+PARSE_AGENT_MODE_KEY = "parse.agent_mode"
+
+METADATA_BANGUMI_ENABLED_KEY = "metadata.bangumi_enabled"
+METADATA_TMDB_ENABLED_KEY = "metadata.tmdb_enabled"
+METADATA_TIMEOUT_KEY = "metadata.timeout"
+METADATA_TMDB_API_KEY_SECRET = "metadata.tmdb_api_key"
+
 DEFAULT_SETTINGS = {
     AUTH_LOCAL_BYPASS_KEY: True,
     LOCAL_HOOK_TRUST_KEY: True,
@@ -23,11 +32,23 @@ DEFAULT_SETTINGS = {
     OPENAI_BASE_URL_KEY: "https://api.openai.com",
     OPENAI_MODEL_KEY: "gpt-4.1-mini",
     OPENAI_TIMEOUT_KEY: 30,
+    METADATA_BANGUMI_ENABLED_KEY: False,
+    METADATA_TMDB_ENABLED_KEY: False,
+    METADATA_TIMEOUT_KEY: 12,
+    REVIEW_ENABLED_KEY: False,
+    PARSE_AGENT_MODE_KEY: "off",
 }
 
-BOOLEAN_SETTINGS = {AUTH_LOCAL_BYPASS_KEY, LOCAL_HOOK_TRUST_KEY, OPENAI_ENABLED_KEY}
-INTEGER_SETTINGS = {OPENAI_TIMEOUT_KEY}
-STRING_SETTINGS = {OPENAI_BASE_URL_KEY, OPENAI_MODEL_KEY}
+BOOLEAN_SETTINGS = {
+    AUTH_LOCAL_BYPASS_KEY,
+    LOCAL_HOOK_TRUST_KEY,
+    OPENAI_ENABLED_KEY,
+    METADATA_BANGUMI_ENABLED_KEY,
+    METADATA_TMDB_ENABLED_KEY,
+    REVIEW_ENABLED_KEY,
+}
+INTEGER_SETTINGS = {OPENAI_TIMEOUT_KEY, METADATA_TIMEOUT_KEY}
+STRING_SETTINGS = {OPENAI_BASE_URL_KEY, OPENAI_MODEL_KEY, PARSE_AGENT_MODE_KEY}
 
 
 def setting_view(row):
@@ -96,6 +117,8 @@ class SettingsService:
         base_url, base_rev = pack(OPENAI_BASE_URL_KEY, "https://api.openai.com")
         model, model_rev = pack(OPENAI_MODEL_KEY, "gpt-4.1-mini")
         timeout, timeout_rev = pack(OPENAI_TIMEOUT_KEY, 30)
+        review_enabled, review_rev = pack(REVIEW_ENABLED_KEY, False)
+        parse_mode, parse_rev = pack(PARSE_AGENT_MODE_KEY, "off")
         return {
             "enabled": bool(enabled),
             "enabled_revision": enabled_rev,
@@ -107,6 +130,34 @@ class SettingsService:
             "timeout_revision": timeout_rev,
             "api_key_configured": bool(secret_configured),
             "ready": bool(enabled) and bool(secret_configured),
+            "review_enabled": bool(review_enabled),
+            "review_enabled_revision": review_rev,
+            "parse_agent_mode": str(parse_mode or "off"),
+            "parse_agent_mode_revision": parse_rev,
+        }
+
+    def metadata_public_view(self, secret_configured=False):
+        """Safe metadata-provider settings block for the WebUI (never includes the API key)."""
+        items = {item["key"]: item for item in self.list()}
+
+        def pack(key, default):
+            row = items.get(key)
+            if row is None:
+                return default, 0
+            return row["value"], int(row["revision"])
+
+        bangumi_enabled, bangumi_rev = pack(METADATA_BANGUMI_ENABLED_KEY, False)
+        tmdb_enabled, tmdb_rev = pack(METADATA_TMDB_ENABLED_KEY, False)
+        timeout, timeout_rev = pack(METADATA_TIMEOUT_KEY, 12)
+        return {
+            "bangumi_enabled": bool(bangumi_enabled),
+            "bangumi_enabled_revision": bangumi_rev,
+            "tmdb_enabled": bool(tmdb_enabled),
+            "tmdb_enabled_revision": tmdb_rev,
+            "timeout": int(timeout or 12),
+            "timeout_revision": timeout_rev,
+            "tmdb_api_key_configured": bool(secret_configured),
+            "ready": bool(bangumi_enabled or (tmdb_enabled and secret_configured)),
         }
 
     def update(self, key, value, revision):
@@ -122,6 +173,8 @@ class SettingsService:
                 raise ValidationError("Setting value must be an integer", {"key": normalized_key}) from error
             if normalized_key == OPENAI_TIMEOUT_KEY and value < 5:
                 raise ValidationError("OpenAI timeout must be at least 5 seconds", {"key": normalized_key})
+            if normalized_key == METADATA_TIMEOUT_KEY and value < 2:
+                raise ValidationError("Metadata timeout must be at least 2 seconds", {"key": normalized_key})
         if normalized_key in STRING_SETTINGS:
             if not isinstance(value, str) or not value.strip():
                 raise ValidationError("Setting value must be a non-empty string", {"key": normalized_key})
@@ -131,6 +184,11 @@ class SettingsService:
             ):
                 raise ValidationError(
                     "OpenAI base URL must start with http:// or https://",
+                    {"key": normalized_key},
+                )
+            if normalized_key == PARSE_AGENT_MODE_KEY and value not in {"off", "uncertain", "all"}:
+                raise ValidationError(
+                    "parse.agent_mode must be one of off / uncertain / all",
                     {"key": normalized_key},
                 )
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

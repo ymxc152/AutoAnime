@@ -17,6 +17,8 @@ describe('ReviewResolutionForm', () => {
         episode: 1,
         is_movie: true,
         release_tag: 'BDRip',
+        source: 'D:\\downloads\\电影标题.BDRip.mkv',
+        confidence: 0.8,
         evidence: [{ agent: 'parser', value: '电影标题', confidence: 0.8 }],
       },
     }} onSubmit={onSubmit} />)
@@ -25,7 +27,12 @@ describe('ReviewResolutionForm', () => {
     expect(screen.queryByLabelText('季度')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('集号')).not.toBeInTheDocument()
     expect(screen.getByText(/目标路径预览/).parentElement).toHaveTextContent('电影标题')
-    expect(screen.getByText(/parser/)).toBeInTheDocument()
+    // 来源文件与识别结果对照
+    expect(screen.getByText('电影标题.BDRip.mkv')).toBeInTheDocument()
+    expect(screen.getByText(/识别结果/).parentElement).toHaveTextContent('电影标题')
+    expect(screen.getByText(/置信度 80%/)).toBeInTheDocument()
+    // 识别依据列表展示了 agent，而非只有折叠 JSON
+    expect(screen.getAllByText(/parser/).length).toBeGreaterThan(0)
 
     await userEvent.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
 
@@ -35,6 +42,41 @@ describe('ReviewResolutionForm', () => {
       release_tag: 'BDRip',
       manual_lock: true,
     })
+  })
+
+  it('renders clickable candidate chips, marks live-action, and fills the title on click', async () => {
+    const onSubmit = vi.fn()
+    render(<ReviewResolutionForm review={{
+      id: 3,
+      payload: {
+        title: '葬送的芙莉莲',
+        season: 1,
+        episode: 1,
+        is_movie: false,
+        release_tag: '',
+        evidence: [],
+        candidates: [
+          { source: 'aiparse', lang: 'zh-cn', title: '葬送的芙莉莲' },
+          { source: 'aiparse', lang: 'ja', title: '葬送のフリーレン' },
+          { source: 'metadata', provider: 'bgm', provider_id: '7', title: '葬送的芙莉莲', confidence: 0.9, is_anime: true },
+          { source: 'metadata', provider: 'tmdb', provider_id: '101', title: '葬送的芙莉蓮', confidence: 0.9, is_anime: false },
+        ],
+      },
+    }} onSubmit={onSubmit} />)
+
+    expect(screen.getByText(/候选标题/)).toBeInTheDocument()
+    expect(screen.getByText('葬送のフリーレン')).toBeInTheDocument()
+    expect(screen.getByText('AI·日文')).toBeInTheDocument()
+    expect(screen.getByText('TMDB · 90%')).toBeInTheDocument()
+    // 非动漫候选标记「真人版?」
+    expect(screen.getByText('真人版?')).toBeInTheDocument()
+
+    // 点击 ja 候选 → 标题填入
+    await userEvent.click(screen.getByText('葬送のフリーレン'))
+    expect(screen.getByLabelText('标题')).toHaveValue('葬送のフリーレン')
+
+    await userEvent.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ title: '葬送のフリーレン' }))
   })
 
   it('hydrates S02E12 and submits numeric season and episode values', async () => {

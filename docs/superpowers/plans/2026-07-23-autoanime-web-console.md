@@ -1,5 +1,7 @@
 # AutoAnime Web Console Implementation Plan
 
+> **Historical (2026-07-23).** Construction checklist from before the console shipped. Unchecked boxes are not remaining work. Current behavior: `docs/11_v3_WebUI与数据层规划.md`. There is no backup-restore HTTP API; navigation is 首页/扫描/待处理/运行记录/资料库/设置.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a Windows LAN, single-administrator Web console that manages AutoAnime scanning, review, immutable plans, safe execution, library editing, automation, metadata, backup, and recovery.

@@ -25,7 +25,28 @@ def main(argv=None):
 
     def scan_handler(job):
         queue.append_event(job.id, "phase", {"name": "scan"}, "开始扫描")
-        outcome = ScanService(database).run(int(job.payload["profile_id"]), job.payload.get("paths") or None)
+        trigger = job.payload.get("trigger") or "manual"
+
+        def on_started(info):
+            payload = dict(info)
+            payload["trigger"] = trigger
+            queue.append_event(job.id, "identify_started", payload, "开始识别")
+
+        def on_unit(info):
+            title = info.get("title") or info.get("hint_title") or info.get("folder") or ""
+            queue.append_event(
+                job.id,
+                "identify_unit",
+                info,
+                "正在识别：%s" % title,
+            )
+
+        outcome = ScanService(database).run(
+            int(job.payload["profile_id"]),
+            job.payload.get("paths") or None,
+            on_unit=on_unit,
+            on_started=on_started,
+        )
         queue.append_event(job.id, "scan_completed", {"plan_id": outcome.plan_id}, "扫描完成")
 
     def execute_handler(job):

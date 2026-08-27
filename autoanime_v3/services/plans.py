@@ -39,6 +39,47 @@ class PlanService:
         finally:
             connection.close()
 
+    def delete_plan(self, plan_id):
+        """Dismiss a superseded/terminal plan so it leaves the inbox list.
+
+        Guarded so an active plan, a plan with operation history, or a plan
+        whose scan run still has open review items can never be removed.
+        """
+        with SqliteUnitOfWork(self.database_path) as uow:
+            plan = PlanRepository(uow.connection).get(plan_id)
+            if plan is None:
+                raise NotFoundError("Plan does not exist", {"id": plan_id})
+            if plan.status in {"draft", "ready", "approved", "executing"}:
+                raise ValidationError(
+                    "Active plans cannot be ignored",
+                    {"id": plan_id, "status": plan.status},
+                )
+            batches = int(
+                uow.connection.execute(
+                    "SELECT COUNT(*) FROM operation_batches WHERE plan_id = ?",
+                    (plan_id,),
+                ).fetchone()[0]
+            )
+            if batches > 0:
+                raise ValidationError(
+                    "Plan has operation history and cannot be ignored",
+                    {"id": plan_id, "operation_batches": batches},
+                )
+            open_reviews = int(
+                uow.connection.execute(
+                    "SELECT COUNT(*) FROM review_items WHERE scan_run_id = ? AND status = 'open'",
+                    (plan.scan_run_id,),
+                ).fetchone()[0]
+            )
+            if open_reviews > 0:
+                raise ValidationError(
+                    "Plan still has open review items and cannot be ignored",
+                    {"id": plan_id, "open_reviews": open_reviews},
+                )
+            uow.connection.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
+            uow.commit()
+            return {"id": plan_id, "deleted": True}
+
     def decide_item(self, plan_id, item_id, decision, user_id=None, reason=None):
         if decision not in {"approved", "rejected"}:
             raise ValidationError("Unsupported plan item decision", {"decision": decision})

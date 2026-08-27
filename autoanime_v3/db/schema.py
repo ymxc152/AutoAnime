@@ -544,6 +544,40 @@ rule_revisions = Table(
     UniqueConstraint("rule_set_id", "revision"),
 )
 
+learned_show_memory = Table(
+    "learned_show_memory",
+    metadata,
+    Column("alias_key", Text, primary_key=True),
+    Column("canonical_title", Text, nullable=False),
+    Column("source", String(32), nullable=False, server_default=text("'identify_batch'")),
+    Column("confidence", Integer, nullable=False, server_default=text("0")),
+    Column("updated_at", String(32), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+
+agent_sessions = Table(
+    "agent_sessions",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("kind", String(16), nullable=False),
+    Column("target_id", Integer, nullable=False),
+    Column("status", String(32), nullable=False, server_default=text("'open'")),
+    CheckConstraint("kind IN ('review', 'library')", name="agent_session_kind"),
+    CheckConstraint("status IN ('open', 'applied', 'abandoned')", name="agent_session_status"),
+    *utc_columns(),
+)
+
+agent_messages = Table(
+    "agent_messages",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("session_id", ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False),
+    Column("role", String(16), nullable=False),
+    Column("content", Text, nullable=False),
+    Column("proposal_json", Text),
+    Column("created_at", String(32), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    CheckConstraint("role IN ('user', 'assistant', 'system')", name="agent_message_role"),
+)
+
 backup_records = Table(
     "backup_records",
     metadata,
@@ -567,3 +601,5 @@ Index("ix_job_events_job_sequence", job_events.c.job_id, job_events.c.sequence)
 Index("ix_file_locations_media_file", file_locations.c.media_file_id)
 Index("ix_identification_results_media_file", identification_results.c.media_file_id)
 Index("ix_plans_status", plans.c.status)
+Index("ix_agent_sessions_kind_target", agent_sessions.c.kind, agent_sessions.c.target_id)
+Index("ix_agent_messages_session", agent_messages.c.session_id)

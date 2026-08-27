@@ -1,16 +1,18 @@
 import type { PropsWithChildren } from 'react'
 import { NavLink } from 'react-router-dom'
-import { ClipboardCheck, FolderCog, LayoutDashboard, Library, Settings } from 'lucide-react'
+import { Activity, ClipboardCheck, FolderCog, LayoutDashboard, Library, LogOut, Settings } from 'lucide-react'
 
 const items = [
   { to: '/', label: '首页', icon: LayoutDashboard, end: true },
   { to: '/scan', label: '扫描', icon: FolderCog },
   { to: '/inbox', label: '待处理', icon: ClipboardCheck },
+  { to: '/activity', label: '运行记录', icon: Activity },
   { to: '/library', label: '资料库', icon: Library },
   { to: '/settings', label: '设置', icon: Settings },
 ]
 
-export function AppShell({ children }: PropsWithChildren) {
+export function AppShell({ children, username, onLogout }: PropsWithChildren<{ username?: string; onLogout?: () => void }>) {
+  const displayName = username || '本机'
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -30,7 +32,11 @@ export function AppShell({ children }: PropsWithChildren) {
       <div className="app-main">
         <header className="topbar">
           <div><strong>动漫文件自动整理</strong><span>Windows Server</span></div>
-          <div className="admin-chip"><span>本</span>本机</div>
+          <div className="admin-chip">
+            <span>{displayName.slice(0, 1)}</span>
+            {displayName}
+            {onLogout ? <button type="button" className="text-button" onClick={onLogout} aria-label="退出登录"><LogOut size={14} />退出</button> : null}
+          </div>
         </header>
         <main>{children}</main>
       </div>

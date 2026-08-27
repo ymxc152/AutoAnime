@@ -133,6 +133,36 @@ class RootService:
             )
         return candidate
 
+    def delete_root(self, root_id):
+        with SqliteUnitOfWork(self.database_path) as uow:
+            repository = RootRepository(uow.connection)
+            current = repository.get(root_id)
+            if current is None:
+                raise NotFoundError("Storage root does not exist", {"id": root_id})
+            profile = uow.connection.execute(
+                "SELECT name FROM scan_profiles WHERE source_root_id = ? OR library_root_id = ? LIMIT 1",
+                (root_id, root_id),
+            ).fetchone()
+            if profile is not None:
+                raise ValidationError(
+                    "Storage root is used by a scan profile; delete the profile first",
+                    {"root_id": root_id, "profile": str(profile["name"])},
+                )
+            referenced = int(
+                uow.connection.execute(
+                    "SELECT COUNT(*) FROM file_locations WHERE root_id = ?",
+                    (root_id,),
+                ).fetchone()[0]
+            )
+            if referenced > 0:
+                raise ValidationError(
+                    "Storage root contains recorded files and cannot be deleted",
+                    {"root_id": root_id, "files": referenced},
+                )
+            uow.connection.execute("DELETE FROM storage_roots WHERE id = ?", (root_id,))
+            uow.commit()
+            return {"id": root_id, "deleted": True}
+
     def validate_root(self, root_id):
         root = self.get_root(root_id)
         path = Path(root.path)

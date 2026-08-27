@@ -8,7 +8,7 @@ from .engine import connect_sqlite, create_engine_for_path
 from .schema import metadata, schema_migrations
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 
 def connect_database(database_path):
@@ -50,6 +50,12 @@ def run_migrations(database_path):
             for column, statement in plan_item_alters.items():
                 if column not in plan_item_columns:
                     connection.exec_driver_sql(statement)
+            connection.exec_driver_sql(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_sessions_open
+                ON agent_sessions(kind, target_id) WHERE status = 'open'
+                """
+            )
             existing = connection.execute(
                 select(schema_migrations.c.version).where(
                     schema_migrations.c.version == SCHEMA_VERSION

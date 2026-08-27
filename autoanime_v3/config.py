@@ -20,6 +20,12 @@ class AppConfig:
     openai_model: str = "gpt-4.1-mini"
     openai_api_key: str = ""
     openai_timeout: int = 30
+    metadata_bangumi_enabled: bool = False
+    metadata_tmdb_enabled: bool = False
+    metadata_tmdb_api_key: str = ""
+    metadata_timeout: int = 12
+    review_enabled: bool = False
+    parse_agent_mode: str = "off"
 
     @property
     def cache_path(self) -> Path:
@@ -74,4 +80,10 @@ def load_config(config_path: Optional[Path], project_root: Path) -> AppConfig:
         openai_model=value("openai_model", "gpt-4.1-mini"),
         openai_api_key=os.environ.get(api_env, "") or value("openai_api_key", ""),
         openai_timeout=max(5, timeout),
+        metadata_bangumi_enabled=_get_bool(parser, "metadata_bangumi_enabled", False),
+        metadata_tmdb_enabled=_get_bool(parser, "metadata_tmdb_enabled", False),
+        metadata_tmdb_api_key=os.environ.get("TMDB_API_KEY", "") or value("metadata_tmdb_api_key", ""),
+        metadata_timeout=max(2, int(value("metadata_timeout", "12") or 12)),
+        review_enabled=_get_bool(parser, "review_enabled", False),
+        parse_agent_mode=value("parse_agent_mode", "off").strip().lower() or "off",
     )

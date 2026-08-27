@@ -219,6 +219,55 @@ class OperationServiceTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_manual_special_resolution_syncs_locked_title_and_special_episode(self):
+        import sqlite3
+
+        from autoanime_v3.services.operations import OperationService
+        from autoanime_v3.services.reviews import ReviewService
+
+        (self.source / "Unknown Show SP03.mkv").write_bytes(b"special-file" * 1024)
+        from autoanime_v3.services.scans import ScanService
+
+        ScanService(self.database).run(self.profile.id)
+        review = ReviewService(self.database).list_open()[0]
+        plan = ReviewService(self.database).resolve(
+            review.id,
+            {
+                "title": "人工锁定特别篇",
+                "media_type": "special",
+                "season": 0,
+                "episode": "SP03",
+                "manual_lock": True,
+            },
+        )
+        from autoanime_v3.services.plans import PlanService
+
+        approved = PlanService(self.database).approve(plan.id)
+        OperationService(self.database).execute(approved.id)
+
+        connection = sqlite3.connect(str(self.database))
+        connection.row_factory = sqlite3.Row
+        try:
+            show = connection.execute(
+                "SELECT * FROM shows WHERE canonical_title = ?",
+                ("人工锁定特别篇",),
+            ).fetchone()
+            self.assertIsNotNone(show)
+            self.assertEqual(int(show["title_locked"]), 1)
+            season = connection.execute(
+                "SELECT * FROM seasons WHERE show_id = ?",
+                (show["id"],),
+            ).fetchone()
+            self.assertEqual(int(season["season_number"]), 0)
+            episode = connection.execute(
+                "SELECT * FROM episodes WHERE season_id = ?",
+                (season["id"],),
+            ).fetchone()
+            self.assertEqual(episode["episode_number"], "SP03")
+            self.assertEqual(episode["episode_type"], "special")
+        finally:
+            connection.close()
+
 
 if __name__ == "__main__":
     unittest.main()

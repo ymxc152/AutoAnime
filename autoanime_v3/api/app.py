@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from autoanime_v3.api.dependencies import CSRF_HEADER, SESSION_COOKIE, csrf_from_request, session_from_request
@@ -34,6 +34,7 @@ from autoanime_v3.services.auth import (
     SecretService,
 )
 from autoanime_v3.services.settings import (
+    METADATA_TMDB_API_KEY_SECRET,
     OPENAI_API_KEY_SECRET,
     OPENAI_BASE_URL_KEY,
     OPENAI_ENABLED_KEY,
@@ -95,7 +96,8 @@ class ServiceContainer:
     backups: BackupService
     schedules: ScheduleService
     webhooks: WebhookSourceService
-
+    memory: "ShowMemoryService"
+    agent_chat: "AgentChatService"
     @classmethod
     def build(cls, settings):
         settings.data_directory.mkdir(parents=True, exist_ok=True)
@@ -108,6 +110,9 @@ class ServiceContainer:
         auth = AuthService(settings.database_path)
         auth.ensure_default_admin()
         app_settings = SettingsService(settings.database_path)
+        from autoanime_v3.services.memory import ShowMemoryService
+        from autoanime_v3.services.agent_chat import AgentChatService
+
         return cls(
             auth=auth,
             secrets=SecretService(settings.database_path, secret_store),
@@ -127,6 +132,8 @@ class ServiceContainer:
             backups=BackupService(settings.database_path, settings.data_directory / "backups"),
             schedules=ScheduleService(settings.database_path),
             webhooks=WebhookSourceService(settings.database_path),
+            memory=ShowMemoryService(settings.database_path),
+            agent_chat=AgentChatService(settings.database_path),
         )
 
 
@@ -221,8 +228,40 @@ class WebhookSourceBody(BaseModel):
 
 
 class DownloaderHookBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     path: Optional[str] = None
     paths: list[str] = []
+    save_path: Optional[str] = None
+    savePath: Optional[str] = None
+    content_path: Optional[str] = None
+    contentPath: Optional[str] = None
+    folder: Optional[str] = None
+
+
+def collect_hook_paths(body) -> list[str]:
+    collected = []
+    seen = set()
+    for value in list(body.paths) + [
+        body.path,
+        body.save_path,
+        body.savePath,
+        body.content_path,
+        body.contentPath,
+        body.folder,
+    ]:
+        if value and value not in seen:
+            seen.add(value)
+            collected.append(value)
+    return collected
+
+
+class AgentSessionBody(BaseModel):
+    kind: str
+    target_id: int
+
+
+class AgentMessageBody(BaseModel):
+    content: str
 
 
 class DeleteBody(BaseModel):
@@ -384,11 +423,49 @@ def create_app(settings, services=None):
               (SELECT COUNT(*) FROM jobs WHERE status = 'failed') AS failed_jobs
             """
         )[0]
+        counts["learned_aliases"] = rows("SELECT COUNT(*) AS count FROM learned_show_memory")[0]["count"]
+        counts["webhook_count"] = rows("SELECT COUNT(*) AS count FROM webhook_sources")[0]["count"]
+        counts["schedule_count"] = rows("SELECT COUNT(*) AS count FROM schedules")[0]["count"]
+        counts["recent_titles"] = [
+            row["canonical_title"]
+            for row in rows(
+                """
+                SELECT DISTINCT title AS canonical_title
+                FROM identification_results
+                WHERE title != '' AND title IS NOT NULL
+                ORDER BY id DESC LIMIT 8
+                """
+            )
+        ]
         counts["roots"] = rows("SELECT id, kind, path, health_status, enabled FROM storage_roots ORDER BY id")
         counts["recent_jobs"] = rows(
             "SELECT id, job_type, status, current_stage, progress_current, progress_total, created_at FROM jobs ORDER BY id DESC LIMIT 8"
         )
         return counts
+
+    @app.get("/api/v1/memory")
+    def list_memory(user=Depends(current_user)):
+        return {"items": services.memory.list(), "next_cursor": None}
+
+    @app.post("/api/v1/agent/sessions", status_code=201)
+    def open_agent_session(body: AgentSessionBody, user=Depends(current_user)):
+        return services.agent_chat.open_session(body.kind, body.target_id)
+
+    @app.get("/api/v1/agent/sessions/{session_id}")
+    def get_agent_session(session_id: int, user=Depends(current_user)):
+        return services.agent_chat.get(session_id)
+
+    @app.post("/api/v1/agent/sessions/{session_id}/messages")
+    def add_agent_message(session_id: int, body: AgentMessageBody, user=Depends(changing_user)):
+        return services.agent_chat.add_message(session_id, body.content)
+
+    @app.post("/api/v1/agent/sessions/{session_id}/apply")
+    def apply_agent_session(session_id: int, user=Depends(changing_user)):
+        return services.agent_chat.apply(session_id, user.id)
+
+    @app.post("/api/v1/agent/sessions/{session_id}/abandon")
+    def abandon_agent_session(session_id: int, user=Depends(changing_user)):
+        return services.agent_chat.abandon(session_id)
 
     @app.get("/api/v1/roots")
     def list_roots(user=Depends(current_user)):
@@ -422,6 +499,12 @@ def create_app(settings, services=None):
     def patch_root(root_id: int, body: RootPatchBody, user=Depends(changing_user)):
         return serialize(services.roots.update_root(root_id, body.patch))
 
+    @app.delete("/api/v1/roots/{root_id}", status_code=204)
+    def delete_root(root_id: int, response: Response, user=Depends(changing_user)):
+        services.roots.delete_root(root_id)
+        response.status_code = 204
+        return response
+
     @app.post("/api/v1/roots/{root_id}/validate")
     def validate_root(root_id: int, user=Depends(changing_user)):
         return serialize(services.roots.validate_root(root_id))
@@ -437,6 +520,12 @@ def create_app(settings, services=None):
     @app.patch("/api/v1/profiles/{profile_id}")
     def patch_profile(profile_id: int, body: PatchBody, user=Depends(changing_user)):
         return serialize(services.profiles.update_profile(profile_id, body.revision, body.patch))
+
+    @app.delete("/api/v1/profiles/{profile_id}", status_code=204)
+    def delete_profile(profile_id: int, body: DeleteBody, response: Response, user=Depends(changing_user)):
+        services.profiles.delete_profile(profile_id, body.revision)
+        response.status_code = 204
+        return response
 
     @app.get("/api/v1/schedules")
     def list_schedules(user=Depends(current_user)):
@@ -484,9 +573,7 @@ def create_app(settings, services=None):
 
     @app.post("/api/v1/hooks/downloaders/{token}", status_code=202)
     def downloader_hook(token: str, body: DownloaderHookBody):
-        paths = list(body.paths)
-        if body.path:
-            paths.append(body.path)
+        paths = collect_hook_paths(body)
         return serialize(services.webhooks.submit_token(token, paths))
 
     @app.post("/api/v1/hooks/local", status_code=202)
@@ -496,9 +583,7 @@ def create_app(settings, services=None):
             raise LocalOnlyError("Local hook endpoint is only available on loopback")
         if not services.auth.local_hook_trust_enabled():
             raise LocalOnlyError("Local trusted hooks are disabled")
-        paths = list(body.paths)
-        if body.path:
-            paths.append(body.path)
+        paths = collect_hook_paths(body)
         profile_id = None
         if paths:
             # Prefer the first enabled profile whose source root contains the path.
@@ -578,6 +663,12 @@ def create_app(settings, services=None):
     def get_plan(plan_id: int, user=Depends(current_user)):
         return serialize(services.plans.get(plan_id))
 
+    @app.delete("/api/v1/plans/{plan_id}", status_code=204)
+    def delete_plan(plan_id: int, response: Response, user=Depends(changing_user)):
+        services.plans.delete_plan(plan_id)
+        response.status_code = 204
+        return response
+
     @app.post("/api/v1/plans/{plan_id}/items/{item_id}/approve")
     def approve_plan_item(plan_id: int, item_id: int, user=Depends(changing_user)):
         return serialize(services.plans.decide_item(plan_id, item_id, "approved", user.id))
@@ -623,14 +714,80 @@ def create_app(settings, services=None):
         )
 
     @app.get("/api/v1/library/shows")
-    def library_shows(user=Depends(current_user)):
-        return {"items": rows("SELECT * FROM shows ORDER BY canonical_title"), "next_cursor": None}
+    def library_shows(user=Depends(current_user), q: Optional[str] = None, sort: str = "title"):
+        where = ""
+        params = []
+        if q and q.strip():
+            escaped = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            where = "WHERE s.canonical_title LIKE ? ESCAPE '\\'"
+            params = ["%%%s%%" % escaped]
+        order = (
+            "ORDER BY s.canonical_title"
+            if sort != "recent"
+            else "ORDER BY recent_activity DESC"
+        )
+        sql = f"""
+            SELECT s.id, s.canonical_title, s.normalized_key, s.status, s.title_locked,
+                   s.revision, s.created_at, s.updated_at,
+                   COALESCE((
+                     SELECT MAX(activity.ts) FROM (
+                       SELECT updated_at AS ts FROM seasons WHERE show_id = s.id
+                       UNION ALL
+                       SELECT e.updated_at FROM episodes e
+                         JOIN seasons se ON se.id = e.season_id WHERE se.show_id = s.id
+                       UNION ALL
+                       SELECT ma.updated_at FROM media_assignments ma WHERE ma.show_id = s.id
+                     ) activity
+                   ), s.updated_at) AS recent_activity,
+                   (SELECT COUNT(*) FROM seasons WHERE show_id = s.id) AS season_count,
+                   (SELECT COUNT(*) FROM episodes e
+                      JOIN seasons se ON se.id = e.season_id WHERE se.show_id = s.id) AS episode_count
+            FROM shows s
+            {where}
+            {order}
+        """
+        return {"items": rows(sql, params), "next_cursor": None}
 
     @app.get("/api/v1/library/shows/{show_id}")
     def library_show(show_id: int, user=Depends(current_user)):
         show = rows("SELECT * FROM shows WHERE id = ?", (show_id,))
         seasons = rows("SELECT * FROM seasons WHERE show_id = ? ORDER BY season_number", (show_id,))
         metadata = rows("SELECT * FROM metadata_records WHERE show_id = ? ORDER BY fetched_at DESC", (show_id,))
+        for season in seasons:
+            episode_rows = rows(
+                """
+                SELECT e.id, e.season_id, e.episode_number, e.episode_type, e.display_title,
+                       e.sort_value, e.created_at, e.updated_at,
+                       ma.release_label, fl.path AS file_path, fl.state AS file_state
+                FROM episodes e
+                LEFT JOIN media_assignments ma ON ma.episode_id = e.id
+                LEFT JOIN file_locations fl ON fl.media_file_id = ma.media_file_id
+                     AND fl.role = 'library'
+                WHERE e.season_id = ?
+                ORDER BY e.sort_value
+                """,
+                (season["id"],),
+            )
+            by_id = {}
+            for row in episode_rows:
+                entry = by_id.get(row["id"])
+                if entry is None:
+                    entry = {
+                        key: value
+                        for key, value in row.items()
+                        if key not in ("file_path", "file_state", "release_label")
+                    }
+                    entry["files"] = []
+                    by_id[row["id"]] = entry
+                if row["file_path"]:
+                    entry["files"].append(
+                        {
+                            "path": row["file_path"],
+                            "state": row["file_state"],
+                            "release_label": row["release_label"],
+                        }
+                    )
+            season["episodes"] = list(by_id.values())
         return {"show": show[0] if show else None, "seasons": seasons, "metadata": metadata}
 
     @app.get("/api/v1/library/files/{media_id}")
@@ -703,6 +860,7 @@ def create_app(settings, services=None):
             "SELECT key, provider, updated_at, 1 AS configured FROM secret_settings ORDER BY key"
         )
         openai_key_configured = any(row["key"] == OPENAI_API_KEY_SECRET for row in secret_rows)
+        metadata_key_configured = any(row["key"] == METADATA_TMDB_API_KEY_SECRET for row in secret_rows)
         return {
             "items": items,
             "security": {
@@ -720,6 +878,7 @@ def create_app(settings, services=None):
                 ),
             },
             "openai": services.settings.openai_public_view(openai_key_configured),
+            "metadata": services.settings.metadata_public_view(metadata_key_configured),
             "secrets": secret_rows,
         }
 
@@ -729,7 +888,7 @@ def create_app(settings, services=None):
 
     @app.put("/api/v1/settings/secrets/{key}")
     def update_secret(key: str, body: SecretBody, user=Depends(changing_user)):
-        allowed = {"metadata.api_key", OPENAI_API_KEY_SECRET}
+        allowed = {METADATA_TMDB_API_KEY_SECRET, "metadata.api_key", OPENAI_API_KEY_SECRET}
         if key not in allowed:
             from autoanime_v3.domain.errors import ValidationError
 

@@ -32,6 +32,7 @@ _TITLE_METADATA = re.compile(
     re.I,
 )
 _GENERIC_CONTEXT_KEYS = {"下载", "下載", "downloads", "download", "anime", "动漫", "動漫", "video", "videos"}
+GENERIC_CONTEXT_KEYS = _GENERIC_CONTEXT_KEYS
 
 
 _CN_NUMBERS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
