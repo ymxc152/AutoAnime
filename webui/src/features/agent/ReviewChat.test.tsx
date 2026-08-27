@@ -42,9 +42,10 @@ describe('ReviewChat', () => {
       return {}
     })
     view()
-    await userEvent.click(screen.getByRole('button', { name: '问 Agent' }))
+    await userEvent.click(screen.getByRole('button', { name: '问助手' }))
+    expect(screen.getByRole('dialog', { name: '纠错会话' })).toBeInTheDocument()
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/agent/sessions', { kind: 'review', target_id: 9 }))
-    await userEvent.type(screen.getByLabelText('向 Agent 说明问题'), '标题错了')
+    await userEvent.type(screen.getByLabelText('向助手说明问题'), '标题错了')
     await userEvent.click(screen.getByRole('button', { name: '发送' }))
     expect(await screen.findByText('改为葬送的芙莉莲')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '应用提案' }))

@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProfilesPage } from './ConsolePages'
 
 const { apiGet, apiPatch } = vi.hoisted(() => ({
@@ -41,19 +41,23 @@ function renderPage() {
 }
 
 describe('ProfilesPage edit flow', () => {
+  afterEach(cleanup)
   beforeEach(() => {
     apiGet.mockClear()
     apiPatch.mockClear()
   })
 
-  it('enters edit mode with a visible header and highlighted row, then saves the renamed profile', async () => {
+  it('opens an edit window with a visible header and highlighted row, then saves the renamed profile', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('默认配置')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '编辑' }))
-    expect(screen.getByText(/正在编辑扫描方案「默认配置」/)).toBeInTheDocument()
-    const form = screen.getByText(/正在编辑扫描方案「默认配置」/).closest('form')!
+    const dialog = screen.getByRole('dialog', { name: '编辑扫描方案' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByText(/正在编辑扫描方案「默认配置」/)).toBeInTheDocument()
+    const form = within(dialog).getByText(/正在编辑扫描方案「默认配置」/).closest('form')!
     expect(within(form).getByLabelText('下载源')).toHaveValue('1')
     expect(within(form).getByLabelText('媒体库')).toHaveValue('2')
     expect(within(form).getByRole('option', { name: 'F:\\src' })).toBeInTheDocument()
@@ -73,5 +77,14 @@ describe('ProfilesPage edit flow', () => {
     expect(body.patch.source_root_id).toBe(3)
     expect(body.patch.library_root_id).toBe(4)
     expect(screen.getByText('F:\\src → F:\\lib')).toBeInTheDocument()
+  })
+
+  it('opens a create window from the scan plan list', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('默认配置')
+    await user.click(screen.getByRole('button', { name: '新建扫描方案' }))
+    expect(screen.getByRole('dialog', { name: '新建扫描方案' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建扫描方案' })).toBeInTheDocument()
   })
 })

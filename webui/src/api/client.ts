@@ -1,3 +1,5 @@
+import { extractApiFailure } from './errors'
+
 const CSRF_KEY = 'autoanime.csrf'
 
 export class ApiError extends Error {
@@ -23,7 +25,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const response = await fetch(`/api/v1${path}`, { ...init, headers, credentials: 'same-origin' })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    throw new ApiError(response.status, body.code || 'http_error', body.message || response.statusText, body.details)
+    const failure = extractApiFailure(body, response.status, response.statusText)
+    throw new ApiError(response.status, failure.code, failure.message, failure.details)
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
@@ -31,7 +34,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
 export async function apiText(path: string): Promise<string> {
   const response = await fetch(`/api/v1${path}`, { credentials: 'same-origin' })
-  if (!response.ok) throw new ApiError(response.status, 'http_error', response.statusText)
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const failure = extractApiFailure(body, response.status, response.statusText)
+    throw new ApiError(response.status, failure.code, failure.message, failure.details)
+  }
   return response.text()
 }
 

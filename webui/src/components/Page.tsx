@@ -11,7 +11,8 @@ const statusLabels: Record<string, string> = {
   rejected: '已拒绝', skip: '跳过', not_preferred_release: '非优选', unknown: '未知',
   pending: '待定', executing: '整理中', stale: '已过期', cancelled: '已取消',
   succeeded: '已完成', leased: '运行中', interrupted: '已中断', active: '启用', inactive: '停用',
-  unavailable: '不可用', validated: '已校验', retired: '已停用',
+  unavailable: '不可用', validated: '已校验', retired: '已停用', resolving: '处理中',
+  waiting_review: '待确认', applied: '已应用', abandoned: '已结束', rolling_back: '回滚中',
 }
 
 export function Status({ value }: { value: string }) {

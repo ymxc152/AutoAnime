@@ -22,7 +22,7 @@ export function AgentRail({
       : '等待识别'
   return (
     <aside className="agent-rail">
-      <div className="surface-title"><h2>Agent 进度</h2><span>已记住 {memoryCount} 个别名</span></div>
+      <div className="surface-title"><h2>识别进度</h2><span>已记住 {memoryCount} 个别名</span></div>
       <div className="agent-skill"><strong>{skill}</strong><span>{units.length}{totalUnits ? ` / ${totalUnits}` : ''} 组</span></div>
       <div className="event-list">
         {units.slice(-8).reverse().map(event => (

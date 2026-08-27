@@ -32,7 +32,7 @@ describe('ReviewResolutionForm', () => {
     expect(screen.getByText(/识别结果/).parentElement).toHaveTextContent('电影标题')
     expect(screen.getByText(/置信度 80%/)).toBeInTheDocument()
     // 识别依据列表展示了 agent，而非只有折叠 JSON
-    expect(screen.getAllByText(/parser/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/解析器/).length).toBeGreaterThan(0)
 
     await userEvent.click(screen.getByRole('button', { name: '确认信息并生成计划' }))
 
