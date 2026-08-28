@@ -79,7 +79,9 @@ def analyze_with_agent(
     from autoanime_v3.services.rules import RuleService
 
     active_rules = RuleService(adapter.database_path).get_active()
-    learned = ShowMemoryService(adapter.database_path).load_overlay()
+    memory = ShowMemoryService(adapter.database_path)
+    memory.compact()
+    learned = memory.load_overlay()
     overlay = {
         "aliases": dict(active_rules.document.get("aliases") or {}),
         "season_layouts": dict(active_rules.document.get("season_layouts") or {}),

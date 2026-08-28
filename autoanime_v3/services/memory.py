@@ -1,5 +1,6 @@
 """Learned show aliases that do not bump RuleService content_hash / plan.rule_version."""
 
+import re
 from pathlib import Path
 
 from autoanime_v3.db.engine import connect_sqlite
@@ -10,6 +11,24 @@ from autoanime_v3.parser import GENERIC_CONTEXT_KEYS
 
 MEMORY_SOURCES = {"identify_batch", "review", "library_correction"}
 GENERIC_ALIAS_KEYS = {alias_key(value) for value in GENERIC_CONTEXT_KEYS}
+PROTECTED_SOURCES = {"review", "library_correction"}
+MAX_BATCH_ALIASES = 8
+_MEDIA_EXT = re.compile(r"(?:mkv|mp4|avi|mov|m2ts|ts|wmv|flv|webm)$", re.I)
+_EPISODE_TAIL = re.compile(r"(?:e|ep|sp)\d+$", re.I)
+
+
+def _compact_key(key):
+    key = _MEDIA_EXT.sub("", str(key or ""))
+    key = _EPISODE_TAIL.sub("", key)
+    return key
+
+
+def _redundant_alias(key, title_key):
+    if not key or not title_key or key == title_key:
+        return True
+    if key.startswith(title_key) and _EPISODE_TAIL.fullmatch(key[len(title_key) :]):
+        return True
+    return False
 
 
 class ShowMemoryService:
@@ -48,11 +67,12 @@ class ShowMemoryService:
             score = max(0, min(100, int(confidence)))
         except (TypeError, ValueError):
             score = 0
+        title_key = alias_key(title)
         keys = []
         seen = set()
         for raw in list(aliases or []) + [title]:
-            key = alias_key(str(raw or ""))
-            if not key or key in seen or key in GENERIC_ALIAS_KEYS:
+            key = _compact_key(alias_key(str(raw or "")))
+            if not key or key in seen or key in GENERIC_ALIAS_KEYS or _redundant_alias(key, title_key):
                 continue
             seen.add(key)
             keys.append(key)
@@ -61,6 +81,7 @@ class ShowMemoryService:
         owns = connection is None
         if owns:
             connection = connect_sqlite(self.database_path)
+            connection.row_factory = __import__("sqlite3").Row
         try:
             for key in keys:
                 connection.execute(
@@ -81,6 +102,42 @@ class ShowMemoryService:
             if owns:
                 connection.close()
         return len(keys)
+
+    def compact(self, connection=None):
+        owns = connection is None
+        if owns:
+            connection = connect_sqlite(self.database_path)
+        previous_factory = getattr(connection, "row_factory", None)
+        connection.row_factory = __import__("sqlite3").Row
+        try:
+            rows = connection.execute(
+                "SELECT alias_key, canonical_title, source, updated_at FROM learned_show_memory"
+            ).fetchall()
+            drop = []
+            grouped = {}
+            for row in rows:
+                key = _compact_key(str(row["alias_key"] or ""))
+                title_key = alias_key(display_title(str(row["canonical_title"] or "")))
+                raw_key = str(row["alias_key"] or "")
+                if raw_key != key or _redundant_alias(key, title_key):
+                    drop.append(raw_key)
+                    continue
+                grouped.setdefault(title_key, []).append(row)
+            for items in grouped.values():
+                batch = [item for item in items if str(item["source"]) not in PROTECTED_SOURCES]
+                batch.sort(key=lambda item: str(item["updated_at"] or ""), reverse=True)
+                drop.extend(str(item["alias_key"]) for item in batch[MAX_BATCH_ALIASES:])
+            if drop:
+                connection.executemany(
+                    "DELETE FROM learned_show_memory WHERE alias_key = ?",
+                    [(key,) for key in dict.fromkeys(drop)],
+                )
+            if owns:
+                connection.commit()
+        finally:
+            connection.row_factory = previous_factory
+            if owns:
+                connection.close()
 
     def list(self):
         connection = connect_sqlite(self.database_path)

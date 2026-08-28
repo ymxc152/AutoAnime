@@ -182,7 +182,7 @@ test('library title correction is previewed before approval', async ({ page }) =
   await page.getByRole('button', { name: '纠正标题' }).click()
   const correction = page.getByRole('dialog', { name: '纠正标题' })
   await correction.getByLabel('新规范标题').fill('已纠正标题')
-  await correction.getByLabel('修改原因').fill('E2E 人工纠正')
+  await expect(correction.getByRole('button', { name: '识别出错' })).toHaveClass(/active/)
   await correction.getByRole('button', { name: '预览修改' }).click()
   await expect(page.getByText(/待纠正标题/).last()).toBeVisible()
   await expect(page.getByText(/已纠正标题/).last()).toBeVisible()

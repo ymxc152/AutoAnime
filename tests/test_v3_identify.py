@@ -211,6 +211,22 @@ class IdentifyMemoryServiceTests(unittest.TestCase):
         overlay = ShowMemoryService(self.database).load_overlay()
         self.assertEqual(overlay["aliases"]["frieren"], "葬送的芙莉莲")
 
+    def test_memory_drops_episode_tails_and_caps_batch_aliases(self):
+        from autoanime_v3.services.memory import ShowMemoryService
+
+        service = ShowMemoryService(self.database)
+        service.remember(
+            ["真实link测试 S01E01.mkv", "真实link测试 S01E02.mkv", "真实link测试"],
+            "测试",
+        )
+        keys = {item["alias_key"] for item in service.list()}
+        self.assertIn("真实link测试", keys)
+        self.assertNotIn("测试", keys)
+        self.assertTrue(all(not key.endswith("e01") and not key.endswith("e02") for key in keys))
+        service.remember([f"AltName{index}" for index in range(20)], "测试")
+        batch = [item for item in service.list() if item["canonical_title"] == "测试"]
+        self.assertLessEqual(len(batch), 8)
+
     def test_learned_alias_accepts_new_filename_on_later_scan(self):
         from autoanime_v3.services.memory import ShowMemoryService
         from autoanime_v3.services.scans import ScanService

@@ -38,6 +38,12 @@ FORBIDDEN_PROPOSAL_FIELDS = {
     "destination_relative_path",
 }
 JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+INTERNAL_REASON = re.compile(
+    r"(canonical_title|library_correction|normalized_key|media_type|title_locked|proposal_json)",
+    re.IGNORECASE,
+)
+CHAT_ATTEMPTS = 3
+AI_DISABLED = "__ai_disabled__"
 
 
 def _json_safe(value):
@@ -96,10 +102,29 @@ def _sanitize_proposal(raw, kind):
             proposal["aliases"] = [str(item).strip() for item in aliases if str(item).strip()]
         else:
             proposal.pop("aliases")
+    reason = str(proposal.get("reason") or "").strip()
+    if not reason or len(reason) > 80 or INTERNAL_REASON.search(reason):
+        proposal.pop("reason", None)
     valid = bool(proposal.get("title"))
     if kind == "review":
         valid = valid or proposal.get("season") is not None or proposal.get("episode") is not None
     return proposal if valid else None
+
+
+def _assistant_content(proposal, raw_content):
+    if raw_content == AI_DISABLED:
+        return "AI 未启用。请先在设置中打开 AI 识别后再试。"
+    if raw_content is None:
+        return "连续 3 次未能连上 AI，请稍后重试。"
+    if proposal is None:
+        return "未生成可应用的提案，请再说明正确标题、季度或集号。"
+    reason = str(proposal.get("reason") or "").strip()
+    if reason and len(reason) <= 80 and not INTERNAL_REASON.search(reason):
+        return reason
+    title = str(proposal.get("title") or "").strip()
+    if title:
+        return f"准备将标题纠正为「{title}」。确认后点应用。"
+    return "已根据你的说明生成提案，确认后可以应用。"
 
 
 class AgentChatService:
@@ -173,7 +198,9 @@ class AgentChatService:
         return (
             "你是绑定到当前对象的 AutoAnime 助手。只能提出 title、media_type、season、episode、"
             "release_tag、aliases、reason；绝不能提出 destination、path、action 或任何目标路径。"
-            "请用简短中文说明，并给出一个 JSON 对象。上下文："
+            "对用户只用一两句中文，不要提及字段名、数据库或 JSON。"
+            "reason 必须是给用户看的短句，例如「识别出错，标题应为测试」。"
+            "同时给出一个 JSON 对象。上下文："
             + json.dumps({"kind": kind, "target": _json_safe(target), "learned_aliases": aliases}, ensure_ascii=False)
         )
 
@@ -219,12 +246,7 @@ class AgentChatService:
         finally:
             connection.close()
 
-    def _default_chat_completion(self, messages):
-        from autoanime_v3.services.scans import CoreScanAdapter
-
-        config = CoreScanAdapter(self.database_path)._openai_config()
-        if not config["openai_enabled"]:
-            return None
+    def _chat_once(self, config, messages):
         endpoint = str(config["openai_base_url"]).rstrip("/")
         if not endpoint.endswith("/v1/chat/completions"):
             endpoint += "/v1/chat/completions"
@@ -250,6 +272,34 @@ class AgentChatService:
         except (OSError, KeyError, IndexError, TypeError, ValueError, urllib.error.URLError):
             return None
 
+    def _default_chat_completion(self, messages):
+        from autoanime_v3.services.scans import CoreScanAdapter
+
+        config = CoreScanAdapter(self.database_path)._openai_config()
+        if not config["openai_enabled"]:
+            return None
+        return self._chat_once(config, messages)
+
+    def _complete_with_retry(self, messages, kind):
+        if self.chat_completion is not None:
+            raw_content = self.chat_completion(messages)
+            return raw_content, _sanitize_proposal(_parse_json_object(raw_content), kind)
+
+        from autoanime_v3.services.scans import CoreScanAdapter
+
+        config = CoreScanAdapter(self.database_path)._openai_config()
+        if not config["openai_enabled"]:
+            return AI_DISABLED, None
+        last_raw = None
+        for _ in range(CHAT_ATTEMPTS):
+            last_raw = self._chat_once(config, messages)
+            if last_raw is None:
+                continue
+            proposal = _sanitize_proposal(_parse_json_object(last_raw), kind)
+            if proposal is not None:
+                return last_raw, proposal
+        return last_raw, _sanitize_proposal(_parse_json_object(last_raw), kind) if last_raw else None
+
     def add_message(self, session_id: int, content: str) -> dict:
         session_id = int(session_id)
         text = str(content or "").strip()
@@ -274,19 +324,8 @@ class AgentChatService:
             for item in current["messages"]
             if item["role"] in {"system", "user", "assistant"}
         ]
-        raw_content = (
-            self.chat_completion(llm_messages)
-            if self.chat_completion is not None
-            else self._default_chat_completion(llm_messages)
-        )
-        proposal = _sanitize_proposal(_parse_json_object(raw_content), current["kind"])
-        if raw_content is None:
-            assistant_content = "AI 未启用或暂时不可用，已保存你的消息；当前没有可应用的提案。\n{}"
-        elif proposal is None:
-            assistant_content = "未生成可应用的安全提案。\n" + json.dumps({}, ensure_ascii=False)
-        else:
-            reason = str(proposal.get("reason") or "已根据当前上下文生成安全提案。").strip()
-            assistant_content = reason[:160] + "\n" + json.dumps(proposal, ensure_ascii=False, sort_keys=True)
+        raw_content, proposal = self._complete_with_retry(llm_messages, current["kind"])
+        assistant_content = _assistant_content(proposal, raw_content)
 
         with SqliteUnitOfWork(self.database_path) as uow:
             row = self._session_row(uow.connection, session_id)
@@ -340,7 +379,7 @@ class AgentChatService:
                 session["target_id"],
                 revision,
                 {"canonical_title": title, "title_locked": True},
-                str(proposal.get("reason") or "agent session"),
+                str(proposal.get("reason") or "识别出错"),
             )
             result = CorrectionService(self.database_path).apply(request.id, user_id)
 

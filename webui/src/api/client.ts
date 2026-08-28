@@ -22,7 +22,13 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   const csrf = sessionStorage.getItem(CSRF_KEY)
   if (csrf && init.method && init.method !== 'GET') headers.set('X-CSRF-Token', csrf)
-  const response = await fetch(`/api/v1${path}`, { ...init, headers, credentials: 'same-origin' })
+  let response: Response
+  try {
+    response = await fetch(`/api/v1${path}`, { ...init, headers, credentials: 'same-origin' })
+  } catch (error) {
+    if (error && typeof error === 'object' && 'name' in error && (error as { name?: string }).name === 'AbortError') throw error
+    throw error
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     const failure = extractApiFailure(body, response.status, response.statusText)
@@ -44,7 +50,7 @@ export async function apiText(path: string): Promise<string> {
 
 export const api = {
   get: <T,>(path: string) => apiFetch<T>(path),
-  post: <T,>(path: string, body?: unknown, headers?: HeadersInit) => apiFetch<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body), headers }),
+  post: <T,>(path: string, body?: unknown, headers?: HeadersInit, init: RequestInit = {}) => apiFetch<T>(path, { ...init, method: 'POST', body: body === undefined ? undefined : JSON.stringify(body), headers }),
   put: <T,>(path: string, body: unknown) => apiFetch<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   patch: <T,>(path: string, body: unknown) => apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T,>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'DELETE', body: body === undefined ? undefined : JSON.stringify(body) }),
