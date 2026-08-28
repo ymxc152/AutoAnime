@@ -1,5 +1,6 @@
 """Plan DTO mapping helpers."""
 
+import json
 from pathlib import Path
 
 from autoanime_v3.domain.entities import PlanItemView, PlanView
@@ -41,6 +42,7 @@ def plan_from_rows(plan_row, item_rows):
         revision=int(plan_row["revision"]),
         status=str(plan_row["status"]),
         items=tuple(items),
+        profile_snapshot=json.loads(plan_row["profile_snapshot_json"] or "{}"),
     )
 
 

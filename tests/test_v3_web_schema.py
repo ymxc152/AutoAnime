@@ -91,7 +91,72 @@ class WebSchemaTests(unittest.TestCase):
             ).fetchall()
         finally:
             connection.close()
-        self.assertEqual(rows, [(5,)])
+        self.assertEqual(rows, [(6,)])
+
+    def test_logical_delete_and_history_snapshot_columns_are_migrated(self):
+        migrations = self.migration_module()
+        migrations.run_migrations(self.database)
+
+        connection = sqlite3.connect(str(self.database))
+        try:
+            columns = {
+                table: {row[1] for row in connection.execute("PRAGMA table_info(%s)" % table)}
+                for table in ("scan_profiles", "scan_runs", "plans")
+            }
+        finally:
+            connection.close()
+
+        self.assertTrue(
+            {"deleted_at", "deleted_snapshot_json"}.issubset(columns["scan_profiles"])
+        )
+        self.assertIn("profile_snapshot_json", columns["scan_runs"])
+        self.assertIn("profile_snapshot_json", columns["plans"])
+
+    def test_migration_does_not_write_delete_snapshot_for_active_profiles(self):
+        from autoanime_v3.db import migrations
+
+        engine = migrations.create_engine_for_path(self.database)
+        try:
+            migrations.metadata.create_all(engine)
+        finally:
+            engine.dispose()
+
+        connection = sqlite3.connect(str(self.database))
+        try:
+            connection.execute(
+                """
+                INSERT INTO storage_roots(kind, path, normalized_path)
+                VALUES ('source', 'C:/source', 'c:/source')
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO storage_roots(kind, path, normalized_path)
+                VALUES ('library', 'C:/library', 'c:/library')
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO scan_profiles(
+                    name, source_root_id, library_root_id, mode, execution_policy,
+                    min_confidence, stability_seconds, watch_enabled, enabled, revision
+                ) VALUES ('active', 1, 2, 'link', 'review_all', 80, 30, 0, 1, 1)
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        migrations.run_migrations(self.database)
+
+        connection = sqlite3.connect(str(self.database))
+        try:
+            snapshot = connection.execute(
+                "SELECT deleted_snapshot_json FROM scan_profiles WHERE name = 'active'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertIsNone(snapshot)
 
     def test_migration_adds_plan_item_decision_columns_to_existing_table(self):
         migrations = self.migration_module()

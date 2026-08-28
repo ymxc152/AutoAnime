@@ -145,7 +145,7 @@ class RootService:
             ).fetchone()
             if profile is not None:
                 raise ValidationError(
-                    "Storage root is used by a scan profile; delete the profile first",
+                    "Storage root is used by a scan profile and cannot be deleted; disable the root instead",
                     {"root_id": root_id, "profile": str(profile["name"])},
                 )
             referenced = int(

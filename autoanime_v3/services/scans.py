@@ -6,11 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from autoanime_v3.db.migrations import run_migrations
+from autoanime_v3.db.profile_snapshots import build_profile_snapshot, encode_profile_snapshot
 from autoanime_v3.db.repositories.library import LibraryRepository
 from autoanime_v3.db.repositories.scans import ScanRepository
 from autoanime_v3.db.uow import SqliteUnitOfWork
 from autoanime_v3.domain.entities import ScanOutcome
-from autoanime_v3.domain.errors import NotFoundError, PathOutsideRootError
+from autoanime_v3.domain.errors import NotFoundError, PathOutsideRootError, ValidationError
 from autoanime_v3.organize import analyze_with_agent
 from autoanime_v3.services.roots import normalize_windows_path, path_is_within
 from autoanime_v3.services.rules import RuleService
@@ -146,6 +147,8 @@ class ScanService:
             ).fetchone()
             if profile is None:
                 raise NotFoundError("Scan profile does not exist", {"id": profile_id})
+            if profile["deleted_at"] is not None:
+                raise ValidationError("Scan profile has been deleted and cannot start new scans", {"profile_id": profile_id})
             source = Path(
                 uow.connection.execute(
                     "SELECT path FROM storage_roots WHERE id = ?", (profile["source_root_id"],)
@@ -155,6 +158,14 @@ class ScanService:
                 uow.connection.execute(
                     "SELECT path FROM storage_roots WHERE id = ?", (profile["library_root_id"],)
                 ).fetchone()[0]
+            )
+            profile_snapshot_json = encode_profile_snapshot(
+                build_profile_snapshot(
+                    uow.connection,
+                    profile_id,
+                    profile_row=profile,
+                    snapshot_at=now_iso(),
+                )
             )
         normalized_scope = []
         for value in scope_paths or []:
@@ -211,6 +222,7 @@ class ScanService:
                 rule_version,
                 {"paths": [str(path) for path in normalized_scope]},
                 started_at,
+                profile_snapshot_json,
             )
             result_ids = {}
             for resolution in resolutions:
@@ -296,10 +308,17 @@ class ScanService:
                 """
                 INSERT INTO plans(
                     scan_run_id, profile_id, profile_revision, rule_version,
-                    library_revision, revision, status, summary_json
-                ) VALUES (?, ?, ?, ?, 0, 1, ?, '{}')
+                    library_revision, revision, status, summary_json, profile_snapshot_json
+                ) VALUES (?, ?, ?, ?, 0, 1, ?, '{}', ?)
                 """,
-                (run_id, profile_id, int(profile["revision"]), rule_version, status),
+                (
+                    run_id,
+                    profile_id,
+                    int(profile["revision"]),
+                    rule_version,
+                    status,
+                    profile_snapshot_json,
+                ),
             )
             plan_id = int(cursor.lastrowid)
             for entry in entries:

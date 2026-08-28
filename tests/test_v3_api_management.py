@@ -142,6 +142,24 @@ class ApiManagementTests(unittest.TestCase):
         )
         self.assertEqual(rejected.status_code, 404)
 
+        import sqlite3
+        connection = sqlite3.connect(str(self.settings.database_path))
+        try:
+            connection.execute("UPDATE jobs SET status = 'succeeded' WHERE job_type = 'scan'")
+            connection.commit()
+        finally:
+            connection.close()
+
+        deleted = self.client.request(
+            "DELETE",
+            "/api/v1/profiles/%s" % profile["id"],
+            json={"revision": profile["revision"]},
+            headers=headers,
+        )
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(self.client.get("/api/v1/schedules").json()["items"], [])
+        self.assertEqual(self.client.get("/api/v1/webhook-sources").json()["items"], [])
+
     def test_storage_root_can_be_disabled_and_revalidated(self):
         headers = self.login()
         source = self.root / "source"

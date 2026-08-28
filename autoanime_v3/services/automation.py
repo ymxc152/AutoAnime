@@ -178,7 +178,18 @@ class ScheduleService:
         connection = connect_sqlite(self.database_path)
         connection.row_factory = __import__("sqlite3").Row
         try:
-            return tuple(_schedule_from_row(row) for row in connection.execute("SELECT * FROM schedules ORDER BY id"))
+            return tuple(
+                _schedule_from_row(row)
+                for row in connection.execute(
+                    """
+                    SELECT s.*
+                    FROM schedules s
+                    JOIN scan_profiles p ON p.id = s.profile_id
+                    WHERE p.deleted_at IS NULL
+                    ORDER BY s.id
+                    """
+                )
+            )
         finally:
             connection.close()
 
@@ -307,7 +318,18 @@ class WebhookSourceService:
         connection = connect_sqlite(self.database_path)
         connection.row_factory = __import__("sqlite3").Row
         try:
-            return tuple(_webhook_from_row(row) for row in connection.execute("SELECT * FROM webhook_sources ORDER BY id"))
+            return tuple(
+                _webhook_from_row(row)
+                for row in connection.execute(
+                    """
+                    SELECT w.*
+                    FROM webhook_sources w
+                    JOIN scan_profiles p ON p.id = w.profile_id
+                    WHERE p.deleted_at IS NULL
+                    ORDER BY w.id
+                    """
+                )
+            )
         finally:
             connection.close()
 

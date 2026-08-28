@@ -175,6 +175,7 @@ class PlanView:
     revision: int
     status: str
     items: Tuple[PlanItemView, ...]
+    profile_snapshot: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

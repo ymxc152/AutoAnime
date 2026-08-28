@@ -10,11 +10,11 @@ function text(details: Details, key: string): string {
 }
 
 const MESSAGES: Record<string, string | ((details: Details) => string)> = {
-  'Storage root is used by a scan profile; delete the profile first': details => {
+  'Storage root is used by a scan profile and cannot be deleted; disable the root instead': details => {
     const name = text(details, 'profile')
     return name
-      ? `该目录正被扫描方案「${name}」使用，请先删除对应扫描方案`
-      : '该目录正被扫描方案使用，请先删除对应扫描方案'
+      ? `该目录正被扫描方案「${name}」使用，无法删除，请直接停用该目录`
+      : '该目录正被扫描方案使用，无法删除，请直接停用该目录'
   },
   'Storage root contains recorded files and cannot be deleted': details => {
     const files = text(details, 'files')
@@ -50,6 +50,9 @@ const MESSAGES: Record<string, string | ((details: Details) => string)> = {
   'Profile numeric fields must contain integers': '扫描方案的数值字段必须是整数',
   'Profile boolean fields must be true or false': '扫描方案的开关字段必须为是或否',
   'Source and library roots cannot be equal or nested': '下载源与媒体库不能相同或相互嵌套',
+  'Scan profile has an active scan job and cannot be deleted; wait or cancel it first': '该扫描方案仍有正在运行的扫描任务，请等待任务完成或先取消任务',
+  'Scan profile has been deleted and cannot be changed': '该扫描方案已删除，无法修改',
+  'Scan profile has been deleted and cannot start new scans': '该扫描方案已删除，无法发起新的扫描',
 
   'Administrator username or password is too short': '管理员用户名过短或密码不足 12 位',
   'Administrator has already been created': '管理员账号已经创建过了',

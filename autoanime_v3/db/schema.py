@@ -140,6 +140,8 @@ scan_profiles = Table(
     Column("watch_enabled", Boolean, nullable=False, server_default=text("0")),
     Column("enabled", Boolean, nullable=False, server_default=text("1")),
     Column("revision", Integer, nullable=False, server_default=text("1")),
+    Column("deleted_at", String(32)),
+    Column("deleted_snapshot_json", Text),
     CheckConstraint("source_root_id <> library_root_id", name="different_roots"),
     *utc_columns(),
 )
@@ -385,6 +387,7 @@ scan_runs = Table(
     Column("rule_version", String(64), nullable=False),
     Column("scope_json", Text, nullable=False),
     Column("statistics_json", Text, nullable=False, server_default=text("'{}'")),
+    Column("profile_snapshot_json", Text, nullable=False, server_default=text("'{}'")),
     Column("started_at", String(32), nullable=False),
     Column("finished_at", String(32)),
 )
@@ -437,6 +440,7 @@ plans = Table(
     Column("revision", Integer, nullable=False),
     Column("status", String(32), nullable=False),
     Column("summary_json", Text, nullable=False),
+    Column("profile_snapshot_json", Text, nullable=False, server_default=text("'{}'")),
     Column("approved_by", ForeignKey("users.id", ondelete="SET NULL")),
     Column("approved_at", String(32)),
     Column("created_at", String(32), nullable=False, server_default=text("CURRENT_TIMESTAMP")),

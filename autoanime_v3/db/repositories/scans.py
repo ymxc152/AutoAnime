@@ -7,15 +7,30 @@ class ScanRepository:
     def __init__(self, connection):
         self.connection = connection
 
-    def create_run(self, profile_id, profile_revision, rule_version, scope, started_at):
+    def create_run(
+        self,
+        profile_id,
+        profile_revision,
+        rule_version,
+        scope,
+        started_at,
+        profile_snapshot_json,
+    ):
         cursor = self.connection.execute(
             """
             INSERT INTO scan_runs(
                 profile_id, profile_revision, rule_version, scope_json,
-                statistics_json, started_at
-            ) VALUES (?, ?, ?, ?, '{}', ?)
+                statistics_json, profile_snapshot_json, started_at
+            ) VALUES (?, ?, ?, ?, '{}', ?, ?)
             """,
-            (profile_id, profile_revision, rule_version, json.dumps(scope), started_at),
+            (
+                profile_id,
+                profile_revision,
+                rule_version,
+                json.dumps(scope),
+                profile_snapshot_json,
+                started_at,
+            ),
         )
         return int(cursor.lastrowid)
 

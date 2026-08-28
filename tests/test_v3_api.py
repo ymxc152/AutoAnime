@@ -257,11 +257,20 @@ class ApiTests(unittest.TestCase):
             CreateProfile("del-profile", source_root.id, library_root.id)
         )
         headers = {"X-CSRF-Token": csrf}
+        listed_roots = {
+            item["id"]: item for item in self.client.get("/api/v1/roots").json()["items"]
+        }
+        self.assertEqual(listed_roots[library_root.id]["profile_count"], 1)
+        self.assertEqual(listed_roots[library_root.id]["file_count"], 0)
         # A root referenced by a profile cannot be deleted.
         blocked = self.client.delete(
             "/api/v1/roots/%s" % library_root.id, headers=headers
         )
         self.assertEqual(blocked.status_code, 422)
+        self.assertEqual(
+            blocked.json()["message"],
+            "Storage root is used by a scan profile and cannot be deleted; disable the root instead",
+        )
         # A free root (operations log) can be deleted.
         deleted = self.client.delete("/api/v1/roots/%s" % spare_root.id, headers=headers)
         self.assertEqual(deleted.status_code, 204)
@@ -270,7 +279,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.delete("/api/v1/roots/%s" % spare_root.id).status_code, 403
         )
-        # After the referencing profile is deleted the root becomes deletable.
+        # A logically deleted profile still protects its historical root reference.
         self.assertEqual(
             self.client.request(
                 "DELETE",
@@ -282,10 +291,10 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(
             self.client.delete("/api/v1/roots/%s" % library_root.id, headers=headers).status_code,
-            204,
+            422,
         )
 
-    def test_delete_profile_blocks_history_and_deletes_fresh(self):
+    def test_delete_profile_preserves_history_and_hides_profile(self):
         csrf = self.login_default()
         base = Path(self.temporary_directory.name)
         source = base / "p-source"
@@ -305,36 +314,60 @@ class ApiTests(unittest.TestCase):
             CreateProfile("used-profile", source_root.id, library_root.id)
         )
         (source / "删除测试 S01E01.mkv").write_bytes(b"x" * 512)
-        ScanService(self.settings.database_path).run(used.id)
+        outcome = ScanService(self.settings.database_path).run(used.id)
         headers = {"X-CSRF-Token": csrf}
-        # A profile with scan/plan history cannot be deleted.
-        blocked = self.client.request(
+        # A profile with scan/plan history is logically deleted.
+        deleted_used = self.client.request(
             "DELETE",
             "/api/v1/profiles/%s" % used.id,
             json={"revision": used.revision},
             headers=headers,
         )
-        self.assertEqual(blocked.status_code, 422)
-        disabled = self.client.patch(
+        self.assertEqual(deleted_used.status_code, 204)
+        blocked_update = self.client.patch(
             "/api/v1/profiles/%s" % used.id,
-            json={"revision": used.revision, "patch": {"enabled": False}},
+            json={"revision": used.revision, "patch": {"enabled": True}},
             headers=headers,
         )
-        self.assertEqual(disabled.status_code, 200)
-        self.assertFalse(disabled.json()["enabled"])
-        import sqlite3
+        self.assertEqual(blocked_update.status_code, 422)
+        blocked_scan = self.client.post(
+            "/api/v1/jobs/scans",
+            json={"profile_id": used.id, "paths": []},
+            headers=headers,
+        )
+        self.assertEqual(blocked_scan.status_code, 422)
+        self.assertEqual(
+            blocked_scan.json()["message"],
+            "Scan profile has been deleted and cannot start new scans",
+        )
 
+        import json
+        import sqlite3
         connection = sqlite3.connect(str(self.settings.database_path))
+        connection.row_factory = sqlite3.Row
         try:
-            scan_runs, plans = connection.execute(
-                "SELECT COUNT(*), (SELECT COUNT(*) FROM plans WHERE profile_id = ?) "
-                "FROM scan_runs WHERE profile_id = ?",
-                (used.id, used.id),
+            profile = connection.execute(
+                "SELECT deleted_at, deleted_snapshot_json FROM scan_profiles WHERE id = ?",
+                (used.id,),
+            ).fetchone()
+            run = connection.execute(
+                "SELECT profile_snapshot_json FROM scan_runs WHERE profile_id = ?",
+                (used.id,),
+            ).fetchone()
+            plan = connection.execute(
+                "SELECT profile_snapshot_json FROM plans WHERE profile_id = ?",
+                (used.id,),
             ).fetchone()
         finally:
             connection.close()
-        self.assertGreater(scan_runs, 0)
-        self.assertGreater(plans, 0)
+        self.assertIsNotNone(profile["deleted_at"])
+        self.assertEqual(json.loads(profile["deleted_snapshot_json"])["name"], "used-profile")
+        self.assertEqual(json.loads(run["profile_snapshot_json"])["name"], "used-profile")
+        self.assertEqual(json.loads(plan["profile_snapshot_json"])["name"], "used-profile")
+        history_plans = self.client.get("/api/v1/plans").json()["items"]
+        history_plan = next(item for item in history_plans if item["id"] == outcome.plan_id)
+        self.assertEqual(history_plan["profile_name"], "used-profile")
+        self.assertEqual(history_plan["profile_snapshot"]["source_path"], str(source.resolve()))
         # A fresh profile without history can be deleted.
         fresh = profiles.create_profile(
             CreateProfile("fresh-profile", source_root.id, library_root.id)
@@ -343,8 +376,7 @@ class ApiTests(unittest.TestCase):
             item["id"]: item
             for item in self.client.get("/api/v1/profiles").json()["items"]
         }
-        self.assertGreater(listed[used.id]["scan_runs"], 0)
-        self.assertGreater(listed[used.id]["plans"], 0)
+        self.assertNotIn(used.id, listed)
         self.assertEqual(listed[fresh.id]["scan_runs"], 0)
         self.assertEqual(listed[fresh.id]["plans"], 0)
         deleted = self.client.request(
@@ -355,7 +387,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(deleted.status_code, 204)
         remaining = self.client.get("/api/v1/profiles").json()["items"]
-        self.assertEqual([item["id"] for item in remaining], [used.id])
+        self.assertEqual(remaining, [])
         # Stale revision is rejected.
         stale = self.client.request(
             "DELETE",
@@ -363,7 +395,7 @@ class ApiTests(unittest.TestCase):
             json={"revision": 0},
             headers=headers,
         )
-        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.status_code, 404)
 
     def test_delete_plan_dismisses_stale_and_guards_open_reviews(self):
         csrf = self.login_default()

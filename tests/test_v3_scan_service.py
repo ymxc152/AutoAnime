@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,6 +96,35 @@ class ScanServiceTests(unittest.TestCase):
             connection.close()
         self.assertEqual(open_reviews, 1)
         self.assertEqual(payload_rows, 1)
+
+    def test_scan_and_plan_store_the_profile_snapshot(self):
+        (self.source / "快照测试 S01E01.mkv").write_bytes(b"snapshot-media")
+
+        from autoanime_v3.services.scans import ScanService
+
+        outcome = ScanService(self.database).run(self.profile.id)
+
+        connection = sqlite3.connect(str(self.database))
+        connection.row_factory = sqlite3.Row
+        try:
+            run = connection.execute(
+                "SELECT profile_snapshot_json FROM scan_runs WHERE id = ?",
+                (outcome.scan_run_id,),
+            ).fetchone()
+            plan = connection.execute(
+                "SELECT profile_snapshot_json FROM plans WHERE id = ?",
+                (outcome.plan_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        run_snapshot = json.loads(run["profile_snapshot_json"])
+        plan_snapshot = json.loads(plan["profile_snapshot_json"])
+        self.assertEqual(run_snapshot, plan_snapshot)
+        self.assertEqual(run_snapshot["name"], "默认整理")
+        self.assertEqual(run_snapshot["revision"], self.profile.revision)
+        self.assertEqual(run_snapshot["source_path"], str(self.source.resolve()))
+        self.assertEqual(run_snapshot["library_path"], str(self.library.resolve()))
 
 
 if __name__ == "__main__":

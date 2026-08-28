@@ -6,16 +6,16 @@ describe('translateApiMessage', () => {
   it('translates the storage-root-in-use error and includes the profile name', () => {
     expect(translateApiMessage(
       'validation_error',
-      'Storage root is used by a scan profile; delete the profile first',
+      'Storage root is used by a scan profile and cannot be deleted; disable the root instead',
       { root_id: 3, profile: '默认配置' },
-    )).toBe('该目录正被扫描方案「默认配置」使用，请先删除对应扫描方案')
+    )).toBe('该目录正被扫描方案「默认配置」使用，无法删除，请直接停用该目录')
   })
 
   it('falls back without a profile name', () => {
     expect(translateApiMessage(
       'validation_error',
-      'Storage root is used by a scan profile; delete the profile first',
-    )).toBe('该目录正被扫描方案使用，请先删除对应扫描方案')
+      'Storage root is used by a scan profile and cannot be deleted; disable the root instead',
+    )).toBe('该目录正被扫描方案使用，无法删除，请直接停用该目录')
   })
 
   it('keeps already-Chinese messages', () => {
@@ -34,6 +34,21 @@ describe('translateApiMessage', () => {
   it('translates extra executor and settings messages', () => {
     expect(translateApiMessage('validation_error', 'Destination became occupied after preview')).toBe('预览后目标位置已被占用')
     expect(translateApiMessage('revision_conflict', 'Setting was changed by another request')).toBe('设置已被其他操作修改，请刷新后重试')
+  })
+
+  it('translates logical-delete profile guard messages', () => {
+    expect(translateApiMessage(
+      'validation_error',
+      'Scan profile has an active scan job and cannot be deleted; wait or cancel it first',
+    )).toBe('该扫描方案仍有正在运行的扫描任务，请等待任务完成或先取消任务')
+    expect(translateApiMessage(
+      'validation_error',
+      'Scan profile has been deleted and cannot be changed',
+    )).toBe('该扫描方案已删除，无法修改')
+    expect(translateApiMessage(
+      'validation_error',
+      'Scan profile has been deleted and cannot start new scans',
+    )).toBe('该扫描方案已删除，无法发起新的扫描')
   })
 })
 

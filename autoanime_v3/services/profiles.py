@@ -1,8 +1,11 @@
-"""Scan-profile creation and optimistic updates."""
+"""Scan-profile creation, optimistic updates, and logical deletion."""
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from autoanime_v3.db.migrations import run_migrations
+from autoanime_v3.db.profile_snapshots import build_profile_snapshot, encode_profile_snapshot
 from autoanime_v3.db.repositories.profiles import ProfileRepository
 from autoanime_v3.db.repositories.roots import RootRepository
 from autoanime_v3.db.uow import SqliteUnitOfWork
@@ -47,37 +50,51 @@ class ProfileService:
     def delete_profile(self, profile_id, revision):
         with SqliteUnitOfWork(self.database_path) as uow:
             repository = ProfileRepository(uow.connection)
-            existing = repository.get(profile_id)
-            if existing is None:
+            existing_row = uow.connection.execute(
+                "SELECT * FROM scan_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            if existing_row is None or existing_row["deleted_at"] is not None:
                 raise NotFoundError("Scan profile does not exist", {"id": profile_id})
-            if int(existing.revision) != int(revision):
+            if int(existing_row["revision"]) != int(revision):
                 raise RevisionConflictError(
                     "Scan profile was changed by another request",
-                    {"expected_revision": revision, "actual_revision": existing.revision},
+                    {"expected_revision": revision, "actual_revision": existing_row["revision"]},
                 )
-            scan_runs = int(
-                uow.connection.execute(
-                    "SELECT COUNT(*) FROM scan_runs WHERE profile_id = ?", (profile_id,)
-                ).fetchone()[0]
+            active_jobs = uow.connection.execute(
+                "SELECT payload_json FROM jobs WHERE job_type = 'scan' AND status IN ('queued', 'running', 'leased')"
+            ).fetchall()
+            for job in active_jobs:
+                try:
+                    payload = json.loads(job["payload_json"] or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if int(payload.get("profile_id", -1)) == int(profile_id):
+                    raise ValidationError(
+                        "Scan profile has an active scan job and cannot be deleted; wait or cancel it first",
+                        {"profile_id": profile_id},
+                    )
+            snapshot = build_profile_snapshot(
+                uow.connection,
+                profile_id,
+                profile_row=existing_row,
+                snapshot_at=datetime.now(timezone.utc).isoformat(),
             )
-            if scan_runs > 0:
+            deleted = uow.connection.execute(
+                """
+                UPDATE scan_profiles
+                SET enabled = 0, watch_enabled = 0, deleted_at = CURRENT_TIMESTAMP,
+                    deleted_snapshot_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND revision = ? AND deleted_at IS NULL
+                """,
+                (encode_profile_snapshot(snapshot), profile_id, revision),
+            ).rowcount
+            if deleted != 1:
                 raise ValidationError(
-                    "Scan profile has scan history and cannot be deleted; disable it instead",
-                    {"profile_id": profile_id, "scan_runs": scan_runs},
+                    "Scan profile was changed by another request",
+                    {"expected_revision": revision, "actual_revision": existing_row["revision"]},
                 )
-            plans = int(
-                uow.connection.execute(
-                    "SELECT COUNT(*) FROM plans WHERE profile_id = ?", (profile_id,)
-                ).fetchone()[0]
-            )
-            if plans > 0:
-                raise ValidationError(
-                    "Scan profile has plan history and cannot be deleted; disable it instead",
-                    {"profile_id": profile_id, "plans": plans},
-                )
-            uow.connection.execute(
-                "DELETE FROM scan_profiles WHERE id = ?", (profile_id,)
-            )
+            uow.connection.execute("DELETE FROM schedules WHERE profile_id = ?", (profile_id,))
+            uow.connection.execute("DELETE FROM webhook_sources WHERE profile_id = ?", (profile_id,))
             uow.commit()
             return {"id": profile_id, "deleted": True}
 
@@ -123,6 +140,11 @@ class ProfileService:
             existing = repository.get(profile_id)
             if existing is None:
                 raise NotFoundError("Scan profile does not exist", {"id": profile_id})
+            deleted_at = uow.connection.execute(
+                "SELECT deleted_at FROM scan_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()["deleted_at"]
+            if deleted_at is not None:
+                raise ValidationError("Scan profile has been deleted and cannot be changed", {"profile_id": profile_id})
             roots = RootRepository(uow.connection)
             source = roots.get(patch.get("source_root_id", existing.source_root_id))
             library = roots.get(patch.get("library_root_id", existing.library_root_id))

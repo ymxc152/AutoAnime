@@ -469,7 +469,20 @@ def create_app(settings, services=None):
 
     @app.get("/api/v1/roots")
     def list_roots(user=Depends(current_user)):
-        return {"items": rows("SELECT * FROM storage_roots ORDER BY id"), "next_cursor": None}
+        return {
+            "items": rows(
+                """
+                SELECT r.*,
+                       (SELECT COUNT(*)
+                        FROM scan_profiles p
+                        WHERE p.source_root_id = r.id OR p.library_root_id = r.id) AS profile_count,
+                       (SELECT COUNT(*) FROM file_locations fl WHERE fl.root_id = r.id) AS file_count
+                FROM storage_roots r
+                ORDER BY r.id
+                """
+            ),
+            "next_cursor": None,
+        }
 
     @app.post("/api/v1/roots", status_code=201)
     def create_root(body: RootBody, user=Depends(changing_user)):
@@ -518,6 +531,7 @@ def create_app(settings, services=None):
                        (SELECT COUNT(*) FROM scan_runs sr WHERE sr.profile_id = p.id) AS scan_runs,
                        (SELECT COUNT(*) FROM plans pl WHERE pl.profile_id = p.id) AS plans
                 FROM scan_profiles p
+                WHERE p.deleted_at IS NULL
                 ORDER BY p.id
                 """
             ),
@@ -668,7 +682,12 @@ def create_app(settings, services=None):
 
     @app.get("/api/v1/plans")
     def list_plans(user=Depends(current_user)):
-        return {"items": rows("SELECT * FROM plans ORDER BY id DESC LIMIT 100"), "next_cursor": None}
+        items = rows("SELECT * FROM plans ORDER BY id DESC LIMIT 100")
+        for item in items:
+            snapshot = json.loads(item.get("profile_snapshot_json") or "{}")
+            item["profile_snapshot"] = snapshot
+            item["profile_name"] = snapshot.get("name")
+        return {"items": items, "next_cursor": None}
 
     @app.get("/api/v1/plans/{plan_id}")
     def get_plan(plan_id: int, user=Depends(current_user)):
@@ -707,7 +726,19 @@ def create_app(settings, services=None):
 
     @app.get("/api/v1/operations")
     def list_operations(user=Depends(current_user)):
-        return {"items": rows("SELECT * FROM operation_batches ORDER BY id DESC LIMIT 100"), "next_cursor": None}
+        items = rows(
+            """
+            SELECT ob.*, p.profile_snapshot_json
+            FROM operation_batches ob
+            LEFT JOIN plans p ON p.id = ob.plan_id
+            ORDER BY ob.id DESC LIMIT 100
+            """
+        )
+        for item in items:
+            snapshot = json.loads(item.pop("profile_snapshot_json", None) or "{}")
+            item["profile_snapshot"] = snapshot
+            item["profile_name"] = snapshot.get("name")
+        return {"items": items, "next_cursor": None}
 
     @app.get("/api/v1/operations/{batch_id}")
     def get_operation(batch_id: int, user=Depends(current_user)):

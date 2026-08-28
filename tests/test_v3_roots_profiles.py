@@ -89,6 +89,25 @@ class RootsAndProfilesTests(unittest.TestCase):
         with self.assertRaises(RevisionConflictError):
             profiles.update_profile(profile.id, profile.revision, {"min_confidence": 95})
 
+    def test_profile_delete_rejects_an_active_scan_job(self):
+        from autoanime_v3.domain.entities import CreateProfile
+        from autoanime_v3.domain.errors import ValidationError
+        from autoanime_v3.jobs.queue import JobQueue
+
+        roots, profiles = self.services()
+        source = roots.create_root("source", self.source)
+        library = roots.create_root("library", self.library)
+        profile = profiles.create_profile(CreateProfile("active-job", source.id, library.id))
+        JobQueue(self.database).enqueue(
+            "scan",
+            {"profile_id": profile.id, "paths": []},
+            "active-scan-job",
+            0,
+        )
+
+        with self.assertRaises(ValidationError):
+            profiles.delete_profile(profile.id, profile.revision)
+
     def test_profile_roots_can_be_rebound_and_increment_revision(self):
         from autoanime_v3.domain.entities import CreateProfile
 

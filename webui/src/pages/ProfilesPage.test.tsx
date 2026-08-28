@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProfilesPage } from './ConsolePages'
 
-const { apiGet, apiPatch, profileFixture } = vi.hoisted(() => {
+const { apiGet, apiPatch, apiDelete, profileFixture } = vi.hoisted(() => {
   const profileFixture = {
     id: 1, name: '默认配置', source_root_id: 1, library_root_id: 2,
     mode: 'copy', execution_policy: 'review_all', min_confidence: 91,
@@ -20,8 +20,8 @@ const { apiGet, apiPatch, profileFixture } = vi.hoisted(() => {
       if (path === '/roots') {
         return {
           items: [
-            { id: 1, kind: 'source', path: 'F:\\src', enabled: 1 },
-            { id: 2, kind: 'library', path: 'F:\\lib', enabled: 1 },
+            { id: 1, kind: 'source', path: 'F:\\src', enabled: 1, profile_count: 1, file_count: 0 },
+            { id: 2, kind: 'library', path: 'F:\\lib', enabled: 1, profile_count: 1, file_count: 0 },
             { id: 3, kind: 'source', path: 'F:\\src2', enabled: 1 },
             { id: 4, kind: 'library', path: 'F:\\lib2', enabled: 1 },
           ],
@@ -30,12 +30,13 @@ const { apiGet, apiPatch, profileFixture } = vi.hoisted(() => {
       return { items: [] }
     }),
     apiPatch: vi.fn(async () => ({})),
+    apiDelete: vi.fn(async () => ({})),
     profileFixture,
   }
 })
 
 vi.mock('../api/client', () => ({
-  api: { get: apiGet, post: vi.fn(), patch: apiPatch, put: vi.fn(), delete: vi.fn(), text: vi.fn() },
+  api: { get: apiGet, post: vi.fn(), patch: apiPatch, put: vi.fn(), delete: apiDelete, text: vi.fn() },
 }))
 
 function renderPage() {
@@ -48,6 +49,7 @@ describe('ProfilesPage edit flow', () => {
   beforeEach(() => {
     apiGet.mockClear()
     apiPatch.mockClear()
+    apiDelete.mockClear()
     profileFixture.scan_runs = 1
     profileFixture.plans = 1
     profileFixture.enabled = 1
@@ -94,20 +96,21 @@ describe('ProfilesPage edit flow', () => {
     expect(screen.getByRole('button', { name: '创建扫描方案' })).toBeInTheDocument()
   })
 
-  it('offers disable instead of delete for a profile with history', async () => {
+  it('allows deleting a profile with history while retaining its records', async () => {
     const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderPage()
     await screen.findByText('默认配置')
     const row = document.querySelector('.profile-row') as HTMLElement
 
-    expect(within(row).getByRole('button', { name: '停用' })).toBeInTheDocument()
-    expect(within(row).queryByRole('button', { name: /删除/ })).not.toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: /删除/ })).toBeInTheDocument()
 
-    await user.click(within(row).getByRole('button', { name: '停用' }))
-    expect(apiPatch).toHaveBeenCalledWith('/profiles/1', {
+    await user.click(within(row).getByRole('button', { name: /删除/ }))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('扫描记录、整理计划和回滚审计会保留'))
+    expect(apiDelete).toHaveBeenCalledWith('/profiles/1', {
       revision: 2,
-      patch: { enabled: false },
     })
+    confirm.mockRestore()
   })
 
   it('keeps delete for a profile without history', async () => {
@@ -118,5 +121,18 @@ describe('ProfilesPage edit flow', () => {
     const row = document.querySelector('.profile-row') as HTMLElement
 
     expect(within(row).getByRole('button', { name: /删除/ })).toBeInTheDocument()
+  })
+
+  it('offers disable instead of delete for a root referenced by a profile', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('默认配置')
+    const row = screen.getByText('F:\\lib').closest('tr') as HTMLElement
+
+    expect(within(row).getByRole('button', { name: '停用' })).toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: /删除/ })).not.toBeInTheDocument()
+
+    await user.click(within(row).getByRole('button', { name: '停用' }))
+    expect(apiPatch).toHaveBeenCalledWith('/roots/2', { patch: { enabled: false } })
   })
 })
