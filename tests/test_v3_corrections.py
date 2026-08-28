@@ -213,6 +213,29 @@ class CorrectionServiceTests(unittest.TestCase):
         self.assertTrue(any("测试番A" in str(p) for p in files))
         self.assertTrue(any("测试番B" in str(p) for p in files))
 
+    def test_rename_preserves_existing_version_brackets(self):
+        from autoanime_v3.services.corrections import _build_basename
+
+        name = _build_basename(1, 1, "episode", "测试", "S01E01 - 真实link测试 [version-4b48df26]", ".mp4")
+        self.assertEqual(name, "S01E01 - 测试 [version-4b48df26].mp4")
+
+    def test_rename_reports_missing_library_file(self):
+        from autoanime_v3.domain.errors import ValidationError
+        from autoanime_v3.services.corrections import CorrectionService
+
+        self.organize({"测试番A S01E01.mkv": b"payload-A" * 200})
+        for path in (self.library / "测试番A").rglob("*"):
+            if path.is_file():
+                path.unlink()
+        show = self.show_row("测试番A")
+        service = CorrectionService(self.database, self.operation_dir)
+        impact = service.impact(show[0], "测试番A2")
+        self.assertGreaterEqual(impact["files_missing"], 1)
+        self.assertEqual(impact["files_to_move"], 0)
+        request = self.change_request(show[0], show[2], "测试番A2")
+        with self.assertRaises(ValidationError) as raised:
+            service.apply(request.id)
+        self.assertEqual(raised.exception.message, "Source file is missing")
 
     def test_backfill_library_creates_shows_for_prior_executions(self):
         from autoanime_v3.services.corrections import CorrectionService

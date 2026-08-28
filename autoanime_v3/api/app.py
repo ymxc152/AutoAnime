@@ -511,7 +511,18 @@ def create_app(settings, services=None):
 
     @app.get("/api/v1/profiles")
     def list_profiles(user=Depends(current_user)):
-        return {"items": rows("SELECT * FROM scan_profiles ORDER BY id"), "next_cursor": None}
+        return {
+            "items": rows(
+                """
+                SELECT p.*,
+                       (SELECT COUNT(*) FROM scan_runs sr WHERE sr.profile_id = p.id) AS scan_runs,
+                       (SELECT COUNT(*) FROM plans pl WHERE pl.profile_id = p.id) AS plans
+                FROM scan_profiles p
+                ORDER BY p.id
+                """
+            ),
+            "next_cursor": None,
+        }
 
     @app.post("/api/v1/profiles", status_code=201)
     def create_profile(body: ProfileBody, user=Depends(changing_user)):

@@ -71,7 +71,11 @@ def _strip_version(stem: str) -> str:
 def _build_basename(season, episode, episode_type, title, source_stem, ext) -> str:
     identity = _identity_basename(season, episode, episode_type, title)
     suffix = _version_suffix(source_stem)
-    return identity + (" [%s]" % suffix if suffix else "") + ext
+    if not suffix:
+        return identity + ext
+    if suffix.startswith("["):
+        return identity + " " + suffix + ext
+    return identity + " [%s]" % suffix + ext
 
 
 def _row_dict(row):
@@ -109,7 +113,14 @@ class CorrectionService:
     def impact(self, show_id, new_title):
         """Read-only preview of what a title change would do."""
         new_title = (new_title or "").strip()
-        empty = {"merge": False, "target_show": None, "files_to_move": 0, "files_to_discard": 0}
+        empty = {
+            "merge": False,
+            "target_show": None,
+            "files_to_move": 0,
+            "files_to_discard": 0,
+            "files_missing": 0,
+            "missing_paths": [],
+        }
         if not new_title:
             return empty
         connection = self._connection()
@@ -124,19 +135,33 @@ class CorrectionService:
             assignments = self._assignments(connection, show_id)
         finally:
             connection.close()
+        missing_paths = [
+            str(Path(a["location_path"]))
+            for a in assignments
+            if not Path(a["location_path"]).exists()
+        ]
         if not assignments or alias_key(new_title) == show["normalized_key"]:
             return {
                 "merge": target is not None,
                 "target_show": dict(target) if target is not None else None,
                 "files_to_move": 0,
                 "files_to_discard": 0,
+                "files_missing": len(missing_paths),
+                "missing_paths": missing_paths,
             }
         plan = self.build_plan(show, target, new_title, assignments)
+        missing_set = set(missing_paths)
         return {
             "merge": plan["merge"],
             "target_show": dict(target) if target is not None else None,
-            "files_to_move": sum(1 for s in plan["steps"] if s["op"] == "move"),
+            "files_to_move": sum(
+                1
+                for s in plan["steps"]
+                if s["op"] == "move" and s.get("from_path") not in missing_set
+            ),
             "files_to_discard": sum(1 for s in plan["steps"] if s["op"] == "trash"),
+            "files_missing": len(missing_paths),
+            "missing_paths": missing_paths,
         }
 
     def _assignments(self, connection, show_id):
@@ -198,6 +223,20 @@ class CorrectionService:
                 if destination == location_path:
                     continue
                 validate_library_destination(root_path, destination)
+                if not location_path.exists():
+                    steps.append(
+                        {
+                            "op": "move",
+                            "assignment_id": int(a["assignment_id"]),
+                            "media_file_id": int(a["media_file_id"]),
+                            "location_id": int(a["location_id"]),
+                            "from_path": str(location_path),
+                            "to_path": str(destination),
+                            "survivor": True,
+                        }
+                    )
+                    decisions[int(a["assignment_id"])] = "survivor"
+                    continue
                 identity = _identity_basename(season, episode, etype, corrected_title)
                 existing = self._find_collision(
                     destination, identity, location_path.suffix.lower(), location_path
@@ -290,7 +329,10 @@ class CorrectionService:
         identity, that would collide with the incoming file."""
         if destination.exists():
             return destination
-        for candidate in destination.parent.glob("*" + ext):
+        parent = destination.parent
+        if not parent.is_dir():
+            return None
+        for candidate in parent.glob("*" + ext):
             if candidate == location_path:
                 continue
             if _strip_version(candidate.stem) == identity:
@@ -333,6 +375,13 @@ class CorrectionService:
             return result
 
         plan = self.build_plan(show, target, new_title, assignments)
+        missing = [
+            step["from_path"]
+            for step in plan["steps"]
+            if step.get("from_path") and not Path(step["from_path"]).exists()
+        ]
+        if missing:
+            raise ValidationError("Source file is missing", {"path": missing[0], "count": len(missing)})
         if not plan["steps"]:
             result = self._apply_title_only(request_id, new_title, patch)
             self._remember_correction(show, new_title, patch)
@@ -441,6 +490,18 @@ class CorrectionService:
                     (request_id,),
                 )
                 uow.commit()
+            if isinstance(error, ValidationError):
+                raise
+            if isinstance(error, FileNotFoundError):
+                raise ValidationError(
+                    "Source file is missing",
+                    {"path": str(getattr(error, "filename", None) or "")},
+                ) from error
+            if isinstance(error, OSError):
+                raise ValidationError(
+                    "Source file disappeared before execution",
+                    {"error": str(error)},
+                ) from error
             raise
 
         created = self._apply_database(request_id, show, target, new_title, patch, plan, batch_id, log_path)
@@ -523,6 +584,8 @@ class CorrectionService:
         else:
             from_path = Path(step["from_path"])
             to_path = Path(step["to_path"])
+            if not from_path.exists():
+                raise ValidationError("Source file is missing", {"path": str(from_path)})
             to_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(from_path), str(to_path))
             step["result"] = True

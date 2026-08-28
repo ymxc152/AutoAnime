@@ -315,10 +315,38 @@ class ApiTests(unittest.TestCase):
             headers=headers,
         )
         self.assertEqual(blocked.status_code, 422)
+        disabled = self.client.patch(
+            "/api/v1/profiles/%s" % used.id,
+            json={"revision": used.revision, "patch": {"enabled": False}},
+            headers=headers,
+        )
+        self.assertEqual(disabled.status_code, 200)
+        self.assertFalse(disabled.json()["enabled"])
+        import sqlite3
+
+        connection = sqlite3.connect(str(self.settings.database_path))
+        try:
+            scan_runs, plans = connection.execute(
+                "SELECT COUNT(*), (SELECT COUNT(*) FROM plans WHERE profile_id = ?) "
+                "FROM scan_runs WHERE profile_id = ?",
+                (used.id, used.id),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertGreater(scan_runs, 0)
+        self.assertGreater(plans, 0)
         # A fresh profile without history can be deleted.
         fresh = profiles.create_profile(
             CreateProfile("fresh-profile", source_root.id, library_root.id)
         )
+        listed = {
+            item["id"]: item
+            for item in self.client.get("/api/v1/profiles").json()["items"]
+        }
+        self.assertGreater(listed[used.id]["scan_runs"], 0)
+        self.assertGreater(listed[used.id]["plans"], 0)
+        self.assertEqual(listed[fresh.id]["scan_runs"], 0)
+        self.assertEqual(listed[fresh.id]["plans"], 0)
         deleted = self.client.request(
             "DELETE",
             "/api/v1/profiles/%s" % fresh.id,
