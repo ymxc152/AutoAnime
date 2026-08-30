@@ -16,11 +16,10 @@ import json
 from os import path
 from pathlib import Path as PathlibPath
 from re import sub
-from time import localtime, sleep, strftime, time
-
-from requests import exceptions, post
+from time import localtime, strftime, time
 
 from .. import state
+from ..apis.openai_client import Auxiliary_OpenAIChatCompletionsPost
 from ..config_loader import (
     Auxiliary_GetOpenAIApiKey,
     Auxiliary_ParseBool,
@@ -138,63 +137,27 @@ def Auxiliary_OpenAIIdentifyFileInfo(FileName):
         Auxiliary_NoteOpenAIIdentifyFailure('missing_api_key', '未配置 OPENAI_API_KEY', input_basename=QueryFileName)
         return None
 
-    BaseUrl = state.OPENAI_BASE_URL if state.OPENAI_BASE_URL not in [None, ''] else 'https://api.longcat.chat/openai'
-    ModelName = state.OPENAI_MODEL if state.OPENAI_MODEL not in [None, ''] else 'LongCat-Flash-Chat'
-    TimeoutSeconds = Auxiliary_ParseInt(state.OPENAI_TIMEOUT_SECONDS, 60)
-    if TimeoutSeconds <= 0:
-        TimeoutSeconds = 60
-    RetryTimes = Auxiliary_ParseInt(state.NETERRRECTRYTIMS, 2)
-    if RetryTimes < 0:
-        RetryTimes = 0
-    HttpData = None
+    RequestBody = {
+        'messages': [
+            {
+                'role': 'system',
+                'content': '你是番剧文件识别助手。请根据用户提供的单个文件名，识别并仅输出 JSON：{"anime_name_zh":"简体中文番剧名","anime_name_en":"英文名或常见英文写法","anime_name_romaji":"罗马音","season":"季数字(未知填1)","episode":"集数字或小数","special":false}。anime_name_zh 必须尽量返回简体中文标准名称；若当前无法确定中文，请保持 anime_name_zh 为空字符串，同时尽可能给出 anime_name_en 或 anime_name_romaji。anime_name_zh、anime_name_en、anime_name_romaji 只允许填写番剧主标题，禁止包含季信息（如 S2、Season 2、2nd Season、第二季等）。不要输出解释文本。'
+                '文件名最前面的半角方括号 […] 与全角书名号式标签 【…】 中多为字幕组/发行方标记，不是番剧标题；anime_name_zh、anime_name_en、anime_name_romaji 只填作品主标题。'
+            },
+            {'role': 'user', 'content': PromptBaseName},
+        ],
+    }
+    TemperatureValue = state.OPENAI_TEMPERATURE if state.OPENAI_TEMPERATURE not in [None, ''] else None
+    if TemperatureValue is not None:
+        try:
+            RequestBody['temperature'] = float(TemperatureValue)
+        except Exception:
+            pass
     try:
-        for RetryIndex in range(RetryTimes + 1):
-            try:
-                HttpData = post(
-                    f'{BaseUrl.rstrip("/")}/v1/chat/completions',
-                    json={
-                        'model': ModelName,
-                        'temperature': 0,
-                        'messages': [
-                            {
-                                'role': 'system',
-                                'content': '你是番剧文件识别助手。请根据用户提供的单个文件名，识别并仅输出 JSON：{"anime_name_zh":"简体中文番剧名","anime_name_en":"英文名或常见英文写法","anime_name_romaji":"罗马音","season":"季数字(未知填1)","episode":"集数字或小数","special":false}。anime_name_zh 必须尽量返回简体中文标准名称；若当前无法确定中文，请保持 anime_name_zh 为空字符串，同时尽可能给出 anime_name_en 或 anime_name_romaji。anime_name_zh、anime_name_en、anime_name_romaji 只允许填写番剧主标题，禁止包含季信息（如 S2、Season 2、2nd Season、第二季等）。不要输出解释文本。'
-                                '文件名最前面的半角方括号 […] 与全角书名号式标签 【…】 中多为字幕组/发行方标记，不是番剧标题；anime_name_zh、anime_name_en、anime_name_romaji 只填作品主标题。'
-                            },
-                            {'role': 'user', 'content': PromptBaseName},
-                        ],
-                    },
-                    headers={
-                        'Authorization': f'Bearer {ApiKey}',
-                        'Content-Type': 'application/json',
-                        'User-Agent': f'AutoAnimeMv/{state.Versions}',
-                    },
-                    timeout=TimeoutSeconds,
-                )
-            except exceptions.RequestException as err:
-                Lvl = _OpenAIFailLogLevel()
-                if RetryIndex < RetryTimes:
-                    BackoffSeconds = 2 ** RetryIndex
-                    Auxiliary_Log(f'OpenAI文件识别请求超时/失败，第{RetryIndex+1}/{RetryTimes+1}次重试 (退避 {BackoffSeconds}s): {err}', Lvl)
-                    sleep(BackoffSeconds)
-                    continue
-                Auxiliary_Log(f'OpenAI文件识别请求失败: {err}', Lvl)
-                Auxiliary_NoteOpenAIIdentifyFailure('http_request_failed', str(err), input_basename=QueryFileName)
-                return None
-            if HttpData.status_code == 200:
-                break
-            Lvl = _OpenAIFailLogLevel()
-            if RetryIndex < RetryTimes:
-                BackoffSeconds = 2 ** RetryIndex
-                Auxiliary_Log(f'OpenAI文件识别请求失败,状态码 {HttpData.status_code}，第{RetryIndex+1}/{RetryTimes+1}次重试 (退避 {BackoffSeconds}s)', Lvl)
-                sleep(BackoffSeconds)
-                continue
-            Auxiliary_Log(f'OpenAI文件识别请求失败,状态码 {HttpData.status_code}', Lvl)
-            Auxiliary_NoteOpenAIIdentifyFailure('http_status', f'status={HttpData.status_code}', input_basename=QueryFileName)
-            return None
+        HttpData = Auxiliary_OpenAIChatCompletionsPost(RequestBody)
         if HttpData in [None, '']:
             Auxiliary_Log('OpenAI文件识别请求失败，未获得有效响应', _OpenAIFailLogLevel())
-            Auxiliary_NoteOpenAIIdentifyFailure('no_http_response', '', input_basename=QueryFileName)
+            Auxiliary_NoteOpenAIIdentifyFailure('no_http_response', '所有槽位请求失败或返回非成功状态', input_basename=QueryFileName)
             return None
         OpenAIData = HttpData.json()
         if type(OpenAIData) != dict:

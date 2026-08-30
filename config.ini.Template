@@ -5,15 +5,29 @@
 # 是否启用 OpenAI 兼容接口进行名称识别。
 USEOPENAIAPI = True
 # True 时优先走 AI；False 时先走传统回退 API。
-OPENAI_PRIORITY_FIRST = True
+OPENAI_PRIORITY_FIRST = False
 # True 时让 AI 直接识别剧名/季/集；False 时只用 AI 标准化标题。
 OPENAI_IDENTIFY_ALL = True
 # OpenAI 兼容网关基础地址；程序会自动拼接 /v1/chat/completions。
-OPENAI_BASE_URL = https://api.longcat.chat/openai
+# 注意：请填写根地址（不带 /v1），避免请求路径变成 /v1/v1/chat/completions。
+# opencode 免费模型端点根地址为 https://opencode.ai/zen （会拼成 .../zen/v1/chat/completions）。
+OPENAI_BASE_URL = https://opencode.ai/zen
 # 调用的模型名称，需与所选网关支持的模型一致。
-OPENAI_MODEL = LongCat-Flash-Chat
+# 例如 opencode 免费模型：mimo-v2.5-free / big-pickle / ling-3.0-flash-fin-free 等。
+OPENAI_MODEL = mimo-v2.5-free
+# OpenAI 请求的 temperature；kimi-for-coding 等模型要求固定为 1。
+OPENAI_TEMPERATURE =
 # OpenAI 请求超时秒数。
-OPENAI_TIMEOUT_SECONDS = 60
+OPENAI_TIMEOUT_SECONDS = 90
+
+# 多接口槽位轮换：逗号或 | 分隔；留空则仅用 OPENAI_BASE_URL。
+OPENAI_BASE_URLS =
+# 多模型槽位轮换：逗号或 | 分隔，与 OPENAI_BASE_URLS 槽位一一对应（同 URL 可重复列出）。
+OPENAI_MODELS =
+# 多 Key 槽位轮换：逗号或 | 分隔；留空则仅用 OPENAI_API_KEY / 环境变量。
+OPENAI_API_KEYS =
+# 槽位遇到下列状态码时切换下一槽位（免费模型常见 429 限流）。
+OPENAI_KEY_ROTATE_ON_STATUS = 401,429,500,503
 
 # 推荐只在模板中保留环境变量名，不要写真实 key。
 OPENAI_API_KEY_ENV = OPENAI_API_KEY
