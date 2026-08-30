@@ -18,3 +18,32 @@ docs/plans/
 *.aam.bak.*
 Thumbs.db
 Desktop.ini
+
+# 本地 AI 工具运行时目录
+.claude/
+.codex/
+
+# 一次性本地库审计/修复脚本（引用本地盘路径，非通用工具）
+scripts/_*.py
+scripts/_dl_report.txt
+scripts/audit_crossref.py
+scripts/build_fix_plan.py
+scripts/check_downloads_eps.py
+scripts/check_downloads_recent.py
+scripts/create_missing_canonicals.py
+scripts/curate_dl_gaps.py
+scripts/fix_cache_records.py
+scripts/fix_disk_and_cache.py
+scripts/fix_library_audit_v2.py
+scripts/gen_audit_report.py
+scripts/plan_library_fix.py
+scripts/rename_folder_to_nfo.py
+scripts/scan_library_folders.py
+scripts/update_whitelist.py
+scripts/test_nvidia_api.py
+
+# 本地库审计临时产物
+.cache_audit_rows.json
+.cache_scan_audit.json
+.repair_plan_hell.json
+审计报告_动漫库.md
