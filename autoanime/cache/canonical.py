@@ -26,6 +26,7 @@ from ..text_utils import (
 )
 from .audit import Auxiliary_AppendPollutionAudit
 from .persistent import (
+    Auxiliary_DelPersistentCacheAlias,
     Auxiliary_GetPersistentCache,
     Auxiliary_SetPersistentCache,
     Auxiliary_SetPersistentCacheAliasWithMeta,
@@ -231,6 +232,78 @@ def _Auxiliary_FindNormalizedCanonicalID(ChineseTitle):
             if NormalizedExisting != '' and NormalizedExisting == NormalizedTarget:
                 return CID
     return None
+def _Auxiliary_ShouldOverwriteForeignName(OldValue, NewValue, OldSource, NewSource, SameShow):
+    """外文名（en/romaji）是否用新值覆盖旧值。
+
+    原逻辑"仅当现有值为空才写"导致错误的 en/romaji 一旦写入就永驻、且污染随
+    别名索引扩散。本函数给出可自愈的覆盖策略，同时避免低可信覆盖高可信：
+
+      1. 新值缺失 或 与旧值相同 → 不覆盖（无变化）
+      2. 旧值缺失 → 写入
+      3. 新来源优先级 > 旧来源优先级 → 覆盖（manual=100 最高，可纠错一切）
+      4. 优先级相同且新 zh 与旧 zh 是同一部番 → 覆盖（同级重识别 = 同剧更正）
+      5. 其余情况（同级但不同番 / 更低优先级）→ 保留旧值，防止串号污染
+    """
+    if NewValue in [None, ''] or NewValue == OldValue:
+        return False
+    if OldValue in [None, '']:
+        return True
+    NewPriority = Auxiliary_GetTitleSourcePriority(NewSource)
+    OldPriority = Auxiliary_GetTitleSourcePriority(OldSource)
+    if NewPriority > OldPriority:
+        return True
+    if NewPriority == OldPriority and SameShow:
+        return True
+    return False
+
+
+def _Auxiliary_IsForeignNameForeignOwned(FieldValue, CanonicalID, SourceTag):
+    """外文名是否已被「另一部番」的 canonical 认领（作为其别名）。
+
+    例如 romaji "Tenbin" 已被 冷然之天秤 认领，此时把它写到别的 canonical 上
+    就是串号污染。manual / manual_title_whitelist 不受此限制（用户明确指定）。
+    """
+    if FieldValue in [None, '']:
+        return False
+    if str(SourceTag) in ('manual', 'manual_title_whitelist', 'ManualWhitelist'):
+        return False
+    AliasKey = Auxiliary_NormalizeAliasKey(FieldValue)
+    if AliasKey == '':
+        return False
+    Owner = Auxiliary_GetAliasCanonicalID(FieldValue)
+    if Owner in [None, '']:
+        return False
+    return str(Owner) != str(CanonicalID)
+
+
+def _Auxiliary_UnlinkFieldAliasIfOwned(FieldValue, CanonicalID):
+    """解除某个外文名作为别名指向 CanonicalID 的链接（仅当确实指向它且不是当前主名）。
+
+    外文名被覆盖后，旧值不应再作为别名指回本 canonical（否则错误外文名仍可通过
+    别名索引把后续识别串号）。
+    """
+    if FieldValue in [None, '']:
+        return
+    AliasKey = Auxiliary_NormalizeAliasKey(FieldValue)
+    if AliasKey == '':
+        return
+    Rec = Auxiliary_GetCanonicalTitleRecord(CanonicalID)
+    if type(Rec) is dict:
+        for Field in ('zh', 'en', 'romaji'):
+            if Auxiliary_NormalizeAliasKey(Rec.get(Field, '')) == AliasKey:
+                return  # 当前主名仍是该别名，保留
+    CurrentCID = state.TitleAliasIndexDataCache.get(AliasKey)
+    if CurrentCID in [None, '']:
+        CurrentCID = Auxiliary_GetAliasCanonicalID(FieldValue)
+    if str(CurrentCID) == str(CanonicalID):
+        Auxiliary_DelPersistentCacheAlias(AliasKey)
+        Auxiliary_AppendPollutionAudit("alias_removed", {
+            "alias_key": AliasKey,
+            "canonical_id": CanonicalID,
+            "reason": "foreign_name_overwritten",
+        })
+
+
 def Auxiliary_UpsertCanonicalTitle(ChineseTitle='', EnglishTitle='', RomajiTitle='', SourceTag='unknown', AliasList=None):
     ChineseTitle = Auxiliary_NormalizeApiTitle(ChineseTitle)
     EnglishTitle = Auxiliary_NormalizeDisplayTitle(EnglishTitle)
@@ -279,6 +352,15 @@ def Auxiliary_UpsertCanonicalTitle(ChineseTitle='', EnglishTitle='', RomajiTitle
     else:
         CanonicalRecord = ExistingRecord.copy()
         ChangedFlag = False
+    # 预取旧值 / 同剧判定，供外文名自动修正使用
+    SameShow = False
+    NewZhNorm = Auxiliary_NormalizeApiTitle(ChineseTitle)
+    OldZhNorm = Auxiliary_NormalizeApiTitle(CanonicalRecord.get('zh', ''))
+    if NewZhNorm not in [None, ''] and OldZhNorm not in [None, ''] and NewZhNorm == OldZhNorm:
+        SameShow = True
+    RecordSource = CanonicalRecord.get('source', 'unknown')
+    OldEn = CanonicalRecord.get('en', '')
+    OldRomaji = CanonicalRecord.get('romaji', '')
     if Auxiliary_ShouldPreferChineseTitle(CanonicalRecord.get('zh', ''), ChineseTitle, CanonicalRecord.get('source', 'unknown'), SourceTag):
         CanonicalRecord['zh'] = ChineseTitle
         CanonicalRecord['source'] = SourceTag
@@ -286,12 +368,21 @@ def Auxiliary_UpsertCanonicalTitle(ChineseTitle='', EnglishTitle='', RomajiTitle
     elif CanonicalRecord.get('source', '') in [None, '']:
         CanonicalRecord['source'] = SourceTag
         ChangedFlag = True
-    if EnglishTitle not in [None, ''] and CanonicalRecord.get('en', '') in [None, '']:
-        CanonicalRecord['en'] = EnglishTitle
-        ChangedFlag = True
-    if RomajiTitle not in [None, ''] and CanonicalRecord.get('romaji', '') in [None, '']:
-        CanonicalRecord['romaji'] = RomajiTitle
-        ChangedFlag = True
+    if CanonicalRecord.get('locked') is not True:
+        WriteEn = (_Auxiliary_ShouldOverwriteForeignName(OldEn, EnglishTitle, RecordSource, SourceTag, SameShow)
+                   and not _Auxiliary_IsForeignNameForeignOwned(EnglishTitle, CanonicalID, SourceTag))
+        WriteRo = (_Auxiliary_ShouldOverwriteForeignName(OldRomaji, RomajiTitle, RecordSource, SourceTag, SameShow)
+                   and not _Auxiliary_IsForeignNameForeignOwned(RomajiTitle, CanonicalID, SourceTag))
+        if WriteEn:
+            CanonicalRecord['en'] = EnglishTitle
+            ChangedFlag = True
+        if WriteRo:
+            CanonicalRecord['romaji'] = RomajiTitle
+            ChangedFlag = True
+        # 更高优先级来源修正了外文名时，同步提升记录来源，防止同级/低可信来源再次改回
+        if (WriteEn or WriteRo) and Auxiliary_GetTitleSourcePriority(SourceTag) > Auxiliary_GetTitleSourcePriority(RecordSource):
+            CanonicalRecord['source'] = SourceTag
+            ChangedFlag = True
     NewConfidence = max(
         Auxiliary_ParseInt(CanonicalRecord.get('confidence', 0), 0),
         Auxiliary_GetTitleSourcePriority(SourceTag),
@@ -310,5 +401,12 @@ def Auxiliary_UpsertCanonicalTitle(ChineseTitle='', EnglishTitle='', RomajiTitle
         if ak == '' or ak in SeenAliasKeys:
             continue
         SeenAliasKeys.add(ak)
+        if _Auxiliary_IsForeignNameForeignOwned(OneAlias, CanonicalID, SourceTag):
+            continue  # 已被另一部番认领的别名，跳过，防止串号扩散
         Auxiliary_LinkAliasToCanonical(OneAlias, CanonicalID, SourceTag=SourceTag)
+    # 外文名被覆盖后，解除旧值残留的别名链接（防串号继续通过别名索引扩散）
+    if OldEn not in [None, ''] and OldEn != CanonicalRecord.get('en', ''):
+        _Auxiliary_UnlinkFieldAliasIfOwned(OldEn, CanonicalID)
+    if OldRomaji not in [None, ''] and OldRomaji != CanonicalRecord.get('romaji', ''):
+        _Auxiliary_UnlinkFieldAliasIfOwned(OldRomaji, CanonicalID)
     return CanonicalID, CanonicalRecord.get('zh', '')

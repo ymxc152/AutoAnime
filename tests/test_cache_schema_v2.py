@@ -125,6 +125,101 @@ class TestCacheV2Trust(unittest.TestCase):
             self.assertIsNone(persistent.Auxiliary_GetPersistentCache("TitleAliasIndex", "新别名键"))
 
 
+class TestCacheV2ForeignNameAutoCorrect(unittest.TestCase):
+    """外文名（en/romaji）自动修正：可覆盖策略 + 串号防护 + 别名清理"""
+
+    def _rec_en(self, cid):
+        return persistent.Auxiliary_GetPersistentCache("CanonicalTitleIndex", str(cid)) or {}
+
+    def test_lower_priority_does_not_overwrite_en(self):
+        with TemporaryDirectory() as tmp:
+            _init_cache_in_tmp(Path(tmp))
+            _load_save()
+            cid, _ = Auxiliary_UpsertCanonicalTitle("低优先剧", "Wrong", "", "TMDB", [])
+            # 更低优先级来源（openai_identify 75 < TMDB 80）不能覆盖
+            cid2, _ = Auxiliary_UpsertCanonicalTitle("低优先剧", "Correct", "", "openai_identify", [])
+            self.assertEqual(str(cid), str(cid2))
+            self.assertEqual(self._rec_en(cid).get("en"), "Wrong")
+
+    def test_higher_priority_overwrites_en(self):
+        with TemporaryDirectory() as tmp:
+            _init_cache_in_tmp(Path(tmp))
+            _load_save()
+            cid, _ = Auxiliary_UpsertCanonicalTitle("高优先剧", "Wrong", "", "unknown", [])
+            cid2, _ = Auxiliary_UpsertCanonicalTitle("高优先剧", "Correct", "", "Bangumi", [])
+            self.assertEqual(str(cid), str(cid2))
+            self.assertEqual(self._rec_en(cid).get("en"), "Correct")
+
+    def test_same_priority_same_show_overwrites_en(self):
+        with TemporaryDirectory() as tmp:
+            _init_cache_in_tmp(Path(tmp))
+            _load_save()
+            cid, _ = Auxiliary_UpsertCanonicalTitle("同剧重识别", "OldEn", "", "Bangumi", [])
+            cid2, _ = Auxiliary_UpsertCanonicalTitle("同剧重识别", "NewEn", "", "Bangumi", [])
+            self.assertEqual(str(cid), str(cid2))
+            self.assertEqual(self._rec_en(cid).get("en"), "NewEn")
+
+    def test_same_priority_different_show_keeps_en(self):
+        with TemporaryDirectory() as tmp:
+            _init_cache_in_tmp(Path(tmp))
+            _load_save()
+            cid, _ = Auxiliary_UpsertCanonicalTitle("甲剧", "OldEn", "", "Bangumi", [])
+            # 把另一个剧名"乙"作为别名链到同一 canonical
+            Auxiliary_LinkAliasToCanonical("乙", cid, "Bangumi")
+            cid2, _ = Auxiliary_UpsertCanonicalTitle("乙", "OtherEn", "", "Bangumi", [])
+            self.assertEqual(str(cid), str(cid2))
+            self.assertEqual(self._rec_en(cid).get("en"), "OldEn")
+
+    def test_foreign_owned_romaji_not_written(self):
+        with TemporaryDirectory() as tmp:
+            _init_cache_in_tmp(Path(tmp))
+            _load_save()
+            # 乙剧先认领 romaji "tenbin"
+            cid_other, _ = Auxiliary_UpsertCanonicalTitle("冷然之天秤", "Libra", "Tenbin", "Bangumi", [])
+            # 甲剧先建 canonical（zh 别名指向它）
+            cid_a, _ = Auxiliary_UpsertCanonicalTitle("转学后甲剧", "AA", "", "Bangumi", [])
+            self.assertNotEqual(str(cid_a), str(cid_other))
+            # 甲剧再识别，romaji 仍是 "tenbin"（已被乙剧认领）—— 字段写入与别名链接都应被拦截
+            cid_a2, _ = Auxiliary_UpsertCanonicalTitle("转学后甲剧", "AA", "Tenbin", "Bangumi", [])
+            self.assertEqual(str(cid_a), str(cid_a2))
+            self.assertEqual(self._rec_en(cid_a).get("romaji"), "")
+            self.assertEqual(self._rec_en(cid_a).get("en"), "AA")
+            # 别名 tenbin 仍归乙剧，未被串号
+            self.assertEqual(
+                str(persistent.Auxiliary_GetPersistentCache("TitleAliasIndex", "tenbin")), str(cid_other)
+            )
+
+    def test_overwrite_removes_old_en_alias(self):
+        with TemporaryDirectory() as tmp:
+            _init_cache_in_tmp(Path(tmp))
+            _load_save()
+            cid, _ = Auxiliary_UpsertCanonicalTitle("覆盖别名剧", "OldEn", "", "Bangumi", [])
+            # OldEn 已成为指向本 canonical 的别名
+            self.assertEqual(
+                str(persistent.Auxiliary_GetPersistentCache("TitleAliasIndex", "olden")), str(cid)
+            )
+            cid2, _ = Auxiliary_UpsertCanonicalTitle("覆盖别名剧", "NewEn", "", "Bangumi", [])
+            self.assertEqual(str(cid), str(cid2))
+            self.assertEqual(self._rec_en(cid).get("en"), "NewEn")
+            # 旧 en 别名应被解除，不再指向本 canonical
+            self.assertIsNone(persistent.Auxiliary_GetPersistentCache("TitleAliasIndex", "olden"))
+            self.assertEqual(
+                str(persistent.Auxiliary_GetPersistentCache("TitleAliasIndex", "newen")), str(cid)
+            )
+
+    def test_manual_always_overwrites_and_protects(self):
+        with TemporaryDirectory() as tmp:
+            _init_cache_in_tmp(Path(tmp))
+            _load_save()
+            cid, _ = Auxiliary_UpsertCanonicalTitle("手工剧", "Wrong", "", "Bangumi", [])
+            cid2, _ = Auxiliary_UpsertCanonicalTitle("手工剧", "Correct", "", "manual", [])
+            self.assertEqual(str(cid), str(cid2))
+            self.assertEqual(self._rec_en(cid).get("en"), "Correct")
+            # manual 修正后，同级 Bangumi 无法再改回去
+            cid3, _ = Auxiliary_UpsertCanonicalTitle("手工剧", "AgainWrong", "", "Bangumi", [])
+            self.assertEqual(self._rec_en(cid).get("en"), "Correct")
+
+
 class TestCacheV2Atomic(unittest.TestCase):
     """5. 原子写：未 replace 前主文件内容保持"""
 

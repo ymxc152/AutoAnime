@@ -490,6 +490,18 @@ def Auxiliary_SetPersistentCacheAliasWithMeta(
     _mark_subfile_dirty("titles")
 
 
+def Auxiliary_DelPersistentCacheAlias(AliasKey):
+    """从 TitleAliasIndex 删除一条别名（同步内存态与持久层）。"""
+    g = "TitleAliasIndex"
+    if type(state.PersistentApiCache) is dict:
+        gc = state.PersistentApiCache.get(g)
+        if type(gc) is dict and str(AliasKey) in gc:
+            del gc[str(AliasKey)]
+            _mark_subfile_dirty("titles")
+    if hasattr(state, "TitleAliasIndexDataCache") and type(state.TitleAliasIndexDataCache) is dict:
+        state.TitleAliasIndexDataCache.pop(str(AliasKey), None)
+
+
 def Auxiliary_RebuildCanonicalIndexesFromPersistentCache():
     from .canonical import Auxiliary_UpsertCanonicalTitle
     from ..text_utils import (

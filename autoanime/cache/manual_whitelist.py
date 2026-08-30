@@ -78,7 +78,7 @@ def Auxiliary_LoadManualWhitelist(force=False):
         'kanansamawaakumadechoroi': '迦楠大人的白给是恶魔级',
         'mamonogurainoboukensha': '吞噬魔物的冒险者',
         'classde2banmenikawaiionnanokototomodachininatta': '和班上第二可爱的女孩子成了朋友',
-        'honzukinogekokujou': '小书痴的下克上',
+        'honzukinogekokujou': '小书痴的下克上：为了成为图书管理员不择手段！',
         'ponkotsufuukiiintoskirttakegafutekisetsunajknohanashi': '木头风纪委员和迷你裙JK的故事',
         'yuushanorokkotsude': '女神“异世界转生想成为什么”我“勇者的肋骨”',
         'tsuetotsuruginowistoria': '杖与剑的魔剑谭',
@@ -94,6 +94,20 @@ def Auxiliary_LoadManualWhitelist(force=False):
         'kanojookarishimasu': '租借女友',
         'kabushikigaishamagilumire': '魔法光源股份有限公司',
         'gaikotsukishisamatadaimaisekaieodekakechuuii': '骸骨骑士大人异世界冒险中',
+        # Toukutsu Ou 的正确动画中文名是《最强王图鉴 ～The Ultimate Battles～》，不是《盗墓王》
+        '盗墓王': '最强王图鉴 ～The Ultimate Battles～',
+        'toukutsuou': '最强王图鉴 ～The Ultimate Battles～',
+        'tombraiderking': '最强王图鉴 ～The Ultimate Battles～',
+        'daomuwang': '最强王图鉴 ～The Ultimate Battles～',
+        'reiwanodarasan': '令和的斑小姐',
+        '令和的达拉桑': '令和的斑小姐',
+        'darasanofreiwa': '令和的斑小姐',
+        # 千年血战篇：只用带 cour 的键，禁止裸 bleach 覆盖原作 BLEACH
+        'bleachsennenkessenhen': '死神 千年血战篇-祸进谭',
+        'bleachthousandyearbloodwar': '死神 千年血战篇-祸进谭',
+        '千年血战篇': '死神 千年血战篇-祸进谭',
+        '死神千年血战篇': '死神 千年血战篇-祸进谭',
+        '死神千年血战篇祸进谭': '死神 千年血战篇-祸进谭',
     }
     WhitelistPath = Auxiliary_GetManualWhitelistPath()
     if WhitelistPath.exists() == False:

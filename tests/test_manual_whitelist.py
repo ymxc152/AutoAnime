@@ -103,7 +103,7 @@ class TestManualWhitelist(unittest.TestCase):
             ('Kanan-sama wa Akumade Choroi', '迦楠大人的白给是恶魔级'),
             ('Mamonogurai no Boukensha', '吞噬魔物的冒险者'),
             ('Class de 2-banme ni Kawaii Onnanoko to Tomodachi ni Natta', '和班上第二可爱的女孩子成了朋友'),
-            ('Honzuki no Gekokujou', '小书痴的下克上'),
+            ('Honzuki no Gekokujou', '小书痴的下克上：为了成为图书管理员不择手段！'),
             ('Ponkotsu Fuuki Iin to Skirt-take ga Futekisetsu na JK no Hanashi', '木头风纪委员和迷你裙JK的故事'),
             ('Yuusha no Rokkotsu de', '女神“异世界转生想成为什么”我“勇者的肋骨”'),
             ('Tsue to Tsurugi no Wistoria', '杖与剑的魔剑谭'),
@@ -119,6 +119,10 @@ class TestManualWhitelist(unittest.TestCase):
             ('Kanojo Okarishimasu', '租借女友'),
             ('Kabushikigaisha-Magi-Lumi=re', '魔法光源股份有限公司'),
             ('Gaikotsu Kishi-sama, Tadaima Isekai e Odekakechuu II', '骸骨骑士大人异世界冒险中'),
+            ('Toukutsu Ou', '最强王图鉴 ～The Ultimate Battles～'),
+            ('Tomb Raider King', '最强王图鉴 ～The Ultimate Battles～'),
+            ('盜墓王', '最强王图鉴 ～The Ultimate Battles～'),
+            ('BLEACH Sennen Kessen-hen', '死神 千年血战篇-祸进谭'),
         ]
         for raw_name, expected_zh in cases:
             with self.subTest(raw_name=raw_name):
@@ -143,6 +147,15 @@ class TestManualWhitelist(unittest.TestCase):
         self.assertEqual(result[4], '命运：奇异赝品')
         # API 被调过但都未命中
         self.assertTrue(mock_bgm.called or mock_bangumi.called)
+
+    def test_bare_bleach_is_not_whitelisted_as_tybw(self):
+        """裸 Bleach 不得命中千年血战篇，否则原作会被整进祸进谭。"""
+        self.assertIsNone(Auxiliary_GetManualWhitelistedTitle('Bleach'))
+        self.assertIsNone(Auxiliary_GetManualWhitelistedTitle('BLEACH'))
+        self.assertEqual(
+            Auxiliary_GetManualWhitelistedTitle('BLEACH Sennen Kessen-hen'),
+            '死神 千年血战篇-祸进谭',
+        )
 
 
 if __name__ == '__main__':

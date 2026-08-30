@@ -17,19 +17,30 @@ from ..logging_utils import Auxiliary_Log
 
 
 def Auxiliary_PROXY():
-    '''代理'''
-    if state.USEPROXY == True:
-        Auxiliary_Log('代理功能开启')
-        if state.USESYSPROXY == True:
-            Auxiliary_Log('使用系统代理')
-            ProxyTuple = tuple(getproxies().values())
-            if ProxyTuple != ():
-                state.HTTPPROXY, state.HTTPSPROXY, _ = ProxyTuple
-            else:
-                state.HTTPPROXY, state.HTTPSPROXY = '', ''
+    '''代理
+
+    行为优先级：
+    1. USESYSPROXY=True 时优先读取并使用系统代理；
+    2. USEPROXY=True 时使用 config.ini 中手动配置的代理；
+    3. 两者都为 False 时显式关闭代理，避免 requests 自动读取系统代理导致意外。'''
+    if state.USESYSPROXY == True:
+        Auxiliary_Log('使用系统代理')
+        ProxyTuple = tuple(getproxies().values())
+        if ProxyTuple != ():
+            state.HTTPPROXY, state.HTTPSPROXY, _ = ProxyTuple
+        else:
+            state.HTTPPROXY, state.HTTPSPROXY = '', ''
         environ['http_proxy'] = state.HTTPPROXY
         environ['https_proxy'] = state.HTTPSPROXY
         environ['all_proxy'] = state.ALLPROXY
+    elif state.USEPROXY == True:
+        Auxiliary_Log('代理功能开启')
+        environ['http_proxy'] = state.HTTPPROXY
+        environ['https_proxy'] = state.HTTPSPROXY
+        environ['all_proxy'] = state.ALLPROXY
+    else:
+        # 不主动设置代理时，保留环境变量，让 requests 自行读取用户配置的系统/环境代理
+        pass
 
 
 def Auxiliary_Http(Url, flag='GET', JsonData=None, ExtraHeaders=None, Timeout=30, ResponseType='text'):

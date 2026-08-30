@@ -128,10 +128,7 @@ def Auxiliary_ScanDIR(Dir, Flag=0) -> list:
             continue
         if Auxiliary_ScanEntryShouldSkip(RelativeFileNormalized, BaseName):
             continue
-        if Flag == 0 and search(r'S\d{1,2}E\d{1,4}', BaseName, flags=I) == None:
-            Scan(RelativeFile)
-        elif Flag == 1 and search(r'S\d{1,2}E\d{1,4}', BaseName, flags=I) != None:
-            Scan(RelativeFile)
+        Scan(RelativeFile)
 
     # 同步日志清理所需的文件列表
     state.LogsFileList = LogsFileList

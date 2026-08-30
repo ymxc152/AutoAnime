@@ -103,6 +103,24 @@ class TestEpisodeRules(unittest.TestCase):
         )
         self.assertEqual(result, ('2', '8', '02', '08'))
 
+    def test_bare_bleach_does_not_use_tybw_layout(self):
+        """裸 Bleach / 死神 不得套用千年血战篇 13 集季表，避免原作 S04 被改号。"""
+        for en, zh in (('Bleach', '死神'), ('BLEACH', 'BLEACH')):
+            with self.subTest(en=en, zh=zh):
+                result = Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode(
+                    '1', '44', '01', '44', en, en, zh,
+                )
+                self.assertIsNone(result)
+
+    def test_tybw_absolute_episode_maps_to_season_four(self):
+        """千年血战篇绝对集 45（3×13 之后）应映射为 S04E06。"""
+        result = Auxiliary_RemappedAbsoluteEpisodeSeasonEpisode(
+            '1', '45', '01', '45',
+            'BLEACH Sennen Kessen-hen', 'BLEACH Sennen Kessen-hen',
+            '死神 千年血战篇-祸进谭',
+        )
+        self.assertEqual(result, ('4', '6', '04', '06'))
+
 
 if __name__ == '__main__':
     unittest.main()

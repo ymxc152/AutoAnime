@@ -165,6 +165,16 @@ def Auxiliary_IDESE(File):
 def Auxiliary_IDEEP(File, *, _quiet_subtitle: bool = False):
     '''识别剧集。`_quiet_subtitle=True` 时不在失败分支打日志，供 `Auxiliary_IDEASS` 末尾批量汇总。'''
 
+    # 优先识别国际通用 SxxExx / Exx 剧集标记。
+    # 原反向正则使用 flags=I，会把大写 E/S 也当作字母排除，导致 S02E01 这类格式无法抽出集号；
+    # 先正向匹配可绕过该问题，同时避免 H.264、AAC2.0 等技术参数被误识别为剧集。
+    ExplicitMatch = search(r'[Ss](\d{1,2})[Ee](\d{1,4})(?!\d)', File)
+    if ExplicitMatch is not None:
+        return ExplicitMatch.group(2)
+    ExplicitMatch = search(r'(?<![a-z0-9])[Ee](\d{1,4})(?!\d)', File)
+    if ExplicitMatch is not None:
+        return ExplicitMatch.group(1)
+
     try:
         if findall(r'[^0-9.\u4e00-\u9fa5\u0800-\u4e00]([0-9.]{1,4}-[0-9.]{1,4})[^0-9.\u4e00-\u9fa5\u0800-\u4e00]', File[::-1], flags=I) != []:
             if _quiet_subtitle != True:
@@ -188,6 +198,14 @@ def Auxiliary_IDEVDName(File, RAWEP):
     '''识别剧名'''
 
     try:
+        # 优先处理 SxxExx 格式：把季集标记整体作为截断点，避免只按反向集号截断留下 S02E 等残留。
+        SeasonEpisodeMatch = search(r'[Ss]\d{1,2}[Ee]\d{1,4}', File)
+        if SeasonEpisodeMatch is not None:
+            VDName = File[:SeasonEpisodeMatch.start()].strip('=.-_ ')
+            if VDName:
+                Auxiliary_Log(f'通过剧集截断文件名 ==> {VDName}', 'INFO')
+                return VDName
+
         match_result = search(r'[=|-]%s[=|-](.*)' % RAWEP[::-1], File[::-1], flags=I)
         if match_result:
             VDName = match_result.group(1).strip('=-=-=-')[::-1]
