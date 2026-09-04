@@ -52,18 +52,18 @@ def Start_PATH(**kwargs) -> dict:
 
     global USEMODULE,USEPROXY,USESYSPROXY,HTTPPROXY,HTTPSPROXY,ALLPROXY,USEBGMAPI,USETMDBAPI,USEBANGUMIAPI,USELINK,LINKFAILSUSEMOVEFLAGS,USETITLTOEP,PRINTLOGFLAG,RMLOGSFLAG,USEBOTFLAG,TIMELAPSE,SEEPSINGLECHARACTER,JELLYFINFORMAT,NOTLOADEXTLIST,MANDATORYCOVER,NETERRRECTRYTIMS,APIREQUESTSONLYUSECH,USEANIMETAG
     USEMODULE = None
-    USEPROXY = False # 使用代理
-    USESYSPROXY = False # 使用系统代理
-    HTTPPROXY = '' # Http代理
-    HTTPSPROXY = '' # Https代理
+    USEPROXY = True # 使用代理
+    USESYSPROXY = True # 使用系统代理
+    HTTPPROXY = 'http://127.0.0.1:7890' # Http代理
+    HTTPSPROXY = 'http://127.0.0.1:7890' # Https代理
     ALLPROXY = '' # 全部代理
     USEBGMAPI = True # 使用BgmApi
     USETMDBAPI = True # 使用TMDBApi
     USEBANGUMIAPI = True # 使用BangumiApi (中文优化)
-    USELINK = False # 使用硬链接开关
+    USELINK = True # 使用硬链接开关
     JELLYFINFORMAT = False # jellyfin 使用 ISO/639 标准 简体和繁体都使用chi做标识\
     USETITLTOEP = True # 给每个番剧视频加上番剧Title 
-    LINKFAILSUSEMOVEFLAGS = False #硬链接失败时使用MOVE
+    LINKFAILSUSEMOVEFLAGS = True #硬链接失败时使用MOVE
     PRINTLOGFLAG = True if __name__ == '__main__' else False# 打印log开关
     RMLOGSFLAG = 7 # 日志文件超时删除,填数字代表删除多久前的
     USEBOTFLAG = False # 使用TgBot进行通知
@@ -71,7 +71,7 @@ def Start_PATH(**kwargs) -> dict:
     SEEPSINGLECHARACTER = False # SE EP单字符模式 01 -> 1
     NOTLOADEXTLIST = [] # 模块排除列表,格式 exmaple.py,XXXX.py + ,
     MANDATORYCOVER = True # 强制覆盖文件
-    NETERRRECTRYTIMS = 1 # 网络请求错误时的重试次数
+    NETERRRECTRYTIMS = 2 # 网络请求错误时的重试次数
     APIREQUESTSONLYUSECH = False # Api请求只搜索中文部分
     USEANIMETAG = False # 使用番剧tag,带有anime标签的文件才会处理
 

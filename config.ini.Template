@@ -1,34 +1,36 @@
-[Settings]
-# API 配置
-USEBGMAPI = True
-USETMDBAPI = True
-USEBANGUMIAPI = True
+[#Config]
+#PRINTLOGFLAG = False # 打印log开关
+USEMODULE = False # 使用模块
+NOTLOADEXTLIST = 'exmaple1', # 模块排除列表,格式 'exmaple1','exmaple2' + ... ,
+USEANIMETAG = False # 使用番剧tag,带有anime标签的文件才会处理
 
-# 代理配置
-USEPROXY = False
-USESYSPROXY = False
-HTTPPROXY = 
-HTTPSPROXY = 
-ALLPROXY = 
+# NetConfig
+USEPROXY = True # 使用代理
+USESYSPROXY = True # 使用系统代理
+HTTPPROXY = '' # Http代理
+HTTPSPROXY = 'http://10.0.0.1:7890' # Https代理
+ALLPROXY = '' # 全部代理
+USEBGMAPI = True # 使用BgmApi
+USETMDBAPI = True #使用TMDBApi
+NETERRRECTRYTIMS = 1 # 网络请求错误时的重试次数
+APIREQUESTSONLYUSECH = False # Api请求只搜索中文部分
 
-# 文件处理配置
-USELINK = False
-LINKFAILSUSEMOVEFLAGS = False
-MANDATORYCOVER = True
-USETITLTOEP = True
-JELLYFINFORMAT = False
+# File处理Config
+USELINK = True # 使用硬链接开关
+LINKFAILSUSEMOVEFLAGS = False #硬链接失败时使用MOVE
+RMLOGSFLAG = False # 日志文件超时删除,填数字代表删除多久前的
+MANDATORYCOVER = False # 强制覆盖文件
 
-# 日志配置
-PRINTLOGFLAG = True
-RMLOGSFLAG = 7
+# FileName处理Config
+JELLYFINFORMAT = False # jellyfin 使用 ISO/639 标准 简体和繁体都使用chi做标识
+USETITLTOEP = False # 给每个番剧视频加上番剧Title 
 
-# 其他配置
-USEBOTFLAG = False
-TIMELAPSE = 0
-SEEPSINGLECHARACTER = False
-APIREQUESTSONLYUSECH = False
-USEANIMETAG = False
-NETERRRECTRYTIMS = 1
+# 附加Config
+TIMELAPSE = 0 # 延时处理番剧
+SEEPSINGLECHARACTER =False # SE EP单字符模式
 
-# 模块配置
-NOTLOADEXTLIST = 
+[#模块名称1]
+模块参数key = value...... 
+
+[#模块名称2]
+模块参数key = value...... 
