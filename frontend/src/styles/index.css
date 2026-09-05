@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/*
+ * 把 Soft Ink token(--ink-*)映射进 Tailwind 4 主题。
+ * inline 让工具类引用运行时 CSS 变量,.dark 切换即时生效。
+ * 生成的工具类:bg-surface / text-ink / text-ink-secondary /
+ * border-line / text-primary / bg-primary 等见下方注释标注。
+ */
+@theme inline {
+  /* 品牌色 */
+  --color-primary: var(--ink-primary);
+  --color-primary-hover: var(--ink-primary-hover);
+  --color-primary-light: var(--ink-primary-light);
+  --color-accent: var(--ink-accent);
+
+  /* 语义色(小色标专用) */
+  --color-success: var(--ink-success);
+  --color-danger: var(--ink-danger);
+  --color-warning: var(--ink-warning);
+
+  /* 中性面:bg-surface / bg-surface-2 / text-ink / border-line */
+  --color-bg: var(--ink-bg);
+  --color-surface: var(--ink-surface);
+  --color-surface-2: var(--ink-surface-2);
+  --color-ink: var(--ink-text);
+  --color-ink-secondary: var(--ink-text-secondary);
+  --color-ink-muted: var(--ink-text-muted);
+  --color-line: var(--ink-border);
+
+  /* 字体 */
+  --font-sans: var(--ink-font-family);
+  --font-mono: var(--ink-font-mono);
+
+  /* 圆角 */
+  --radius-sm: var(--ink-radius-sm);
+  --radius-md: var(--ink-radius-md);
+  --radius-lg: var(--ink-radius-lg);
+  --radius-xl: var(--ink-radius-xl);
+
+  /* 阴影 */
+  --shadow-soft-sm: var(--ink-shadow-sm);
+  --shadow-soft-md: var(--ink-shadow-md);
+  --shadow-soft-lg: var(--ink-shadow-lg);
+}
+
+/* 类名驱动的暗色变体(.dark 挂在 <html> 上) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  html {
+    font-family: var(--ink-font-family);
+    background-color: var(--ink-bg);
+    color: var(--ink-text);
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--ink-bg);
+    color: var(--ink-text);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 数据文本:mono + tabular-nums(时间戳/集数/速度/哈希/得分/统计) */
+  .data-text {
+    font-family: var(--ink-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ink-primary);
+    outline-offset: 1px;
+  }
+}

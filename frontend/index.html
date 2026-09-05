@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AutoAnime</title>
+    <script>
+      // 主题在首帧前确定,避免闪烁;不做切换动画(第一版纪律)。
+      try {
+        if (localStorage.getItem('autoanime-theme') === 'dark') {
+          document.documentElement.classList.add('dark')
+        }
+      } catch (e) {
+        /* localStorage 不可用时维持浅色 */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
