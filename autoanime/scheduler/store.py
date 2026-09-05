@@ -354,6 +354,27 @@ class LoopStore:
                 ).scalar_one()
             )
 
+    async def list_pending(
+        self, *, status: str | None = None, limit: int = 50, offset: int = 0
+    ) -> tuple[list[PendingQueue], int]:
+        """pending_queue 分页查询（CLI queue 命令读侧）。
+
+        与 E2 ``ApiStore.list_pending_page`` 同一查询语义（id 倒序 + 可选
+        status 过滤 + 总数）：CLI 不反向依赖 web 层（A7 收口方向——web 依赖
+        store，而非 store 依赖 web），故在 scheduler 域内镜像该语义。
+        """
+        async with self._storage.transaction() as session:
+            query = select(PendingQueue).order_by(PendingQueue.id.desc())
+            count_query = select(func.count()).select_from(PendingQueue)
+            if status is not None:
+                query = query.where(PendingQueue.status == status)
+                count_query = count_query.where(PendingQueue.status == status)
+            total = (await session.execute(count_query)).scalar_one()
+            rows = (
+                await session.execute(query.limit(limit).offset(offset))
+            ).scalars().all()
+        return list(rows), int(total)
+
     async def seasons_by_ids(self, season_ids: Sequence[int]) -> list[Season]:
         if not season_ids:
             return []

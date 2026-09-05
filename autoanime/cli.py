@@ -15,11 +15,20 @@ from autoanime.core.enums import (
     MediaType,
     MemorySource,
     MemoryStatus,
+    PendingStatus,
     SeasonState,
     Segment,
 )
 from autoanime.core.interfaces import LlmTransport, ParseResult, RawName, Registry
-from autoanime.core.models import AuditLog, Episode, ParseEvents, RssSource, Season, Series
+from autoanime.core.models import (
+    AuditLog,
+    Episode,
+    ParseEvents,
+    PendingQueue,
+    RssSource,
+    Season,
+    Series,
+)
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
@@ -46,7 +55,6 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("run", help="Process the download queue (placeholder)")
     subparsers.add_parser("import", help="Import a local library (placeholder)")
-    subparsers.add_parser("queue", help="Inspect pending items (placeholder)")
     confirm_parser = subparsers.add_parser(
         "confirm",
         help="Confirm a release's parse result and learn it into parse_memory",
@@ -84,6 +92,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit the full summary as JSON (default: human-readable lines)",
     )
     subparsers.add_parser("init-db", help="Create the v2 SQLite schema")
+    queue_parser = subparsers.add_parser(
+        "queue",
+        help=(
+            "List pending_queue rows awaiting manual confirmation "
+            "(--status filter, --limit cap; table output, --json optional)"
+        ),
+    )
+    queue_parser.add_argument(
+        "--status",
+        choices=sorted(status.value for status in PendingStatus),
+        default=None,
+        help="Only list rows in this status (default: all statuses)",
+    )
+    queue_parser.add_argument(
+        "--limit", type=int, default=50, help="Maximum rows to show (default: 50)"
+    )
+    queue_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit rows as JSON (default: human-readable table)",
+    )
     parse_parser = subparsers.add_parser(
         "parse",
         help=(
@@ -538,6 +567,82 @@ async def _report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pending_row_payload(row: PendingQueue) -> dict[str, object]:
+    """pending_queue 行 → JSON 明细（与 E2 PendingOut 同字段口径）。"""
+    return {
+        "id": row.id,
+        "raw_name": row.raw_name,
+        "stage": row.stage,
+        "reason": row.reason,
+        "status": row.status.value if hasattr(row.status, "value") else str(row.status),
+        "context": dict(row.context or {}),
+        "created_at": (
+            row.created_at.isoformat(timespec="seconds") if row.created_at else None
+        ),
+        "resolved_at": (
+            row.resolved_at.isoformat(timespec="seconds") if row.resolved_at else None
+        ),
+        "resolution": row.resolution,
+    }
+
+
+def _render_pending_table(rows: Sequence[PendingQueue]) -> str:
+    """Human-readable fixed-width table of pending_queue rows."""
+    headers = ("id", "status", "stage", "raw_name", "reason", "created_at")
+    cells = [
+        (
+            str(row.id),
+            str(row.status.value if hasattr(row.status, "value") else row.status),
+            row.stage,
+            row.raw_name,
+            row.reason or "",
+            row.created_at.isoformat(timespec="seconds") if row.created_at else "",
+        )
+        for row in rows
+    ]
+    widths = [
+        max([len(headers[i])] + [len(item[i]) for item in cells])
+        for i in range(len(headers))
+    ]
+    lines = ["  ".join(h.ljust(widths[i]) for i, h in enumerate(headers))]
+    for item in cells:
+        lines.append("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(item)))
+    return "\n".join(lines)
+
+
+async def _queue(args: argparse.Namespace) -> int:
+    """CLI pending_queue 读侧：LoopStore 收口（A7），查询语义同 E2 分页。"""
+    settings = load_settings()
+    storage = SqliteStorage(settings.database_url)
+    try:
+        rows, total = await LoopStore(storage).list_pending(
+            status=args.status, limit=max(args.limit, 0)
+        )
+    except Exception as exc:  # noqa: BLE001 -- 未初始化/旧 schema 给出可操作提示
+        print(f"queue: storage unavailable ({type(exc).__name__}); run 'autoanime init-db'")
+        return 1
+    finally:
+        await storage.close()
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "total": total,
+                    "count": len(rows),
+                    "status": args.status,
+                    "items": [_pending_row_payload(row) for row in rows],
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        scope = f" (status={args.status})" if args.status else ""
+        print(f"pending_queue: showing {len(rows)} of {total} rows{scope}")
+        if rows:
+            print(_render_pending_table(rows))
+    return 0
+
+
 async def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "init-db":
         settings = load_settings()
@@ -550,6 +655,8 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return await _confirm(args)
     if args.command == "report":
         return await _report(args)
+    if args.command == "queue":
+        return await _queue(args)
     if args.command == "subscribe":
         return await _subscribe(args)
     if args.command == "rerun":
