@@ -1,0 +1,12 @@
+{
+  "id": "A02_stable",
+  "dialect": "A",
+  "folder": "Anime.Another.Title.S01.1080p.friDay.WEB-DL-MWeb",
+  "parent_path": "Z:/Downloads",
+  "files": [
+    {"name": "Anime.Another.Title.S01E01.1080p.friDay.WEB-DL.mkv"},
+    {"name": "Anime.Another.Title.S01E02.1080p.friDay.WEB-DL.mkv"}
+  ],
+  "tags": ["source_friday"],
+  "notes": "稳定排序样例"
+}

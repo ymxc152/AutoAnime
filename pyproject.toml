@@ -36,7 +36,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 include = ["autoanime/**", "tests/**"]
-exclude = ["autoanime/alembic/script.py.mako"]
+exclude = ["autoanime/alembic/script.py.mako", "tests/fixtures/**"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

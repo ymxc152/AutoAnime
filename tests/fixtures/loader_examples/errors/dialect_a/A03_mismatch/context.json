@@ -1,0 +1,9 @@
+{
+  "id": "A03_mismatch",
+  "dialect": "B",
+  "folder": "Mismatched.Dialect",
+  "parent_path": "Z:/Downloads",
+  "files": [{"name": "Mismatched.Dialect.E01.mkv"}],
+  "tags": ["invalid"],
+  "notes": "dialect 与目录不一致"
+}
