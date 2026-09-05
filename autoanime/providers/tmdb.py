@@ -143,13 +143,13 @@ class TmdbReference:
         # 命中的剧目不多花一次请求；请求级失败（网络/429 两次/非 JSON）
         # 不再重试第二语言。
         search = await self._search_tv(query, self._language)
-        if search is None:
+        if not isinstance(search, dict):
             return None
         candidates = _parse_search_results(search)
         chosen = pick_candidate(candidates, query)
         if chosen is None:
             alt = await self._search_tv(query, SECOND_LANGUAGE)
-            if alt is None:
+            if not isinstance(alt, dict):
                 return None
             candidates = _merge_candidates(candidates, _parse_search_results(alt))
             chosen = pick_candidate(candidates, query)
