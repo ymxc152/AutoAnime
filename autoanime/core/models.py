@@ -26,6 +26,7 @@ from autoanime.core.enums import (
     MemorySource,
     MemoryStatus,
     PendingStatus,
+    ReleaseStatus,
     ResolvedBy,
     SeasonState,
 )
@@ -86,6 +87,16 @@ class Episode(Base):
 
 
 class ReleaseRecord(Base):
+    """种子候选记录（M1 建表；E4 B4 增量：下载任务生命周期三列）。
+
+    - ``status``：下载任务生命周期（:class:`ReleaseStatus`，候选/已选/
+      下载中/完成/失败），启动补扫「下载完成但未归档」悬挂任务按此列判断；
+    - ``picked_at``/``finished_at``：选定与终态时间（补扫与报表用）。
+
+    ``torrent_hash`` 唯一约束自 M1 起即幂等去重兜底（RSS seen 语义 +
+    并发重复提交双保险）。
+    """
+
     __tablename__ = "release_record"
     __table_args__ = (
         CheckConstraint(
@@ -106,6 +117,11 @@ class ReleaseRecord(Base):
     decision: Mapped[Decision] = mapped_column(_enum(Decision), default=Decision.PENDING)
     reason: Mapped[str | None] = mapped_column(String, nullable=True)
     source_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[ReleaseStatus] = mapped_column(
+        _enum(ReleaseStatus), default=ReleaseStatus.CANDIDATE
+    )
+    picked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ParseMemory(Base):

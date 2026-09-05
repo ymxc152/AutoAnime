@@ -10,15 +10,45 @@ class EpisodeState(StrEnum):
     ORGANIZED = "organized"
     UPGRADED = "upgraded"
     IGNORED = "ignored"
+    # B5（E4 增量）：启动对账发现 ORGANIZED 文件已不在盘上 → 标 FLAGGED +
+    # 通知，不自动修；文件恢复/手动处理后可回到 ORGANIZED。
+    FLAGGED = "flagged"
 
     def can_transition(self, target: EpisodeState) -> bool:
         transitions = {
             self.MISSING: frozenset({self.DOWNLOADING, self.IGNORED}),
             self.DOWNLOADING: frozenset({self.DOWNLOADED, self.IGNORED}),
             self.DOWNLOADED: frozenset({self.ORGANIZED, self.IGNORED}),
-            self.ORGANIZED: frozenset({self.UPGRADED}),
+            self.ORGANIZED: frozenset({self.UPGRADED, self.FLAGGED}),
             self.UPGRADED: frozenset({self.ORGANIZED}),
             self.IGNORED: frozenset(),
+            self.FLAGGED: frozenset({self.ORGANIZED}),
+        }
+        return target in transitions[self]
+
+
+class ReleaseStatus(StrEnum):
+    """release_record 下载任务生命周期（审核 B4，E4 增量）。
+
+    ``candidate``（RSS 新条目入池）→ ``picked``（已选定提交下载器）→
+    ``downloading``（网关确认在下载）→ ``completed``（完成，待归档/已归档
+    归档侧另看 episode 状态）/ ``failed``（失败，可重试回 ``picked``，
+    重试次数上界由网关轮询侧约束 ≤2，不进库）。
+    """
+
+    CANDIDATE = "candidate"
+    PICKED = "picked"
+    DOWNLOADING = "downloading"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+    def can_transition(self, target: ReleaseStatus) -> bool:
+        transitions = {
+            self.CANDIDATE: frozenset({self.PICKED, self.FAILED}),
+            self.PICKED: frozenset({self.DOWNLOADING, self.FAILED, self.CANDIDATE}),
+            self.DOWNLOADING: frozenset({self.COMPLETED, self.FAILED}),
+            self.COMPLETED: frozenset(),
+            self.FAILED: frozenset({self.PICKED}),
         }
         return target in transitions[self]
 

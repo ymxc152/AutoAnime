@@ -18,6 +18,15 @@ dependencies = [
   "fastapi==0.141.1",
   "uvicorn==0.52.4",
   "sse-starlette==3.4.11",
+  # M4 闭环(E4):计划钉版纪律(Plan §0.1 联网核实版)
+  # - feedparser 6.0.x(2026-07 仍活跃发布,非弃维护旧情报);同步库,调用侧一律 asyncio.to_thread(B6)
+  # - APScheduler 钉 3.x 线(3.11.3;4.0 是重写线非默认主线,勿用)
+  # - qbittorrent-api 2026.8.1(calver,持续跟 qBittorrent 5.x);同步库,同样 to_thread 包裹(B6)
+  # - tzdata:zoneinfo 在 Windows/容器精简镜像上无系统时区库,跨平台 JST 判定(D20)必备
+  "feedparser==6.0.14",
+  "apscheduler>=3.11,<4",
+  "qbittorrent-api==2026.8.1",
+  "tzdata>=2024.1",
 ]
 
 [project.scripts]
@@ -30,6 +39,8 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.5",
   "pyright>=1.1",
+  # compose 文件结构自检(D10 本机无 docker 的替代验收,任务提示词第 7 项)用 YAML 解析
+  "pyyaml>=6.0",
 ]
 
 [tool.hatch.build.targets.wheel]
