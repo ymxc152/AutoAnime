@@ -8,9 +8,18 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from autoanime.config import Settings, load_settings
-from autoanime.core.enums import Actor, Confidence, MemorySource, MemoryStatus, Segment
+from autoanime.core.enums import (
+    Actor,
+    Confidence,
+    EpisodeState,
+    MediaType,
+    MemorySource,
+    MemoryStatus,
+    SeasonState,
+    Segment,
+)
 from autoanime.core.interfaces import LlmTransport, ParseResult, RawName, Registry
-from autoanime.core.models import AuditLog, ParseEvents
+from autoanime.core.models import AuditLog, Episode, ParseEvents, RssSource, Season, Series
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
@@ -24,6 +33,9 @@ from autoanime.providers import (
     register_providers,
     register_reference_providers,
 )
+from autoanime.scheduler.clock import SystemClock
+from autoanime.scheduler.scheduler import build_loop
+from autoanime.scheduler.store import LoopStore
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -82,6 +94,44 @@ def _build_parser() -> argparse.ArgumentParser:
     parse_parser.add_argument("--name", required=True, help="File name to parse")
     parse_parser.add_argument("--folder", default=None, help="Optional folder name")
     parse_parser.add_argument("--parent", default=None, help="Optional parent path")
+    # --- E4：订阅闭环（M4） -----------------------------------------------------
+    subscribe_parser = subparsers.add_parser(
+        "subscribe",
+        help=(
+            "Subscribe a series: create Series/Season/Episode rows (air_date 判定"
+            "一律 JST 展示转本地，D20) and optionally attach an RSS source"
+        ),
+    )
+    subscribe_parser.add_argument("--title-cn", default=None, help="Chinese title")
+    subscribe_parser.add_argument("--title-jp", default=None, help="Japanese title")
+    subscribe_parser.add_argument("--title-romaji", default=None, help="Romaji title")
+    subscribe_parser.add_argument("--season", type=int, default=1, help="Season number")
+    subscribe_parser.add_argument(
+        "--episodes", type=int, default=0, help="Pre-generate N MISSING episode rows"
+    )
+    subscribe_parser.add_argument(
+        "--media-type",
+        choices=sorted(t.value for t in MediaType),
+        default=MediaType.TV.value,
+        help="tv|movie|ova|special（Mikan 不支持 OVA/剧场版订阅，走散装导入）",
+    )
+    subscribe_parser.add_argument("--fansub", default=None, help="Preferred fansub group")
+    subscribe_parser.add_argument(
+        "--rss-url", default=None, help="RSS source URL (Mikan 私有订阅含 ?token= 的 URL)"
+    )
+    subscribe_parser.add_argument(
+        "--rss-token", default=None, help="RSS token（密钥：只进库，不进日志/报告）"
+    )
+    rerun_parser = subparsers.add_parser(
+        "rerun",
+        help=(
+            "Run one subscription-loop cycle now (download reconcile + poll; "
+            "与调度器共用同一批 store 入口，A7)"
+        ),
+    )
+    rerun_parser.add_argument(
+        "--source-id", type=int, default=None, help="Only poll this rss_source id"
+    )
     return parser
 
 
@@ -253,6 +303,129 @@ async def _confirm(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _subscribe(args: argparse.Namespace) -> int:
+    """CLI 订阅入口：与调度器/WEB 共用 LoopStore 收口（A7）。
+
+    预生成 ``--episodes`` 条 MISSING 集行（air_date v1 由参考源回填，CLI 不
+    写死假日期——缺集 diff 对无 air_date 的集「不硬拦截只降级」，
+    ARCHITECTURE 5.6）。``--rss-token`` 是密钥：只落库，输出不回显。
+    """
+    if not (args.title_cn or args.title_jp or args.title_romaji):
+        print("subscribe: need at least one of --title-cn/--title-jp/--title-romaji")
+        return 2
+    settings = load_settings()
+    async with SqliteStorage(settings.database_url) as storage:
+        store = LoopStore(storage)
+        series = Series(
+            title_cn=args.title_cn,
+            title_jp=args.title_jp,
+            title_romaji=args.title_romaji,
+            media_type=MediaType(args.media_type),
+            fansub_pref=args.fansub,
+            status="active",
+        )
+        season = Season(number=args.season, status=SeasonState.AIRING)
+        episodes = [
+            Episode(number=number, state=EpisodeState.MISSING)
+            for number in range(1, max(args.episodes, 0) + 1)
+        ]
+        created = await store.create_subscription(series, season, episodes)
+        seasons = await store.seasons_for_series(created.id)
+        season_id = seasons[0].id if seasons else None
+        rss_id: int | None = None
+        if args.rss_url and season_id is not None:
+            saved = await store.add_rss_source(
+                RssSource(
+                    url=args.rss_url,
+                    token=args.rss_token,
+                    season_id=season_id,
+                    enabled=True,
+                )
+            )
+            rss_id = saved.id
+        print(
+            json.dumps(
+                {
+                    "series_id": created.id,
+                    "season_id": season_id,
+                    "episodes_pregenerated": len(episodes),
+                    "rss_source_id": rss_id,
+                    "rss_token_saved": args.rss_token is not None,
+                },
+                ensure_ascii=False,
+            )
+        )
+    return 0
+
+
+async def _rerun(args: argparse.Namespace) -> int:
+    """CLI 手动触发一轮订阅闭环（与调度器共用 poll 入口，A7）。
+
+    顺序：启动补扫（悬挂任务）→ 下载比对 → RSS 轮询（--source-id 限定单
+    源）。输出 JSON 汇总；下载器不可达如实记 notes 不视为失败。
+    """
+    settings = load_settings()
+    components = build_loop(settings)
+    try:
+        await components.storage.create_all()
+        reconcile = await components.download_poller.reconcile_startup(
+            now=_now()
+        )
+        downloads = await components.download_poller.poll_once(now=_now())
+        if args.source_id is not None:
+            source = await components.store.get_rss_source(args.source_id)
+            if source is None:
+                print(json.dumps({"error": f"rss source {args.source_id} not found"}))
+                return 1
+            outcome = await components.rss_poller.poll_source(source, now=_now())
+            outcomes = [outcome]
+            errors: list[str] = []
+        else:
+            report = await components.rss_poller.poll_all(now=_now())
+            outcomes = list(report.outcomes)
+            errors = list(report.errors)
+        print(
+            json.dumps(
+                {
+                    "reconciled": reconcile.reconciled,
+                    "download": {
+                        "checked": downloads.checked,
+                        "completed": downloads.completed,
+                        "failed": downloads.failed,
+                        "retried": downloads.retried,
+                        "notes": list(downloads.notes),
+                    },
+                    "rss": {
+                        "sources": [
+                            {
+                                "source_id": o.source_id,
+                                "season_id": o.season_id,
+                                "skipped_not_due": o.skipped_not_due,
+                                "fetch_error": o.fetch_error,
+                                "entries_total": o.entries_total,
+                                "seen": o.seen,
+                                "rejected": o.rejected,
+                                "backlog": o.backlog,
+                                "picked": o.picked,
+                                "gaps": list(o.gaps),
+                            }
+                            for o in outcomes
+                        ],
+                        "errors": errors,
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
+    finally:
+        await components.close()
+    return 0
+
+
+def _now():
+    return SystemClock().now()
+
+
 def _aggregate_report(
     events: Sequence[Any], audits: Sequence[Any]
 ) -> dict[str, Any]:
@@ -377,6 +550,10 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return await _confirm(args)
     if args.command == "report":
         return await _report(args)
+    if args.command == "subscribe":
+        return await _subscribe(args)
+    if args.command == "rerun":
+        return await _rerun(args)
     if args.command == "parse":
         settings = load_settings()
         orchestrator, storage, transport_obj = await _build_orchestrator(settings)
