@@ -58,7 +58,7 @@ function EpisodeRow({ episode }: { episode: EpisodeDto }) {
       <div className="flex min-w-0 items-center gap-2">
         <StatusDot tone={view.tone} />
         <span className="data-text shrink-0 text-sm text-ink">
-          {t(strings.library.episodeShort, { n: episode.number })}
+          {t(strings.library.episodeShort, { n: String(episode.number).padStart(2, '0') })}
         </span>
         <span className="text-xs text-ink-secondary">{view.label}</span>
       </div>

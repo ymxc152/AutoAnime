@@ -45,7 +45,9 @@ function PipelineNodeView({ data }: NodeProps<Node<PipelineNodeData>>) {
       <p className="mt-0.5 text-xs text-ink-secondary">{data.desc}</p>
       <div className="mt-1.5 flex items-center gap-1.5">
         <Badge tone={data.passing > 0 ? 'primary' : 'neutral'} mark>
-          <span className="data-text">{data.passed}</span>
+          <span className="data-text" data-testid={`node-count-${data.title}`}>
+            {data.passed}
+          </span>
         </Badge>
         {rate !== null && (
           <span className="text-xs text-ink-secondary data-text">

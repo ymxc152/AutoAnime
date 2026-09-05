@@ -58,20 +58,16 @@ function AutonomyPicker({
   )
 }
 
-function SectionField<T extends keyof SettingsDto>(props: {
-  section: T
-  edit: Partial<SettingsDto>
-  data: SettingsDto
-  onChange: (patch: Partial<SettingsDto>) => void
-}): SettingsDto[T] {
-  const edited = props.edit[props.section]
-  return (edited !== undefined ? edited : props.data[props.section]) as SettingsDto[T]
+function parseNumericInput(value: string): number {
+  return Number(value.replace(/[^\d]/g, '') || 0)
 }
 
 export function SettingsPage() {
   const fetcher = useCallback(() => api.settings.get(), [])
   const { data, loading, error, reload } = useApi(fetcher)
   const [edit, setEdit] = useState<Partial<SettingsDto>>({})
+  // 保存成功后立即以服务端返回值为展示基线(useApi 的 data 要等 reload 才更新)
+  const [savedSnapshot, setSavedSnapshot] = useState<SettingsDto | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -101,17 +97,19 @@ export function SettingsPage() {
     )
   }
 
+  const base: SettingsDto = savedSnapshot ?? data
   const dirty = Object.keys(edit).length > 0
-  const downloader = SectionField({ section: 'downloader', edit, data, onChange: patch })
-  const llm = SectionField({ section: 'llm', edit, data, onChange: patch })
-  const quality = SectionField({ section: 'quality', edit, data, onChange: patch })
-  const autonomy = edit.autonomy ?? data.autonomy
+  const downloader = edit.downloader ?? base.downloader
+  const llm = edit.llm ?? base.llm
+  const quality = edit.quality ?? base.quality
+  const autonomy = edit.autonomy ?? base.autonomy
 
   const save = async (): Promise<void> => {
     setSaving(true)
     setSaveError(null)
     try {
-      await api.settings.update({ ...data, ...edit })
+      const savedSettings = await api.settings.update({ ...base, ...edit })
+      setSavedSnapshot(savedSettings)
       setEdit({})
       setSaved(true)
       window.setTimeout(() => setSaved(false), 2500)
@@ -204,7 +202,7 @@ export function SettingsPage() {
                 patch({
                   quality: {
                     ...quality,
-                    upgrade_threshold: Number(e.target.value.replace(/[^\d]/g, '') || 0),
+                    upgrade_threshold: parseNumericInput(e.target.value),
                   },
                 })
               }
@@ -219,7 +217,7 @@ export function SettingsPage() {
                 patch({
                   quality: {
                     ...quality,
-                    max_upgrades_per_episode: Number(e.target.value.replace(/[^\d]/g, '') || 0),
+                    max_upgrades_per_episode: parseNumericInput(e.target.value),
                   },
                 })
               }
@@ -251,7 +249,7 @@ export function SettingsPage() {
                 patch({
                   quality: {
                     ...quality,
-                    skip_size_gb: Number(e.target.value.replace(/[^\d]/g, '') || 0),
+                    skip_size_gb: parseNumericInput(e.target.value),
                   },
                 })
               }

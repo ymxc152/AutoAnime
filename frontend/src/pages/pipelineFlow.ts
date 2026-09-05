@@ -62,14 +62,15 @@ export function pathForEvent(event: SseEvent): PipelineNodeId[] | null {
   if (event.category === 'parse') {
     const level = Number(event.payload.level ?? 0)
     const outcome = String(event.payload.outcome ?? '')
+    // 低置信判定必须先于 level 判定:低置信事件可能带任意 level
+    if (outcome === 'low_confidence' || event.payload.confidence === 'low') {
+      return ['input', 'l1', 'l2', 'arbiter', 'pending']
+    }
     if (level === 1 || outcome === 'l1_high') {
       return ['input', 'l1', 'arbiter', 'organize']
     }
     if (level === 2 || outcome === 'memory_hit') {
       return ['input', 'l1', 'l2', 'arbiter', 'organize']
-    }
-    if (outcome === 'low_confidence' || event.payload.confidence === 'low') {
-      return ['input', 'l1', 'l2', 'arbiter', 'pending']
     }
     return ['input', 'l1', 'l2', 'l3', 'arbiter', 'organize']
   }
