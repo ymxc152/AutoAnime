@@ -1,0 +1,12 @@
+{
+  "id": "openai_chat_completion_server_error",
+  "desc": "上游 500 错误响应（录制形状）；错误消息不得进入 transport 异常文本",
+  "status": 500,
+  "body": {
+    "error": {
+      "message": "internal upstream failure on /v1/chat/completions?token=should-never-leak",
+      "type": "server_error",
+      "code": null
+    }
+  }
+}

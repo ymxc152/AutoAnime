@@ -1,0 +1,11 @@
+{
+  "id": "openai_chat_completion_bad_shape",
+  "desc": "HTTP 200 但响应体缺少 choices（录制形状）",
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-recorded-badshape",
+    "object": "chat.completion",
+    "created": 1757000001,
+    "model": "gpt-4o-mini"
+  }
+}

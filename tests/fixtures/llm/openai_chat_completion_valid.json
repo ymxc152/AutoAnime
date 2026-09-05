@@ -1,0 +1,22 @@
+{
+  "id": "openai_chat_completion_valid",
+  "desc": "OpenAI 兼容 chat completions 成功响应（录制形状）",
+  "status": 200,
+  "body": {
+    "id": "chatcmpl-recorded-001",
+    "object": "chat.completion",
+    "created": 1757000000,
+    "model": "gpt-4o-mini",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "{\"title\": \"Sousou no Frieren\", \"season\": 1, \"episode\": 3, \"segment\": \"episode\", \"fansub\": \"LoliHouse\"}"
+        }
+      }
+    ],
+    "usage": { "prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160 }
+  }
+}
