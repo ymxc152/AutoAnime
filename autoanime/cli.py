@@ -3,14 +3,22 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from collections.abc import Sequence
 
-from autoanime.config import load_settings
+from autoanime.config import Settings, load_settings
 from autoanime.core.enums import Confidence, MemorySource, MemoryStatus, Segment
 from autoanime.core.interfaces import ParseResult, RawName
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
+from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage
 from autoanime.pipeline.l1_local import LocalRecognizer
+from autoanime.pipeline.orchestrator import Orchestrator
+
+# L2 pipeline switch: set AUTOANIME_L2_ENABLED=0/false/no/off to run the
+# parse command on the L1-only path (graceful degradation, PR4 contract).
+_L2_ENABLED_ENV = "AUTOANIME_L2_ENABLED"
+_L2_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -53,12 +61,35 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init-db", help="Create the v2 SQLite schema")
     parse_parser = subparsers.add_parser(
         "parse",
-        help="Parse a single release name with the L1 pipeline (JSON output)",
+        help="Parse a single release name with the L1 pipeline and L2 memory (JSON output)",
     )
     parse_parser.add_argument("--name", required=True, help="File name to parse")
     parse_parser.add_argument("--folder", default=None, help="Optional folder name")
     parse_parser.add_argument("--parent", default=None, help="Optional parent path")
     return parser
+
+
+def _l2_enabled() -> bool:
+    raw = os.environ.get(_L2_ENABLED_ENV)
+    if raw is None:
+        return True
+    return raw.strip().casefold() not in _L2_DISABLED_VALUES
+
+
+async def _build_orchestrator(settings: Settings) -> tuple[Orchestrator, SqliteStorage | None]:
+    """Wire the fixed orchestrator; an unusable memory store degrades to L1-only."""
+    if not _l2_enabled():
+        return Orchestrator(l2_enabled=False), None
+    try:
+        storage = SqliteStorage(settings.database_url)
+    except Exception:
+        return Orchestrator(), None
+    try:
+        await storage.create_all()
+    except Exception:
+        await storage.close()
+        return Orchestrator(), None
+    return Orchestrator(memory_store=StorageMemoryStore(storage)), storage
 
 
 def _parse_result_to_json(result: ParseResult | None) -> dict[str, object] | None:
@@ -146,11 +177,16 @@ async def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "confirm":
         return await _confirm(args)
     if args.command == "parse":
-        recognizer = LocalRecognizer()
-        result = await recognizer.parse(
-            RawName(name=args.name, folder=args.folder, parent_path=args.parent)
-        )
-        print(json.dumps(_parse_result_to_json(result), ensure_ascii=False))
+        settings = load_settings()
+        orchestrator, storage = await _build_orchestrator(settings)
+        try:
+            outcome = await orchestrator.process(
+                RawName(name=args.name, folder=args.folder, parent_path=args.parent)
+            )
+        finally:
+            if storage is not None:
+                await storage.close()
+        print(json.dumps(_parse_result_to_json(outcome.result), ensure_ascii=False))
         return 0
     print(f"{args.command}: not implemented yet")
     return 0
