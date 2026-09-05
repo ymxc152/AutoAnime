@@ -230,6 +230,10 @@ class InstrumentedOrchestrator(Orchestrator):
 # ---------------------------------------------------------------------------
 
 
+#: ``--folder-strategy root`` 的合成目录标签：全部 [F] 散文件共享同一下载根。
+_ROOT_FOLDER_LABEL = "download-root"
+
+
 async def build_raws(
     entries: Sequence[Any],
     *,
@@ -239,20 +243,24 @@ async def build_raws(
     """快照条目 → 带 folder 上下文的 ``RawName`` 列表（输入顺序不变）。
 
     ``[D]`` 目录条目自带 folder=自身；``[F]`` 散文件按 ``folder_strategy``
-    重建（口径见模块 docstring）。L1 解析失败/无标题的条目 folder 保持
-    ``None``——永不凑批，走单文件快路径。
+    重建（口径见模块 docstring）：``title`` 用 L1 draft title 作「同发布
+    目录」代理，``root`` 用合成根标签（批键退化为「同字幕组」）。L1 解析
+    失败/无标题的条目 folder 保持 ``None``——永不凑批，走单文件快路径。
     """
     recognizer = LocalRecognizer()
     raws: list[RawName] = []
     for entry in entries:
         raw = to_raw_name(entry)
-        if entry.kind == "F" and raw.folder is None and folder_strategy == "title":
-            try:
-                draft = await recognizer.parse(raw)
-            except Exception:  # noqa: BLE001 -- 单条容错
-                draft = None
-            if draft is not None and draft.title:
-                raw = replace(raw, folder=draft.title)
+        if entry.kind == "F" and raw.folder is None:
+            if folder_strategy == "root":
+                raw = replace(raw, folder=_ROOT_FOLDER_LABEL)
+            elif folder_strategy == "title":
+                try:
+                    draft = await recognizer.parse(raw)
+                except Exception:  # noqa: BLE001 -- 单条容错
+                    draft = None
+                if draft is not None and draft.title:
+                    raw = replace(raw, folder=draft.title)
         raws.append(raw)
     return raws
 
