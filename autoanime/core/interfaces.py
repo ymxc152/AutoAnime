@@ -77,6 +77,40 @@ class Storage(Protocol):
     async def close(self) -> None: ...
 
 
+@runtime_checkable
+class MemoryStore(Protocol):
+    """L2 memory persistence contract (PR4).
+
+    Implementations keep every DB session internally; callers only pass the
+    store object itself. The ORM row is ``autoanime.core.models.ParseMemory``;
+    it is typed as ``Any`` here so this module stays free of SQLAlchemy
+    imports, mirroring the ``Storage`` protocol style.
+    """
+
+    async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None: ...
+    async def record_hit(self, parse_memory: Any) -> None: ...
+    async def record_correction(self, parse_memory: Any) -> None: ...
+    async def has_bypass(self, pattern_hash: str) -> bool: ...
+
+
+@runtime_checkable
+class MemoryRecognizer(Protocol):
+    """L2 memory enhancement contract (PR4).
+
+    Input: the L1 ParseResult, the optional parse context, and the injected
+    memory store. Output: the enhanced ParseResult on a hit; ``None`` when
+    the memory has nothing to add, in which case the orchestrator routes by
+    the L1 result alone.
+    """
+
+    async def enhance(
+        self,
+        result: ParseResult,
+        context: ParseContext | None,
+        store: MemoryStore,
+    ) -> ParseResult | None: ...
+
+
 class Registry:
     """Small explicit registry used only for external providers and gateways."""
 

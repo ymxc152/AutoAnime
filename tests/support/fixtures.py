@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,11 +10,17 @@ from autoanime.core.interfaces import RawName
 
 _DEFAULT_ROOT = Path(__file__).parents[1] / "fixtures" / "samples"
 _DIALECT_PREFIX = "dialect_"
+_ROUNDTRIP_ROOT = Path(__file__).parents[1] / "fixtures" / "memory"
 
 _VALID_LEVELS = frozenset({"high", "medium", "low"})
 _VALID_SEGMENTS = frozenset({"episode", "season_pack", "movie"})
 _VALID_EVIDENCE_SOURCES = frozenset({"name", "folder", "context", "none"})
 _LEVEL_CONFIDENCE = {"high": 1.0, "medium": 0.6, "low": 0.2}
+
+_MEMORY_EVIDENCE = "memory"
+_KEY_LEVEL_EVIDENCE = "key_level"
+_ROUNDTRIP_EVIDENCE_SOURCES = _VALID_EVIDENCE_SOURCES | {_MEMORY_EVIDENCE}
+_KEY_LEVEL_VALUE_RE = re.compile(r"memory:[12]")
 
 
 class FixtureError(ValueError):
@@ -139,6 +146,13 @@ def _load_expected(path: Path) -> FixtureExpected:
     if not isinstance(payload, dict):
         raise FixtureError(f"expected.json must contain an object in fixture directory: {path}")
 
+    return _expected_from_payload(payload, where=f"directory: {path}")
+
+
+def _expected_from_payload(
+    payload: dict[str, Any], *, where: str, allow_memory_evidence: bool = False
+) -> FixtureExpected:
+    """Validate one expected-shaped object (ParseResult contract fields)."""
     title = _require_string(payload, "title")
     season = _optional_int(payload, "season")
     episode = _optional_int(payload, "episode")
@@ -148,11 +162,11 @@ def _load_expected(path: Path) -> FixtureExpected:
 
     confidence = payload.get("confidence")
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        raise FixtureError(f"fixture field 'confidence' must be a number in directory: {path}")
+        raise FixtureError(f"fixture field 'confidence' must be a number in {where}")
     if confidence != _LEVEL_CONFIDENCE[level]:
         raise FixtureError(
             f"fixture field 'confidence' must be {_LEVEL_CONFIDENCE[level]} for level "
-            f"{level!r} in directory: {path}"
+            f"{level!r} in {where}"
         )
 
     raw_missing = payload.get("missing_fields", [])
@@ -160,25 +174,14 @@ def _load_expected(path: Path) -> FixtureExpected:
         not isinstance(field, str) or not field for field in raw_missing
     ):
         raise FixtureError(
-            f"fixture field 'missing_fields' must be a list of non-empty strings "
-            f"in directory: {path}"
+            f"fixture field 'missing_fields' must be a list of non-empty strings in {where}"
         )
 
-    raw_evidence = payload.get("evidence", {})
-    if not isinstance(raw_evidence, dict):
-        raise FixtureError(f"fixture field 'evidence' must be an object in directory: {path}")
-    evidence: dict[str, str] = {}
-    for key, value in raw_evidence.items():
-        if not isinstance(key, str) or not key:
-            raise FixtureError(
-                f"fixture field 'evidence' keys must be non-empty strings in directory: {path}"
-            )
-        if value not in _VALID_EVIDENCE_SOURCES:
-            raise FixtureError(
-                f"fixture field 'evidence[{key}]' must be one of "
-                f"{sorted(_VALID_EVIDENCE_SOURCES)} in directory: {path}"
-            )
-        evidence[key] = value
+    evidence = _evidence_from_payload(
+        payload.get("evidence", {}),
+        where=where,
+        allow_memory_evidence=allow_memory_evidence,
+    )
 
     return FixtureExpected(
         title=title,
@@ -191,6 +194,36 @@ def _load_expected(path: Path) -> FixtureExpected:
         missing_fields=tuple(raw_missing),
         evidence=evidence,
     )
+
+
+def _evidence_from_payload(
+    raw_evidence: object, *, where: str, allow_memory_evidence: bool
+) -> dict[str, str]:
+    """Validate an evidence object; roundtrip fixtures also accept memory sources."""
+    if not isinstance(raw_evidence, dict):
+        raise FixtureError(f"fixture field 'evidence' must be an object in {where}")
+    evidence: dict[str, str] = {}
+    for key, value in raw_evidence.items():
+        if not isinstance(key, str) or not key:
+            raise FixtureError(
+                f"fixture field 'evidence' keys must be non-empty strings in {where}"
+            )
+        if allow_memory_evidence and key == _KEY_LEVEL_EVIDENCE:
+            if not isinstance(value, str) or not _KEY_LEVEL_VALUE_RE.fullmatch(value):
+                raise FixtureError(
+                    f"fixture field 'evidence[{_KEY_LEVEL_EVIDENCE}]' must be "
+                    f"'memory:1' or 'memory:2' in {where}"
+                )
+            evidence[key] = value
+            continue
+        valid_sources = _ROUNDTRIP_EVIDENCE_SOURCES if allow_memory_evidence else _VALID_EVIDENCE_SOURCES
+        if not isinstance(value, str) or value not in valid_sources:
+            raise FixtureError(
+                f"fixture field 'evidence[{key}]' must be one of "
+                f"{sorted(valid_sources)} in {where}"
+            )
+        evidence[key] = value
+    return evidence
 
 
 def _optional_int(data: dict[str, Any], key: str) -> int | None:
@@ -260,3 +293,87 @@ def load_dialects(*dialects: str, root: Path | None = None) -> list[FixtureCase]
 def load_all(root: Path | None = None) -> list[FixtureCase]:
     """Load every dialect fixture in stable dialect/case order."""
     return load_dialects(root=root or _DEFAULT_ROOT)
+
+
+@dataclass(frozen=True)
+class RoundtripLearn:
+    """Learning side: the L1 output and the user-confirmed result."""
+
+    parse_result: FixtureExpected
+    confirmed: FixtureExpected
+
+
+@dataclass(frozen=True)
+class RoundtripQuery:
+    """Query side: one raw release name plus the contract-level expectation."""
+
+    name: str
+    folder: str | None
+    expected: FixtureExpected
+
+
+@dataclass(frozen=True)
+class RoundtripCase:
+    """One learn-then-query memory roundtrip (PR4 L2 fixtures)."""
+
+    id: str
+    learn: RoundtripLearn
+    query: RoundtripQuery
+
+
+def load_roundtrip_case(path: Path) -> RoundtripCase:
+    """Load one roundtrip case from a single JSON file under fixtures/memory."""
+    where = f"roundtrip fixture: {path}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FixtureError(f"invalid {where}") from exc
+    if not isinstance(payload, dict):
+        raise FixtureError(f"{where} must contain an object")
+
+    case_id = _require_string(payload, "id")
+    if case_id != path.stem:
+        raise FixtureError(
+            f"roundtrip fixture id mismatch for {path}: expected {path.stem!r}, got {case_id!r}"
+        )
+
+    learn_payload = _require_object(payload, "learn", where)
+    query_payload = _require_object(payload, "query", where)
+    learn = RoundtripLearn(
+        parse_result=_expected_from_payload(
+            _require_object(learn_payload, "parse_result", where),
+            where=f"{where} (learn.parse_result)",
+        ),
+        confirmed=_expected_from_payload(
+            _require_object(learn_payload, "confirmed", where),
+            where=f"{where} (learn.confirmed)",
+        ),
+    )
+    query = RoundtripQuery(
+        name=_require_string(query_payload, "name"),
+        folder=_optional_string(query_payload, "folder"),
+        expected=_expected_from_payload(
+            _require_object(query_payload, "expected", where),
+            where=f"{where} (query.expected)",
+            allow_memory_evidence=True,
+        ),
+    )
+    return RoundtripCase(id=case_id, learn=learn, query=query)
+
+
+def load_roundtrip_cases(root: Path | None = None) -> list[RoundtripCase]:
+    """Load every roundtrip case in stable id order (one JSON file per case)."""
+    fixture_root = root or _ROUNDTRIP_ROOT
+    if not fixture_root.is_dir():
+        raise FixtureError(f"roundtrip fixture root does not exist or is not a directory: {fixture_root}")
+    return [
+        load_roundtrip_case(path)
+        for path in sorted(fixture_root.glob("*.json"), key=lambda path: path.name)
+    ]
+
+
+def _require_object(data: dict[str, Any], key: str, where: str) -> dict[str, Any]:
+    value = data.get(key)
+    if not isinstance(value, dict):
+        raise FixtureError(f"roundtrip fixture field '{key}' must be an object in {where}")
+    return value
