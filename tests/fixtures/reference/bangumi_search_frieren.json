@@ -1,0 +1,57 @@
+{
+  "data": [
+    {
+      "id": 400602,
+      "name": "葬送のフリーレン",
+      "name_cn": "葬送的芙莉莲",
+      "type": 2,
+      "date": "2023-09-29",
+      "platform": "TV",
+      "total_episodes": 28,
+      "series": false
+    },
+    {
+      "id": 459283,
+      "name": "葬送のフリーレン ～●●の魔法～",
+      "name_cn": "葬送的芙莉莲 ～●●的魔法～",
+      "type": 2,
+      "date": "2023-10-11",
+      "platform": "WEB",
+      "total_episodes": 11,
+      "series": false
+    },
+    {
+      "id": 515759,
+      "name": "葬送のフリーレン 第2期",
+      "name_cn": "葬送的芙莉莲 第二季",
+      "type": 2,
+      "date": "2026-01-16",
+      "platform": "TV",
+      "total_episodes": 10,
+      "series": false
+    },
+    {
+      "id": 549563,
+      "name": "葬送のフリーレン ～●●の魔法～2期",
+      "name_cn": "葬送的芙莉莲 ～●●的魔法～2期",
+      "type": 2,
+      "date": "2025-04-02",
+      "platform": "WEB",
+      "total_episodes": 11,
+      "series": false
+    },
+    {
+      "id": 638133,
+      "name": "葬送のフリーレン 第3期【黄金郷編】",
+      "name_cn": "葬送的芙莉莲 第三季 黄金乡篇",
+      "type": 2,
+      "date": null,
+      "platform": "TV",
+      "total_episodes": 0,
+      "series": false
+    }
+  ],
+  "total": 5,
+  "limit": 5,
+  "offset": 0
+}
