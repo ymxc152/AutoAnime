@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
 """T6: 用真实下载快照做 L1 结构级验证。
 
 读取外部快照文件（每行 ``[F] <文件名>`` 或 ``[D] <目录名>``，``#`` 开头为注释），
 逐条构造 RawName 并调用 LocalRecognizer，输出稳定性与档位分布统计 JSON。
 
-快照不进仓库；默认路径指向外部样本文件，可用 ``--snapshot`` 覆盖。
+快照不进仓库；默认从 ``AUTOANIME_L1_SNAPSHOT`` 或仓库上一级 notes 样本目录解析，可用 ``--snapshot`` 覆盖。
 
 RawName 构造约定：
 - ``[D]`` 行是目录项，目录名本身就是它的 folder 上下文（folder = name）；
@@ -16,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from collections import Counter
@@ -24,17 +24,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_ROOT = Path(__file__).resolve().parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
 from autoanime.core.interfaces import RawName
 from autoanime.pipeline.l1_local import LocalRecognizer
 
-DEFAULT_SNAPSHOT = Path(
-    r"C:\Users\17645\Desktop\面试\07_新项目规划\01_AutoAnime产品化升级"
-    r"\notes\samples\z_downloads_snapshot.txt"
-)
+_ROOT = Path(__file__).resolve().parent.parent
+
+_SNAPSHOT_RELATIVE_PATH = Path("notes") / "samples" / "z_downloads_snapshot.txt"
+
+
+def default_snapshot_path() -> Path:
+    """Resolve the external snapshot without hard-coding a machine path."""
+    from_env = os.getenv("AUTOANIME_L1_SNAPSHOT")
+    if from_env:
+        return Path(from_env).expanduser()
+    return _ROOT.parent / _SNAPSHOT_RELATIVE_PATH
 
 _MAX_FAILED_SAMPLES = 10
 
@@ -144,10 +147,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--snapshot",
         type=Path,
-        default=DEFAULT_SNAPSHOT,
-        help="快照文件路径（默认指向外部样本，不进仓库）",
+        default=None,
+        help="快照文件路径（默认读取 AUTOANIME_L1_SNAPSHOT 或仓库上一级 notes 样本）",
     )
     args = parser.parse_args(argv)
+    args.snapshot = args.snapshot if args.snapshot is not None else default_snapshot_path()
     if not args.snapshot.is_file():
         print(f"snapshot not found: {args.snapshot}", file=sys.stderr)
         return 2

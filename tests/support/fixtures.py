@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from autoanime.core.enums import Confidence
 from autoanime.core.interfaces import RawName
+from autoanime.pipeline.l1.confidence import confidence_for
 
 _DEFAULT_ROOT = Path(__file__).parents[1] / "fixtures" / "samples"
 _DIALECT_PREFIX = "dialect_"
@@ -15,7 +17,6 @@ _ROUNDTRIP_ROOT = Path(__file__).parents[1] / "fixtures" / "memory"
 _VALID_LEVELS = frozenset({"high", "medium", "low"})
 _VALID_SEGMENTS = frozenset({"episode", "season_pack", "movie"})
 _VALID_EVIDENCE_SOURCES = frozenset({"name", "folder", "context", "none"})
-_LEVEL_CONFIDENCE = {"high": 1.0, "medium": 0.6, "low": 0.2}
 
 _MEMORY_EVIDENCE = "memory"
 _KEY_LEVEL_EVIDENCE = "key_level"
@@ -163,9 +164,10 @@ def _expected_from_payload(
     confidence = payload.get("confidence")
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
         raise FixtureError(f"fixture field 'confidence' must be a number in {where}")
-    if confidence != _LEVEL_CONFIDENCE[level]:
+    expected_confidence = confidence_for(Confidence(level))
+    if confidence != expected_confidence:
         raise FixtureError(
-            f"fixture field 'confidence' must be {_LEVEL_CONFIDENCE[level]} for level "
+            f"fixture field 'confidence' must be {expected_confidence} for level "
             f"{level!r} in {where}"
         )
 

@@ -31,6 +31,7 @@ from autoanime.pipeline.l1.context import (
     apply_release_progress,
     merge_folder_draft,
 )
+from autoanime.pipeline.l1.dialects.cjk import season_spans as cjk_season_spans
 from autoanime.pipeline.l1.draft import L1Draft
 from autoanime.pipeline.l1.normalize import normalize_name, normalize_whitespace
 
@@ -48,6 +49,31 @@ _TECH_INNER_RE = re.compile(
     r")(?:_[A-Za-z0-9]+)*",
     re.IGNORECASE,
 )
+
+
+_ORDINAL_SEASON_RE = re.compile(
+    r"(?P<num>\d{1,2})\s*(?:st|nd|rd|th)\s*(?:Season|季)",
+    re.IGNORECASE,
+)
+
+
+def _season_matches(text: str) -> list[tuple[int, int, int]]:
+    """Every season marker as ``(start, end, value)`` in positional order."""
+    spans = list(cjk_season_spans(text))
+    for match in _ORDINAL_SEASON_RE.finditer(text):
+        spans.append((match.start(), match.end(), int(match.group("num"))))
+    return sorted(spans)
+
+
+def _title_and_season(title: str) -> tuple[str, int | None]:
+    """Remove season markers from a bracket title and return the season number."""
+    matches = _season_matches(title)
+    masked = list(title)
+    for start, end, _ in matches:
+        for index in range(start, min(end, len(masked))):
+            masked[index] = "\x00"
+    clean_title = normalize_whitespace("".join(masked).replace("\x00", " ")).strip(" -_")
+    return clean_title, (matches[0][2] if matches else None)
 
 
 def parse(raw: RawName, context: ParseContext | None = None) -> ParseResult | None:
@@ -89,15 +115,22 @@ def _parse_text(text: str) -> L1Draft | None:
     if not title:
         return None
 
-    level = base_level(title=title, season=None, episode=episode, segment=Segment.EPISODE)
+    title, season = _title_and_season(title)
+    if not title:
+        return None
+
+    segment = Segment.EPISODE if episode is not None else (
+        Segment.SEASON_PACK if season is not None else Segment.EPISODE
+    )
+    level = base_level(title=title, season=season, episode=episode, segment=segment)
     if _anitopy_conflict(anitopy, episode=episode):
         level = downgrade(level)
 
     return L1Draft(
         title=title,
-        season=None,
+        season=season,
         episode=episode,
-        segment=Segment.EPISODE,
+        segment=segment,
         fansub=fansub,
         level=level,
         missing_fields=missing_fields_for(
@@ -105,7 +138,7 @@ def _parse_text(text: str) -> L1Draft | None:
         ),
         evidence={
             "title": SOURCE_NAME,
-            "season": SOURCE_NONE,
+            "season": SOURCE_NAME if season is not None else SOURCE_NONE,
             "episode": SOURCE_NAME if episode is not None else SOURCE_NONE,
             "segment": SOURCE_NAME,
             "fansub": SOURCE_NAME if fansub is not None else SOURCE_NONE,

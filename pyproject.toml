@@ -36,7 +36,11 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-include = ["autoanime/**/*.py", "tests/**/*.py"]
+include = [
+  "autoanime/**/*.py",
+  "tests/**/*.py",
+  "scripts/validate_l1_corpus.py",
+]
 exclude = ["autoanime/alembic/script.py.mako"]
 
 [tool.ruff.lint]
@@ -44,7 +48,7 @@ select = ["E", "F", "I", "B", "UP"]
 ignore = ["E501"]
 
 [tool.pyright]
-include = ["autoanime", "tests"]
+include = ["autoanime", "tests", "scripts/validate_l1_corpus.py"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 

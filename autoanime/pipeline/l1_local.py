@@ -11,7 +11,7 @@ Processing stages:
    ``(raw, context)`` input. Folder merge (conflict downgrade) and the
    ``release_progress`` gate already run inside each dialect; the aggregator
    applies neither a second time.
-2. Contract boundary: a dialect that raises ``ValueError`` (its internal
+2. Contract boundary: a dialect that raises ``L1ContractError`` (its internal
    ``ParseResult`` invariants are unsatisfiable for this input) counts as no
    hit; the Recognizer contract only knows ``ParseResult | None``.
 3. Quality gates -- PR3 confidence-contract invariants enforced on every
@@ -56,6 +56,7 @@ from autoanime.pipeline.l1.dialects import (
     parse_pure_bracket,
     parse_special,
 )
+from autoanime.pipeline.l1.draft import L1ContractError
 
 type DialectFn = Callable[[RawName, ParseContext | None], ParseResult | None]
 
@@ -124,7 +125,7 @@ class LocalRecognizer:
     ) -> ParseResult | None:
         try:
             result = dialect(raw, context)
-        except ValueError:
+        except L1ContractError:
             # A dialect whose draft cannot satisfy the ParseResult contract
             # has no hit for this input; it must not crash the pipeline.
             return None

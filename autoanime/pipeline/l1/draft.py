@@ -14,6 +14,10 @@ from autoanime.core.interfaces import ParseResult
 from autoanime.pipeline.l1.confidence import confidence_for, downgrade, missing_fields_for
 
 
+class L1ContractError(ValueError):
+    """An L1Draft cannot satisfy the public ParseResult contract."""
+
+
 @dataclass(frozen=True)
 class L1Draft:
     title: str
@@ -53,9 +57,9 @@ class L1Draft:
     def to_parse_result(self) -> ParseResult:
         """Build the contract-level ParseResult; segment and title are mandatory."""
         if not self.title:
-            raise ValueError("L1Draft.title must be a non-empty string")
+            raise L1ContractError("L1Draft.title must be a non-empty string")
         if self.segment is None:
-            raise ValueError("L1Draft.segment must be set before building a ParseResult")
+            raise L1ContractError("L1Draft.segment must be set before building a ParseResult")
         return ParseResult(
             title=self.title,
             season=self.season,

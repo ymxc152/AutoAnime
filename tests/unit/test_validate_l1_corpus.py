@@ -137,15 +137,39 @@ def test_validate_entries_failed_samples_are_capped() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_default_snapshot_path_prefers_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    mod = _load_script()
+    snapshot = tmp_path / "snapshot.txt"
+    monkeypatch.setenv("AUTOANIME_L1_SNAPSHOT", str(snapshot))
+
+    assert mod.default_snapshot_path() == snapshot
+
+
+def test_default_snapshot_path_falls_back_to_repository_notes() -> None:
+    mod = _load_script()
+
+    assert mod.default_snapshot_path() == mod._ROOT.parent / "notes" / "samples" / "z_downloads_snapshot.txt"
+
+
 def test_real_snapshot_full_run() -> None:
     mod = _load_script()
-    snapshot = mod.DEFAULT_SNAPSHOT
+    snapshot = mod.default_snapshot_path()
     if not snapshot.is_file():
         pytest.skip(f"external snapshot not available: {snapshot}")
     entries = list(mod.parse_snapshot_lines(snapshot.read_text(encoding="utf-8-sig")))
     report = asyncio.run(mod.validate_entries(entries))
-    assert report["total"] > 2000
-    assert report["parsed"] + report["returned_none"] + report["failed"] == report["total"]
+    # Baseline established on the 2026-09-05 2606-line real snapshot.
+    # These are floors, not exact expectations, so small parser improvements
+    # do not force a test update while gross regressions are still caught.
+    assert report["total"] == 2606
+    assert report["parsed"] >= 2600
+    assert report["returned_none"] <= 3
     assert report["failed"] == 0, f"unexpected failures: {report['failed_samples']}"
+    assert report["levels"]["high"] >= 350
+    assert report["levels"]["medium"] >= 2200
+    assert report["levels"]["low"] <= 10
+    assert report["segments"]["episode"] >= 2400
+    assert report["segments"]["season_pack"] >= 150
+    assert report["segments"]["movie"] >= 3
     dumped = json.dumps(report, ensure_ascii=False, sort_keys=True)
     assert json.loads(dumped) == report

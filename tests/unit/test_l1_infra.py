@@ -36,6 +36,7 @@ from autoanime.pipeline.l1 import (
     separators_to_spaces,
     strip_extension,
 )
+from autoanime.pipeline.l1.draft import L1ContractError
 
 BEANSUB_NAME = "[BeanSub] BLEACH Sennen Kessen-hen - 41 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv"
 DIALECT_A_NAME = "Some.Title.S02E01.1080p.Baha.WEB-DL.mkv"
@@ -188,7 +189,7 @@ def test_l1_draft_confidence_and_to_parse_result() -> None:
 
 
 def test_l1_draft_requires_segment_for_parse_result() -> None:
-    with pytest.raises(ValueError, match="segment"):
+    with pytest.raises(L1ContractError, match="segment"):
         L1Draft(title="T").to_parse_result()
 
 

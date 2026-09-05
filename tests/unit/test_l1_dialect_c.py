@@ -7,6 +7,7 @@ import pytest
 from autoanime.core.enums import Confidence, Segment
 from autoanime.core.interfaces import ParseContext, RawName
 from autoanime.pipeline.l1.dialects import pure_bracket
+from autoanime.pipeline.l1_local import LocalRecognizer
 from tests.support.fixtures import FixtureCase, load_dialects
 
 CASES = load_dialects("c")
@@ -82,6 +83,74 @@ def test_episode_beyond_release_progress_drops_to_low() -> None:
     assert result.level is Confidence.LOW
     assert result.confidence == 0.2
     assert result.evidence["release_progress"] == "context"
+
+
+_REAL_PURE_BRACKET_SEASON_CASES = [
+    (
+        "[KissSub][Medalist 2nd Season][07][1080P][GB][MP4].mp4",
+        "Medalist",
+        7,
+        "KissSub",
+    ),
+    (
+        "[UHA-WINGS][Sousou no Frieren 2nd Season -S2][37][1080p HEVC][CHS].mp4",
+        "Sousou no Frieren",
+        37,
+        "UHA-WINGS",
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "expected_title", "expected_episode", "expected_fansub"),
+                         _REAL_PURE_BRACKET_SEASON_CASES)
+def test_real_pure_bracket_season_markers_are_extracted(
+    name: str, expected_title: str, expected_episode: int, expected_fansub: str
+) -> None:
+    result = pure_bracket.parse(RawName(name=name))
+
+    assert result is not None
+    assert result.title == expected_title
+    assert result.season == 2
+    assert result.episode == expected_episode
+    assert result.fansub == expected_fansub
+    assert result.segment is Segment.EPISODE
+    assert result.level is Confidence.HIGH
+    assert result.confidence == 1.0
+    assert result.missing_fields == ()
+    assert result.evidence["season"] == "name"
+
+
+@pytest.mark.parametrize(
+    ("name", "expected_title"),
+    [(name, title) for name, title, _, _ in _REAL_PURE_BRACKET_SEASON_CASES],
+)
+async def test_real_season_names_survive_aggregator_quality_gate(
+    name: str, expected_title: str
+) -> None:
+    result = await LocalRecognizer().parse(RawName(name=name))
+
+    assert result is not None
+    assert result.title == expected_title
+    assert result.season == 2
+    assert result.level is Confidence.HIGH
+
+
+@pytest.mark.parametrize(
+    ("marker", "expected_title"),
+    [
+        ("Season 2", "Show"),
+        ("S2", "Show"),
+        ("第二季", "Show"),
+    ],
+)
+def test_pure_bracket_supports_core_season_marker_forms(marker: str, expected_title: str) -> None:
+    result = pure_bracket.parse(RawName(name=f"[64bitsub][Show {marker}][07][1920x1080][AVC_AAC].mp4"))
+
+    assert result is not None
+    assert result.title == expected_title
+    assert result.season == 2
+    assert result.episode == 7
+    assert result.evidence["season"] == "name"
 
 
 def test_names_without_bracket_flow_return_none() -> None:
