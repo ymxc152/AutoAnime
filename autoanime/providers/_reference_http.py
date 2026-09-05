@@ -41,6 +41,9 @@ MAX_RETRY_AFTER_S = 30.0
 SEASON_PLACEHOLDER = "{season}"
 EPISODE_PLACEHOLDER = "{ep}"
 
+SHORT_QUERY_MAX_LEN = 4
+"""短 query 阈值：归一后长度 ≤ 此值的 query 不参与包含匹配（见 pick_candidate）。"""
+
 # bare_query 里除含占位符的 token 外，还需丢弃的孤立季节/集锚点词
 # （占位符与锚点词被空白隔开时的残留，如 "season {season}"）。
 _ANCHOR_TOKENS = frozenset({"s", "ss", "season", "e", "ep", "eps", "episode"})
@@ -108,17 +111,26 @@ def pick_candidate(
     query: str,
     *,
     min_containment_len: int = 5,
+    short_query_max_len: int = SHORT_QUERY_MAX_LEN,
 ) -> int | None:
     """在候选里选出与 ``query`` 匹配的条目 id；无命中返回 ``None``。
 
-    匹配规则（权威参考的保守语义）：
-    1. 任一名字规范化后与 ``query`` 完全相等 → 命中（优先）；
-    2. 否则包含关系（``query`` 在名字里，或名字在 ``query`` 里）且较短
-       一边长度 ≥ ``min_containment_len`` → 在命中者中取最短名字的候选。
+    匹配规则（权威参考的保守语义，query 与候选名均先经 ``normalize_title``
+    归一——空白折叠 + casefold）：
+    1. 任一名字归一后与 query 完全相等 → 命中（优先）；
+    2. 短 query 前缀放行：归一 query 长度 ≤ ``short_query_max_len`` 时，
+       「query 是某名字前缀、且前缀之外的后缀不含任何文字内容（仅剩
+       标点/符号/空白）」视为一次命中；命中条目**唯一**才放行，多于一个
+       条目命中即拒绝（多义保护），零命中继续走包含回退；
+    3. 包含回退（短 query 按上述保护跳过）：包含关系（query 在名字里，
+       或名字在 query 里）且较短一边长度 ≥ ``min_containment_len`` →
+       在命中者中取最短名字的候选。
 
     包含规则用于吸收查询侧残余后缀（如 "sword art online ii" 与
-    "sword art online"）；短 query（含 4 字中文短名）不参与包含匹配，
-    避免误命中外传/别名（如「刀剑神域」误配「刀剑神域外传」）。
+    "sword art online"）；短 query（含 4 字中文短名）默认不参与包含匹配，
+    避免误命中外传/别名（如「刀剑神域」误配「刀剑神域外传」——后缀
+    「外传」是文字内容，前缀放行同样不适用）。前缀放行只覆盖「唯一一个
+    条目、后缀纯标点」的形态（如「孤独摇滚」→「孤独摇滚！」）。
     """
     normalized_query = normalize_title(query)
     if not normalized_query:
@@ -128,7 +140,15 @@ def pick_candidate(
         for name in names:
             if normalize_title(name) == normalized_query:
                 return candidate_id
-    # 2) 包含回退：取最短命中名。
+    # 2) 短 query：仅允许「前缀命中 + 后缀无文字内容 + 唯一条目」放行。
+    if len(normalized_query) <= short_query_max_len:
+        hits = _short_prefix_hits(candidates, normalized_query)
+        if len(hits) > 1:
+            return None  # 多义保护：多个条目命中，不替参考源做决定。
+        if len(hits) == 1:
+            return next(iter(hits))
+        # 零命中：继续包含回退（默认参数下对短 query 必然无果，行为一致）。
+    # 3) 包含回退：取最短命中名。
     best: tuple[int, str] | None = None
     for candidate_id, names in candidates:
         for name in names:
@@ -144,6 +164,25 @@ def pick_candidate(
             if contained and (best is None or len(normalized_name) < len(best[1])):
                 best = (candidate_id, normalized_name)
     return None if best is None else best[0]
+
+
+def _short_prefix_hits(
+    candidates: Sequence[tuple[int, tuple[str, ...]]], normalized_query: str
+) -> set[int]:
+    """短 query 的前缀命中条目集合：后缀只含标点/符号/空白才计入。"""
+    hits: set[int] = set()
+    for candidate_id, names in candidates:
+        for name in names:
+            normalized_name = normalize_title(name)
+            if not normalized_name.startswith(normalized_query):
+                continue
+            suffix = normalized_name[len(normalized_query) :]
+            # 后缀含任何文字内容（字母/数字/CJK 等 isalnum 字符）即视为
+            # 语义延伸（外传/第二季…），不命中；纯标点后缀（如「！」）放行。
+            if not any(ch.isalnum() for ch in suffix):
+                hits.add(candidate_id)
+                break
+    return hits
 
 
 class ReferenceHttpClient:

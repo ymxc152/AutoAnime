@@ -6,6 +6,11 @@
 ``subject_type=2``）取候选，``pick_candidate`` 选出命中条目，再
 ``GET /v0/subjects/{id}`` 取权威详情映射为 ``ReferenceFacts``。
 
+候选匹配范围（PR7 M1）：每个检索条目的 ``name``/``name_cn`` 加上该条目
+自带 infobox 的「别名」「中文名」（v0 搜索响应条目自带 infobox，罗马音
+query 靠别名精确命中）；检索结果列表内全部条目共同参与匹配，最终 facts
+仍取最相似命中条目的详情。
+
 字段映射（API → ReferenceFacts）：
 - canonical_title = ``name_cn``（中文名优先），空则 ``name``；
 - aliases = ``name`` + infobox「别名」各值 + infobox「中文名」（去重、
@@ -140,6 +145,26 @@ def _positive_int(value: object) -> int | None:
     return number if number > 0 else None
 
 
+def _candidate_names(item: dict[str, Any]) -> tuple[str, ...]:
+    """检索条目 → 参与匹配的名字集合（去空、去重、保序）。
+
+    范围 = ``name`` + ``name_cn`` + 该条目自带 infobox 的「别名」「中文名」
+    各值。Bangumi v0 搜索响应的条目自带 infobox（真实响应已验证），罗马音
+    query（如 "Sousou no Frieren"）正是靠条目自带的别名完成精确匹配——
+    仅比 name/name_cn 无法覆盖罗马音。
+    """
+    names = [str(item.get("name") or ""), str(item.get("name_cn") or "")]
+    names.extend(_infobox_values(item, "别名"))
+    names.extend(_infobox_values(item, "中文名"))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for name in names:
+        if name and name not in seen:
+            seen.add(name)
+            unique.append(name)
+    return tuple(unique)
+
+
 class BangumiReference:
     """Bangumi 参考源插件（Registry 注册名 ``"bangumi"``）。
 
@@ -193,10 +218,7 @@ class BangumiReference:
         hits = [item for item in search.get("data") or [] if isinstance(item, dict) and item.get("id")]
         if not hits:
             return None
-        candidates = [
-            (int(item["id"]), (str(item.get("name") or ""), str(item.get("name_cn") or "")))
-            for item in hits
-        ]
+        candidates = [(int(item["id"]), _candidate_names(item)) for item in hits]
         chosen = pick_candidate(candidates, query)
         if chosen is None:
             return None
