@@ -1,0 +1,56 @@
+{
+  "id": "L01_series_level_season_pack",
+  "raw_name": "Anime.AzurLane.Slow.Ahead.S02.1080p.Baha.WEB-DL.mkv",
+  "source": "manual",
+  "repeat": 1,
+  "bypassed": false,
+  "confirmed": {
+    "title": "Anime AzurLane Slow Ahead",
+    "season": 2,
+    "episode": null,
+    "segment": "season_pack",
+    "fansub": "MWeb",
+    "level": "high",
+    "confidence": 1.0,
+    "missing_fields": [],
+    "evidence": {
+      "title": "name",
+      "season": "name",
+      "episode": "none",
+      "segment": "name",
+      "fansub": "name"
+    }
+  },
+  "expected": [
+    {
+      "key_level": 1,
+      "title_shape": "anime azurlane slow ahead",
+      "fansub_norm": "mweb",
+      "result": {
+        "title": "Anime AzurLane Slow Ahead",
+        "season": 2,
+        "episode": null,
+        "segment": "season_pack",
+        "fansub": "MWeb"
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    },
+    {
+      "key_level": 2,
+      "title_shape": "anime azurlane slow ahead",
+      "fansub_norm": "mweb",
+      "result": {
+        "title": "Anime AzurLane Slow Ahead",
+        "season": 2,
+        "episode": null,
+        "segment": "season_pack",
+        "fansub": "MWeb"
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    }
+  ]
+}

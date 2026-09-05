@@ -1,0 +1,56 @@
+{
+  "id": "L02_exact_level_llm_confirmed",
+  "raw_name": "[BeanSub&FZSD&LoliHouse] BLEACH Sennen Kessen-hen - 41 [WebRip 1080p HEVC-10bit].mkv",
+  "source": "llm_confirmed",
+  "repeat": 1,
+  "bypassed": false,
+  "confirmed": {
+    "title": "BLEACH Sennen Kessen-hen",
+    "season": 1,
+    "episode": 41,
+    "segment": "episode",
+    "fansub": "BeanSub&FZSD&LoliHouse",
+    "level": "high",
+    "confidence": 1.0,
+    "missing_fields": [],
+    "evidence": {
+      "title": "name",
+      "season": "context",
+      "episode": "name",
+      "segment": "name",
+      "fansub": "name"
+    }
+  },
+  "expected": [
+    {
+      "key_level": 1,
+      "title_shape": "bleach sennen kessen-hen",
+      "fansub_norm": "beansub&fzsd&lolihouse",
+      "result": {
+        "title": "BLEACH Sennen Kessen-hen",
+        "season": 1,
+        "episode": null,
+        "segment": "episode",
+        "fansub": "BeanSub&FZSD&LoliHouse"
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    },
+    {
+      "key_level": 2,
+      "title_shape": "bleach sennen kessen-hen",
+      "fansub_norm": "beansub&fzsd&lolihouse",
+      "result": {
+        "title": "BLEACH Sennen Kessen-hen",
+        "season": 1,
+        "episode": 41,
+        "segment": "episode",
+        "fansub": "BeanSub&FZSD&LoliHouse"
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    }
+  ]
+}
