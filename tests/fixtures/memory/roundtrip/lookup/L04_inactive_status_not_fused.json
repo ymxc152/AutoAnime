@@ -1,0 +1,21 @@
+{
+  "id": "L04_inactive_status_not_fused",
+  "memory": {
+    "key_level": 1,
+    "hit_count": 5,
+    "corrected_count": 0,
+    "status": "pending",
+    "result": {
+      "title": "Anime AzurLane Slow Ahead",
+      "season": 2,
+      "episode": null,
+      "segment": "season_pack",
+      "fansub": "MWeb"
+    }
+  },
+  "query": {
+    "name": "Anime.AzurLane.Slow.Ahead.E03.1080p.Baha.WEB-DL.mkv",
+    "folder": null,
+    "expected": null
+  }
+}
