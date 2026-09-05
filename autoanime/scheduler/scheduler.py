@@ -16,8 +16,9 @@ B6：AsyncIOScheduler 在事件循环内跑；feedparser / qbittorrent-api 等�
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -30,12 +31,19 @@ from autoanime.gateway.rss import RssFetchError, fetch_torrent
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
+from autoanime.organize.archive import ArchiveService
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.pipeline.l3_llm import LlmFallbackRecognizer
 from autoanime.pipeline.orchestrator import Orchestrator
-from autoanime.providers import LLM_TRANSPORT_NAME, register_providers, register_reference_providers
+from autoanime.providers import (
+    LLM_TRANSPORT_NAME,
+    register_notify,
+    register_providers,
+    register_reference_providers,
+)
 from autoanime.scheduler.clock import SystemClock
 from autoanime.scheduler.download_poller import CompletedCallback, DownloadPoller
+from autoanime.scheduler.library_reconcile import LibraryReconciler
 from autoanime.scheduler.rss_poller import RssPoller
 from autoanime.scheduler.store import LoopStore
 
@@ -118,6 +126,9 @@ class LoopComponents:
         rss_poller: RssPoller,
         download_poller: DownloadPoller,
         bus: EventBus,
+        archive_service: ArchiveService | None = None,
+        reconciler: LibraryReconciler | None = None,
+        notify_dispatcher: Any | None = None,
         own_storage: bool = False,
     ) -> None:
         self.store = store
@@ -127,6 +138,9 @@ class LoopComponents:
         self.rss_poller = rss_poller
         self.download_poller = download_poller
         self.bus = bus
+        self.archive_service = archive_service
+        self.reconciler = reconciler
+        self.notify_dispatcher = notify_dispatcher
         self.own_storage = own_storage
 
     async def close(self) -> None:
@@ -156,6 +170,15 @@ def build_loop(
     async def _refetch(source_url: str) -> bytes | None:
         return await refetch_torrent_bytes(client_factory, source_url)
 
+    governance = MemoryGovernance(storage)
+    archive_service = ArchiveService(
+        store, orchestrator, gateway,
+        settings=settings, governance=governance, bus=bus,
+    )
+    reconciler = LibraryReconciler(store, settings, bus=bus)
+    registry = Registry()
+    notify_dispatcher = register_notify(registry, settings)
+
     rss_poller = RssPoller(
         store,
         orchestrator,
@@ -173,7 +196,7 @@ def build_loop(
         gateway,
         bus=bus,
         max_retries=settings.download_max_retries,
-        on_completed=on_completed,
+        on_completed=on_completed if on_completed is not None else archive_service.handle_completed,
         torrent_refetch=_refetch,
     )
     return LoopComponents(
@@ -184,6 +207,9 @@ def build_loop(
         rss_poller=rss_poller,
         download_poller=download_poller,
         bus=bus,
+        archive_service=archive_service,
+        reconciler=reconciler,
+        notify_dispatcher=notify_dispatcher,
         own_storage=own_storage,
     )
 
@@ -199,6 +225,7 @@ class SubscriptionScheduler:
         self._components = components
         self._settings = settings
         self._scheduler: AsyncIOScheduler | None = None
+        self._pump_task: asyncio.Task[None] | None = None
 
     @property
     def running(self) -> bool:
@@ -249,6 +276,7 @@ class SubscriptionScheduler:
         )
         self._scheduler = scheduler
         scheduler.start()
+        self._start_notify_pump()
         logger.info(
             "subscription scheduler started (rss=%smin jitter±%ss, download=%ss)",
             self._settings.rss_poll_interval_minutes,
@@ -257,6 +285,9 @@ class SubscriptionScheduler:
         )
 
     def shutdown(self) -> None:
+        if self._pump_task is not None:
+            self._pump_task.cancel()
+            self._pump_task = None
         if self._scheduler is None:
             return
         if self._scheduler.running:
@@ -265,8 +296,15 @@ class SubscriptionScheduler:
         logger.info("subscription scheduler stopped")
 
     async def run_startup_cycle(self) -> None:
-        """启动补扫（A4/B4）：悬挂任务对账 + 首轮下载比对（lifespan 共用）。"""
+        """启动补扫（A4/B4/B5）：下载悬挂对账 + 媒体库对账 + 首轮下载比对。"""
         now = SystemClock().now()
+        if self._components.reconciler is not None:
+            try:
+                report = await self._components.reconciler.reconcile(now=now)
+                if report.flagged:
+                    logger.warning("library reconcile: %s episodes flagged", report.flagged)
+            except Exception:  # noqa: BLE001 — 对账失败不阻塞启动
+                logger.exception("library reconcile failed")
         try:
             reconcile = await self._components.download_poller.reconcile_startup(now=now)
             logger.info("startup reconcile: %s reconciled", reconcile.reconciled)
@@ -276,6 +314,28 @@ class SubscriptionScheduler:
             await self._components.download_poller.poll_once(now=now)
         except GatewayError as exc:
             logger.warning("first download poll skipped: %s", exc)
+
+    def _start_notify_pump(self) -> None:
+        """通知泵（D3/D16）：进程内总线 → NotifyDispatcher 白名单扇出。
+
+        仅当总线提供 ``subscribe()``（InMemoryEventBus）且配置了通知通道
+        时启动；CLI 短生命周期路径自动跳过。
+        """
+        dispatcher = self._components.notify_dispatcher
+        subscribe = getattr(self._components.bus, "subscribe", None)
+        if dispatcher is None or not callable(subscribe):
+            return
+        subscription: Any = subscribe()
+
+        async def _pump() -> None:
+            while True:
+                event: Any = await subscription.queue.get()
+                if event is None:
+                    return
+                await dispatcher.dispatch(event)
+
+        self._pump_task = asyncio.create_task(_pump(), name="autoanime-notify-pump")
+        logger.info("notify pump started (%s)", sorted(dispatcher.subscribed_events))
 
     async def _run_rss_poll(self) -> None:
         try:

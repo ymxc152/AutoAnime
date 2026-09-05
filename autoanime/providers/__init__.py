@@ -35,6 +35,7 @@ from autoanime.providers.bangumi import (
     BangumiReference,
 )
 from autoanime.providers.llm import HttpxLlmTransport, LlmTransportError, safe_origin
+from autoanime.providers.notify import NotifyDispatcher, register_notify
 from autoanime.providers.tmdb import (
     DEFAULT_LANGUAGE,
     TMDB_API_KEY_ENV,
@@ -55,6 +56,7 @@ __all__ = [
     "LLM_TRANSPORT_NAME",
     "HttpxLlmTransport",
     "LlmTransportError",
+    "NotifyDispatcher",
     "ReferenceCacheStore",
     "TMDB_API_KEY_ENV",
     "TMDB_BASE_URL",
@@ -62,6 +64,7 @@ __all__ = [
     "TokenBucketLimiter",
     "USER_AGENT",
     "safe_origin",
+    "register_notify",
     "register_providers",
     "register_reference_providers",
 ]

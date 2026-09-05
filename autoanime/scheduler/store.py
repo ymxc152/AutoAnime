@@ -16,16 +16,24 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from autoanime.core.enums import (
     Decision,
     EpisodeState,
+    PendingStatus,
     ReleaseStatus,
     SeasonState,
 )
-from autoanime.core.models import Episode, ReleaseRecord, RssSource, Season, Series
+from autoanime.core.models import (
+    Episode,
+    PendingQueue,
+    ReleaseRecord,
+    RssSource,
+    Season,
+    Series,
+)
 from autoanime.memory.store import SqliteStorage
 
 
@@ -259,6 +267,92 @@ class LoopStore:
                 )
             ).scalars().all()
         return list(rows)
+
+    # --- E4b：归档服务 / 错配恢复 / B5 对账所需 --------------------------------
+
+    async def episode_context(self, episode_id: int) -> tuple[Episode, Season, Series] | None:
+        """归档所需的完整上下文（episode → season → series，一次取齐）。"""
+        async with self._storage.transaction() as session:
+            episode = await session.get(Episode, episode_id)
+            if episode is None:
+                return None
+            season = await session.get(Season, episode.season_id) if episode.season_id else None
+            series = await session.get(Series, episode.series_id)
+            if season is None or series is None:
+                return None
+        return episode, season, series
+
+    async def update_episode_archive_state(
+        self,
+        episode_id: int,
+        *,
+        target: EpisodeState,
+        file_path: str | None = None,
+        quality_score: float | None = None,
+        upgraded_count_delta: int = 0,
+    ) -> Episode | None:
+        """归档/洗版落地：状态转移 + 文件指针 + 质量分 + 洗版计数（同事务）。"""
+        async with self._storage.transaction() as session:
+            row = await session.get(Episode, episode_id)
+            if row is None:
+                return None
+            current = EpisodeState(
+                row.state.value if hasattr(row.state, "value") else row.state
+            )
+            if current is not target and not current.can_transition(target):
+                raise TransitionError(f"episode {episode_id}: {current} -> {target} illegal")
+            row.state = target
+            if file_path is not None:
+                row.file_path = file_path
+            if quality_score is not None:
+                row.quality_score = quality_score
+            if upgraded_count_delta:
+                row.upgraded_count = int(row.upgraded_count or 0) + upgraded_count_delta
+            session.add(row)
+        return row
+
+    async def set_release_episode(self, record_id: int, episode_id: int) -> ReleaseRecord | None:
+        """错配恢复 A（改挂）：release_record 换挂目标集（expected 载体更新）。"""
+        async with self._storage.transaction() as session:
+            row = await session.get(ReleaseRecord, record_id)
+            if row is None:
+                return None
+            row.episode_id = episode_id
+            row.season_id = None
+            session.add(row)
+        return row
+
+    async def set_release_decision(
+        self, record_id: int, decision: Decision, *, reason: str | None = None
+    ) -> ReleaseRecord | None:
+        """更新已终态 release 的 decision/reason（不改生命周期状态）。"""
+        async with self._storage.transaction() as session:
+            row = await session.get(ReleaseRecord, record_id)
+            if row is None:
+                return None
+            row.decision = decision
+            if reason is not None:
+                row.reason = reason
+            session.add(row)
+        return row
+
+    async def add_pending(self, row: PendingQueue) -> PendingQueue:
+        async with self._storage.transaction() as session:
+            session.add(row)
+            await session.flush()
+        return row
+
+    async def count_pending(self) -> int:
+        async with self._storage.transaction() as session:
+            return int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(PendingQueue)
+                        .where(PendingQueue.status == PendingStatus.PENDING.value)
+                    )
+                ).scalar_one()
+            )
 
     async def seasons_by_ids(self, season_ids: Sequence[int]) -> list[Season]:
         if not season_ids:

@@ -33,7 +33,7 @@ from autoanime.scheduler.store import LoopStore, TransitionError
 logger = logging.getLogger(__name__)
 
 #: 完成回调签名：release + 网关文件清单（organize 侧在 E4b 接线）。
-CompletedCallback = Callable[[ReleaseRecord, list[dict[str, object]]], Awaitable[None]]
+CompletedCallback = Callable[[ReleaseRecord, list[dict[str, object]]], Awaitable[Any]]
 
 
 @dataclass
