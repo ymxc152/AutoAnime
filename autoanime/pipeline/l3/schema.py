@@ -12,6 +12,13 @@
 - 解析不做语义校验（负数 season、未来日期等留给 arbiter/参考源），
   也不做 markdown 围栏剥离：录制与缓存的都是纯 JSON 文本。
 
+批量响应解析（E1，ARCHITECTURE 9.3b 数组输出）：``parse_batch_response``
+把一个 JSON 数组解析成与批内 release name 数量对齐的草稿列表，每项多一
+个 ``index`` 对齐字段。整体非法（非 JSON/非数组）→ 全 ``None``；项级
+违规 → 该项 ``None``、其余照常；同一 ``index`` 出现多次 → 该 index 的
+全部项置 ``None``（无法归属的输出宁可丢弃，由调用方走单文件重试兜底，
+即「逐项校验失败不连坐」的解析侧语义）。该函数永不抛、永不返回 ``None``。
+
 纯函数，无 I/O、无模块级可变状态。
 """
 
@@ -24,6 +31,10 @@ from autoanime.core.enums import Segment
 
 L3_EVIDENCE = "llm"
 L3_FIELDS: tuple[str, ...] = ("title", "season", "episode", "segment", "fansub")
+
+#: 批量响应（E1，9.3b 数组输出）每项在单文件白名单上多一个对齐字段。
+BATCH_INDEX_FIELD = "index"
+BATCH_FIELDS: tuple[str, ...] = (BATCH_INDEX_FIELD, *L3_FIELDS)
 
 REASON_NOT_JSON = "not_json"
 REASON_UNKNOWN_FIELD = "unknown_field"
@@ -66,7 +77,11 @@ def parse_llm_response(text: str) -> L3Draft:
         raise LlmResponseError(REASON_NOT_JSON, str(exc)) from exc
     if not isinstance(payload, dict):
         raise LlmResponseError(REASON_NOT_JSON, "response is not a JSON object")
+    return parse_llm_payload(payload)
 
+
+def parse_llm_payload(payload: dict[str, object]) -> L3Draft:
+    """单个响应对象的白名单校验（单文件与批量响应共用的解析核心）。"""
     unknown = sorted(set(payload) - set(L3_FIELDS))
     if unknown:
         raise LlmResponseError(REASON_UNKNOWN_FIELD, ", ".join(unknown))
@@ -89,6 +104,46 @@ def parse_llm_response(text: str) -> L3Draft:
         episode=episode,
         fansub=fansub,
     )
+
+
+def parse_batch_response(text: str, count: int) -> list[L3Draft | None]:
+    """把批量响应解析成与批内条数对齐的草稿列表（永不抛、永不返回 ``None``）。
+
+    - 整体非 JSON / 非数组：全 ``None``（调用方对整批逐项走单文件重试）；
+    - 每项先校验 ``index``（整数、0 <= index < count），再把该项交给单
+      文件白名单校验（``index`` 之外的字段集与单文件完全一致）；任何一
+      步违规只置该项为 ``None``，不连坐；
+    - 同一 ``index`` 被声明多次：该 index 的全部项都置 ``None``（无法
+      归属的输出宁可丢弃）；
+    - 缺失的 index 保持 ``None``。
+    """
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return [None] * count
+    if not isinstance(payload, list):
+        return [None] * count
+
+    drafts: list[L3Draft | None] = [None] * count
+    seen: dict[int, int] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        index = item.get(BATCH_INDEX_FIELD)
+        if isinstance(index, bool) or not isinstance(index, int):
+            continue
+        if not 0 <= index < count:
+            continue
+        seen[index] = seen.get(index, 0) + 1
+        try:
+            rest = {key: value for key, value in item.items() if key != BATCH_INDEX_FIELD}
+            drafts[index] = parse_llm_payload(rest)
+        except LlmResponseError:
+            drafts[index] = None
+    for index, occurrences in seen.items():
+        if occurrences > 1:
+            drafts[index] = None
+    return drafts
 
 
 def _optional_int(payload: dict[str, object], key: str) -> int | None:
