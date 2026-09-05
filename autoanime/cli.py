@@ -4,16 +4,20 @@ import argparse
 import asyncio
 import json
 from collections.abc import Sequence
+from typing import Any, cast
 
 from autoanime.config import Settings, load_settings
 from autoanime.core.enums import Confidence, MemorySource, MemoryStatus, Segment
-from autoanime.core.interfaces import ParseResult, RawName
+from autoanime.core.interfaces import LlmTransport, ParseResult, RawName, Registry
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
-from autoanime.memory.store import SqliteStorage
+from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
 from autoanime.pipeline.l1_local import LocalRecognizer
+from autoanime.pipeline.l3 import ReferenceChain
+from autoanime.pipeline.l3_llm import LlmFallbackRecognizer
 from autoanime.pipeline.orchestrator import Orchestrator
+from autoanime.providers import LLM_TRANSPORT_NAME, register_providers
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -56,7 +60,10 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init-db", help="Create the v2 SQLite schema")
     parse_parser = subparsers.add_parser(
         "parse",
-        help="Parse a single release name with the L1 pipeline and L2 memory (JSON output)",
+        help=(
+            "Parse a single release name through the L1/L2/L3 pipeline and "
+            "the arbiter (JSON output)"
+        ),
     )
     parse_parser.add_argument("--name", required=True, help="File name to parse")
     parse_parser.add_argument("--folder", default=None, help="Optional folder name")
@@ -64,20 +71,64 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _build_orchestrator(settings: Settings) -> tuple[Orchestrator, SqliteStorage | None]:
-    """Wire the fixed orchestrator; an unusable memory store degrades to L1-only."""
-    if not settings.l2_enabled:
-        return Orchestrator(l2_enabled=False), None
+async def _build_orchestrator(
+    settings: Settings,
+) -> tuple[Orchestrator, SqliteStorage | None, object | None]:
+    """Wire the full L1 -> L2 -> L3 -> arbiter pipeline.
+
+    Every external capability degrades gracefully: the memory store, the LLM
+    cache store and the arbiter audit sink all hang off the SQLite storage;
+    the LLM transport comes from the provider registry (registered only when
+    ``llm_enabled`` and the endpoint config are complete). The third element
+    is the transport instance (if any) so the caller can release its HTTP
+    client; an unusable storage degrades L2 and L3 caching together.
+    """
+    registry = Registry()
+    registered = register_providers(registry, settings)
+    transport_obj = registry.optional(LlmTransport, LLM_TRANSPORT_NAME) if registered else None
+    llm_transport = cast("LlmTransport", transport_obj) if transport_obj is not None else None
+    reference_chain = ReferenceChain(
+        registry, order=settings.reference_order, enabled=settings.reference_enabled
+    )
+    l3_recognizer = LlmFallbackRecognizer.from_settings(settings)
+
+    def _degraded_orchestrator() -> Orchestrator:
+        # Storage unavailable: L2 and the L3 cache fall back together; the
+        # orchestrator marks such passes degraded in its outcome.
+        return Orchestrator(
+            l2_enabled=settings.l2_enabled,
+            l3_enabled=settings.llm_enabled,
+            l3_recognizer=l3_recognizer,
+            llm_transport=llm_transport,
+            reference_chain=reference_chain,
+        )
+
+    if not settings.l2_enabled and not settings.llm_enabled:
+        return Orchestrator(l2_enabled=False), None, None
     try:
         storage = SqliteStorage(settings.database_url)
     except Exception:
-        return Orchestrator(), None
+        return _degraded_orchestrator(), None, transport_obj
     try:
         await storage.create_all()
     except Exception:
         await storage.close()
-        return Orchestrator(), None
-    return Orchestrator(memory_store=StorageMemoryStore(storage, audit_governance=MemoryGovernance(storage))), storage
+        return _degraded_orchestrator(), None, transport_obj
+    governance = MemoryGovernance(storage)
+    return (
+        Orchestrator(
+            memory_store=StorageMemoryStore(storage, audit_governance=governance),
+            l2_enabled=settings.l2_enabled,
+            l3_enabled=settings.llm_enabled,
+            l3_recognizer=l3_recognizer,
+            llm_transport=llm_transport,
+            llm_cache_store=StorageLlmCacheStore(storage),
+            reference_chain=reference_chain,
+            audit_sink=governance,
+        ),
+        storage,
+        transport_obj,
+    )
 
 
 def _parse_result_to_json(result: ParseResult | None) -> dict[str, object] | None:
@@ -166,15 +217,27 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return await _confirm(args)
     if args.command == "parse":
         settings = load_settings()
-        orchestrator, storage = await _build_orchestrator(settings)
+        orchestrator, storage, transport_obj = await _build_orchestrator(settings)
         try:
             outcome = await orchestrator.process(
                 RawName(name=args.name, folder=args.folder, parent_path=args.parent)
             )
         finally:
+            # The transport is created by providers.register_providers and is
+            # only known here as an object; duck-type its optional aclose().
+            try:
+                await cast("Any", transport_obj).aclose()
+            except AttributeError:
+                pass
+            except Exception:
+                pass
             if storage is not None:
                 await storage.close()
-        print(json.dumps(_parse_result_to_json(outcome.result), ensure_ascii=False))
+        payload = _parse_result_to_json(outcome.result)
+        if payload is not None:
+            payload["route"] = outcome.route
+            payload["degraded"] = outcome.degraded
+        print(json.dumps(payload, ensure_ascii=False))
         return 0
     print(f"{args.command}: not implemented yet")
     return 0
