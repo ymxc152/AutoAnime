@@ -1,0 +1,145 @@
+{
+  "data": [
+    {
+      "id": 328609,
+      "name": "ぼっち・ざ・ろっく！",
+      "name_cn": "孤独摇滚！",
+      "type": 2,
+      "date": "2022-10-08",
+      "platform": "TV",
+      "total_episodes": 12,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "孤独摇滚！"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "BTR"
+            },
+            {
+              "v": "Bocchi the Rock!"
+            },
+            {
+              "v": "Bocchi the \"Guitar Hero\" Rock Story"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 537409,
+      "name": "ぼっち・ざ・ろっく！ 第2期",
+      "name_cn": "孤独摇滚！第二季",
+      "type": 2,
+      "date": null,
+      "platform": "TV",
+      "total_episodes": 0,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "孤独摇滚！第二季"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "BTR 2"
+            },
+            {
+              "v": "Bocchi the Rock! Season 2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 436738,
+      "name": "劇場総集編ぼっち・ざ・ろっく！ Re:",
+      "name_cn": "剧场总集篇孤独摇滚！ Re:",
+      "type": 2,
+      "date": "2024-06-07",
+      "platform": "剧场版",
+      "total_episodes": 1,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "剧场总集篇孤独摇滚！ Re:"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "劇場総集編「ぼっち・ざ・ろっく！」 前編"
+            },
+            {
+              "v": "BOCCHI THE ROCK! Recap Part 1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 459642,
+      "name": "劇場総集編ぼっち・ざ・ろっく！ Re:Re:",
+      "name_cn": "剧场总集篇孤独摇滚！ Re:Re:",
+      "type": 2,
+      "date": "2024-08-09",
+      "platform": "剧场版",
+      "total_episodes": 1,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "剧场总集篇孤独摇滚！ Re:Re:"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "劇場総集編「ぼっち・ざ・ろっく！」 後編"
+            },
+            {
+              "v": "BOCCHI THE ROCK! Recap Part 2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 504554,
+      "name": "Samac",
+      "name_cn": "孤独",
+      "type": 2,
+      "date": "1959-01-01",
+      "platform": "其他",
+      "total_episodes": 0,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "孤独"
+        }
+      ]
+    },
+    {
+      "id": 152083,
+      "name": "孤独的小猪",
+      "name_cn": "",
+      "type": 2,
+      "date": null,
+      "platform": "剧场版",
+      "total_episodes": 1,
+      "series": false,
+      "infobox": []
+    }
+  ],
+  "total": 18,
+  "limit": 10,
+  "offset": 0
+}

@@ -1,0 +1,70 @@
+{
+  "data": [
+    {
+      "id": 486347,
+      "name": "薬屋のひとりごと 第2期",
+      "name_cn": "药屋少女的呢喃 第二季",
+      "type": 2,
+      "date": "2025-01-10",
+      "platform": "TV",
+      "total_episodes": 24,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "药屋少女的呢喃 第二季"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "Kusuriya no Hitorigoto 2nd Season"
+            },
+            {
+              "v": "药师少女的独语 第二季"
+            },
+            {
+              "v": "Kusuriya no Hitorigoto Season 2"
+            },
+            {
+              "v": "The Apothecary Diaries Season 2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 420628,
+      "name": "薬屋のひとりごと",
+      "name_cn": "药屋少女的呢喃",
+      "type": 2,
+      "date": "2023-10-21",
+      "platform": "TV",
+      "total_episodes": 24,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "药屋少女的呢喃"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "药师少女的独语"
+            },
+            {
+              "v": "Kusuriya no Hitorigoto"
+            },
+            {
+              "v": "The Apothecary Diaries"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "total": 2,
+  "limit": 10,
+  "offset": 0
+}

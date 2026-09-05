@@ -1,0 +1,100 @@
+{
+  "data": [
+    {
+      "id": 515759,
+      "name": "葬送のフリーレン 第2期",
+      "name_cn": "葬送的芙莉莲 第二季",
+      "type": 2,
+      "date": "2026-01-16",
+      "platform": "TV",
+      "total_episodes": 10,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "葬送的芙莉莲 第二季"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "Sousou no Frieren 2nd Season"
+            },
+            {
+              "v": "Frieren: Beyond Journey's End Season 2"
+            },
+            {
+              "v": "Sousou no Frieren (2026)"
+            },
+            {
+              "v": "Beyond Journey`s End (2026)"
+            },
+            {
+              "v": "葬送のフリーレン (2026)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 400602,
+      "name": "葬送のフリーレン",
+      "name_cn": "葬送的芙莉莲",
+      "type": 2,
+      "date": "2023-09-29",
+      "platform": "TV",
+      "total_episodes": 28,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "葬送的芙莉莲"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "Frieren: Beyond Journey's End"
+            },
+            {
+              "v": "Sousou no Frieren"
+            },
+            {
+              "v": "葬送的芙莉蓮"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 198753,
+      "name": "古寺のおばけ騒動",
+      "name_cn": "古寺闹鬼记",
+      "type": 2,
+      "date": null,
+      "platform": "剧场版",
+      "total_episodes": 1,
+      "series": false,
+      "infobox": [
+        {
+          "key": "中文名",
+          "value": "古寺闹鬼记"
+        },
+        {
+          "key": "别名",
+          "value": [
+            {
+              "v": "Taro's Monster Hunt"
+            },
+            {
+              "v": "Furudera no Obake-soudou"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "total": 3,
+  "limit": 10,
+  "offset": 0
+}

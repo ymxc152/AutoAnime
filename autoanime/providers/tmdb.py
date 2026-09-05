@@ -5,6 +5,12 @@ L2 title shape，先经 ``bare_query`` 折叠成检索关键词，
 ``GET /3/search/tv``（``language=zh-CN``）取候选，``pick_candidate`` 选出
 命中条目，再 ``GET /3/tv/{id}`` 取权威详情映射为 ``ReferenceFacts``。
 
+双语 search（PR7 M1）：zh-CN 对拉丁 query 返回的 name/original_name 全为
+中文/日文（``original_name`` 不随 language 变化），拉丁 query 会匹配失败；
+主语言未命中时补一次 ``language=en`` 查询，候选并集去重后再匹配（详情
+仍以 zh-CN 取中文名）。策略：仅主语言未命中才发第二查询，主语言命中的
+剧目不多花请求；请求级失败（网络/429 两次/非 JSON）不重试第二语言。
+
 密钥：v3 ``api_key`` 走环境变量 ``AUTOANIME_TMDB_API_KEY``（构造参数可
 覆盖），内部以 ``SecretStr`` 持有；未配置时 ``lookup`` 直接返回 ``None``
 （链继续问下一个 provider），不发任何请求。密钥不进日志、不进异常文案
@@ -49,6 +55,15 @@ TMDB_API_KEY_ENV = "AUTOANIME_TMDB_API_KEY"
 
 DEFAULT_LANGUAGE = "zh-CN"
 """本地化语言（canonical_title 取中文名）。"""
+
+SECOND_LANGUAGE = "en"
+"""双语 search 的第二语言（拉丁 query 的匹配面）。
+
+选 ``en`` 而非 ``ja-JP``：``original_name`` 不随 ``language`` 参数变化
+（zh-CN 响应里已经带日文原名），ja-JP 只会重复 zh-CN 已有的匹配面；
+en 补上英文本地化名（如 "Frieren: Beyond Journey's End"），是拉丁/
+罗马音 query 唯一能新增的匹配载体。
+"""
 
 
 def _resolve_api_key(api_key: SecretStr | str | None) -> SecretStr | None:
@@ -123,45 +138,90 @@ class TmdbReference:
         query = bare_query(title_shape)
         if not query:
             return None
-        search = await self._http.request_json(
+        # 双语 search：先主语言（zh-CN）；仅当主语言未命中（0 候选或候选
+        # 匹配失败）才补一次第二语言查询，候选并集去重后再匹配——主语言
+        # 命中的剧目不多花一次请求；请求级失败（网络/429 两次/非 JSON）
+        # 不再重试第二语言。
+        search = await self._search_tv(query, self._language)
+        if not isinstance(search, dict):
+            return None
+        candidates = _parse_search_results(search)
+        chosen = pick_candidate(candidates, query)
+        if chosen is None:
+            alt = await self._search_tv(query, SECOND_LANGUAGE)
+            if not isinstance(alt, dict):
+                return None
+            candidates = _merge_candidates(candidates, _parse_search_results(alt))
+            chosen = pick_candidate(candidates, query)
+            if chosen is None:
+                return None
+        detail = await self._fetch_tv_detail(chosen)
+        if not isinstance(detail, dict):
+            return None
+        return _map_tv_detail(detail)
+
+    async def _search_tv(self, query: str, language: str) -> object | None:
+        """``GET /3/search/tv`` 第一页；任何请求级失败返回 ``None``。"""
+        if self._api_key is None:
+            return None
+        return await self._http.request_json(
             "GET",
             f"{self._base_url}/search/tv",
             params={
                 "api_key": self._api_key.get_secret_value(),
-                "language": self._language,
+                "language": language,
                 "query": query,
                 "page": "1",
                 "include_adult": "false",
             },
         )
-        if not isinstance(search, dict):
+
+    async def _fetch_tv_detail(self, subject_id: int) -> object | None:
+        """``GET /3/tv/{id}``（主语言本地化）；任何请求级失败返回 ``None``。"""
+        if self._api_key is None:
             return None
-        candidates: list[tuple[int, tuple[str, ...]]] = []
-        for item in search.get("results") or []:
-            if not isinstance(item, dict) or item.get("id") is None:
-                continue
-            candidates.append(
-                (
-                    int(item["id"]),
-                    (str(item.get("name") or ""), str(item.get("original_name") or "")),
-                )
-            )
-        if not candidates:
-            return None
-        chosen = pick_candidate(candidates, query)
-        if chosen is None:
-            return None
-        detail = await self._http.request_json(
+        return await self._http.request_json(
             "GET",
-            f"{self._base_url}/tv/{chosen}",
+            f"{self._base_url}/tv/{subject_id}",
             params={
                 "api_key": self._api_key.get_secret_value(),
                 "language": self._language,
             },
         )
-        if not isinstance(detail, dict):
-            return None
-        return _map_tv_detail(detail)
+
+
+def _parse_search_results(search: dict[str, Any]) -> list[tuple[int, tuple[str, ...]]]:
+    """search 响应 → ``(id, (name, original_name))`` 候选列表。"""
+    candidates: list[tuple[int, tuple[str, ...]]] = []
+    for item in search.get("results") or []:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        candidates.append(
+            (
+                int(item["id"]),
+                (str(item.get("name") or ""), str(item.get("original_name") or "")),
+            )
+        )
+    return candidates
+
+
+def _merge_candidates(
+    primary: list[tuple[int, tuple[str, ...]]],
+    secondary: list[tuple[int, tuple[str, ...]]],
+) -> list[tuple[int, tuple[str, ...]]]:
+    """两个语言的候选并集：按 id 去重（主语言顺序优先），同名条目名字
+    元组合并去重——两个语言各自带来的名字都参与匹配。"""
+    merged: dict[int, tuple[str, ...]] = {}
+    order: list[int] = []
+    for source in (primary, secondary):
+        for candidate_id, names in source:
+            if candidate_id not in merged:
+                merged[candidate_id] = ()
+                order.append(candidate_id)
+            seen = set(merged[candidate_id])
+            extra = [name for name in names if name and name not in seen]
+            merged[candidate_id] = (*merged[candidate_id], *extra)
+    return [(candidate_id, merged[candidate_id]) for candidate_id in order]
 
 
 def _map_tv_detail(detail: dict[str, Any]) -> ReferenceFacts:
