@@ -54,6 +54,7 @@ from autoanime.core.interfaces import (
     Recognizer,
 )
 from autoanime.memory.lookup import lookup_memory
+from autoanime.organize.expected import ExpectedContext, align_with_expected
 from autoanime.pipeline.batch import (
     DEFAULT_MAX_BATCH_SIZE,
     DEFAULT_MIN_BATCH_SIZE,
@@ -141,6 +142,8 @@ class RouteOutcome:
     l3_applied: bool = False
     audit: tuple[ArbiterAudit, ...] = ()
     batch_applied: bool = False
+    alignment: str | None = None
+    fast_path: bool = False
 
 
 @dataclass(frozen=True)
@@ -190,31 +193,80 @@ class Orchestrator:
         self._audit_sink = audit_sink
 
     async def parse(
-        self, raw: RawName, context: ParseContext | None = None
+        self,
+        raw: RawName,
+        context: ParseContext | None = None,
+        *,
+        expected: ExpectedContext | None = None,
     ) -> ParseResult | None:
         """Recognizer-style shortcut: only the effective ParseResult."""
-        return (await self.process(raw, context)).result
+        return (await self.process(raw, context, expected=expected)).result
 
     async def process(
-        self, raw: RawName, context: ParseContext | None = None
+        self,
+        raw: RawName,
+        context: ParseContext | None = None,
+        *,
+        expected: ExpectedContext | None = None,
     ) -> RouteOutcome:
-        """Full fixed pipeline for one release name."""
+        """Full fixed pipeline for one release name.
+
+        ``expected``（D13，E4）：订阅路径逐文件附带的期望上下文。L1 结果与
+        expected 对齐一致（剧名命中 + 季集对上）→ HIGH 快路径：跳过 L2
+        查找与 API 匹配，audit 记 ``subscribed_fast_path``；同番集数不同/
+        双集/SP（``episode_variant``）与冲突（``conflict``）/解析失败
+        （``unparsed``）不短路——继续走既有管线，对齐结论随 RouteOutcome
+        返回，交 organize 服务做错配恢复（A/B/C）。
+        """
         operation_id = uuid4().hex
         result = await self._recognizer.parse(raw, context)
+        alignment_verdict: str | None = None
+        if expected is not None:
+            alignment = align_with_expected(result, expected)
+            alignment_verdict = alignment.verdict
+            if alignment.verdict == "fast_path" and result is not None:
+                fast = replace(
+                    result,
+                    level=Confidence.HIGH,
+                    confidence=max(result.confidence, 0.99),
+                )
+                await self._record_simple_audit(
+                    operation_id,
+                    action="subscribed_fast_path",
+                    instruction={
+                        "torrent_hash": expected.torrent_hash,
+                        "episode_number": expected.episode_number,
+                        "season_number": expected.season_number,
+                    },
+                )
+                return RouteOutcome(
+                    fast, ROUTE_ARCHIVE, alignment="fast_path", fast_path=True
+                )
+            # episode_variant/conflict/unparsed：expected 是证据之一，管线
+            # 继续跑（不静默放行）；对齐结论随 outcome 交给调用方。
         if result is None:
-            return await self._finish(
-                raw, None, None, context, operation_id,
-                l2_applied=False, l2_degraded=False, memory_seasons=(),
+            return replace(
+                await self._finish(
+                    raw, None, None, context, operation_id,
+                    l2_applied=False, l2_degraded=False, memory_seasons=(),
+                ),
+                alignment=alignment_verdict,
             )
         if result.level is Confidence.HIGH:
-            return RouteOutcome(result, ROUTE_ARCHIVE)
+            return replace(
+                RouteOutcome(result, ROUTE_ARCHIVE), alignment=alignment_verdict
+            )
         if not eligible_for_memory(result.level):
             # LOW: memory never participates; straight to the L3 segment.
-            return await self._finish(
-                raw, result, result, context, operation_id,
-                l2_applied=False, l2_degraded=False, memory_seasons=(),
+            return replace(
+                await self._finish(
+                    raw, result, result, context, operation_id,
+                    l2_applied=False, l2_degraded=False, memory_seasons=(),
+                ),
+                alignment=alignment_verdict,
             )
-        return await self._through_l2(raw, result, context, operation_id)
+        outcome = await self._through_l2(raw, result, context, operation_id)
+        return replace(outcome, alignment=alignment_verdict)
 
     async def _through_l2(
         self, raw: RawName, result: ParseResult, context: ParseContext | None,
@@ -737,6 +789,30 @@ class Orchestrator:
             for season in seasons
             if isinstance(season, int) and not isinstance(season, bool)
         )
+
+    async def _record_simple_audit(
+        self,
+        operation_id: str,
+        *,
+        action: str,
+        instruction: dict[str, object],
+        entity: str = "release",
+    ) -> None:
+        """Persist one plain audit row (e.g. the D13 subscribed_fast_path mark)."""
+        sink = self._audit_sink
+        if sink is None:
+            return
+        try:
+            await sink.record_audit(
+                operation_id=operation_id,
+                entity=entity,
+                action=action,
+                instruction=instruction,
+            )
+        except Exception:
+            logger.warning(
+                "audit write failed, op=%s action=%s", operation_id, action, exc_info=True
+            )
 
     async def _record_audit(self, verdict: ArbiterVerdict, operation_id: str) -> None:
         """Persist the verdict's audit rows under the pass operation_id."""

@@ -9,7 +9,8 @@ def test_episode_state_transition_table() -> None:
     assert EpisodeState.DOWNLOADED.can_transition(EpisodeState.ORGANIZED)
     assert EpisodeState.ORGANIZED.can_transition(EpisodeState.UPGRADED)
     assert EpisodeState.UPGRADED.can_transition(EpisodeState.ORGANIZED)
-    assert not EpisodeState.MISSING.can_transition(EpisodeState.ORGANIZED)
+    # E4/D14-A：改挂零重下允许 MISSING → ORGANIZED（文件已存在、仅归属错）
+    assert EpisodeState.MISSING.can_transition(EpisodeState.ORGANIZED)
     assert not EpisodeState.IGNORED.can_transition(EpisodeState.MISSING)
 
 

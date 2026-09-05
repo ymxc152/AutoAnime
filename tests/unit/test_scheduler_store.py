@@ -81,9 +81,14 @@ async def test_episode_transition_guards(store: LoopStore, season_id: int) -> No
     episode = (await store.episodes_for_season(season_id))[0]
     assert await store.transition_episode(episode.id, EpisodeState.DOWNLOADING)
     with pytest.raises(TransitionError):
-        await store.transition_episode(episode.id, EpisodeState.MISSING)
-    # B5：ORGANIZED → FLAGGED（对账），FLAGGED → ORGANIZED（恢复）
+        await store.transition_episode(episode.id, EpisodeState.ORGANIZED)
+    # D14 错配恢复回退路径：DOWNLOADING → MISSING 现已合法
+    assert await store.transition_episode(episode.id, EpisodeState.MISSING)
+    assert await store.transition_episode(episode.id, EpisodeState.DOWNLOADING)
     assert await store.transition_episode(episode.id, EpisodeState.DOWNLOADED)
+    with pytest.raises(TransitionError):
+        await store.transition_episode(episode.id, EpisodeState.DOWNLOADING)
+    # B5：ORGANIZED → FLAGGED（对账），FLAGGED → ORGANIZED（恢复）
     assert await store.transition_episode(episode.id, EpisodeState.ORGANIZED)
     assert await store.transition_episode(episode.id, EpisodeState.FLAGGED)
     assert await store.transition_episode(episode.id, EpisodeState.ORGANIZED)

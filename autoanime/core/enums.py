@@ -15,10 +15,15 @@ class EpisodeState(StrEnum):
     FLAGGED = "flagged"
 
     def can_transition(self, target: EpisodeState) -> bool:
+        """状态机（E4 扩展）：``→ MISSING`` 是 D14 错配恢复 C 分支的回退
+        路径（文件不可救 → 回缺等 RSS 自然命中回补）；``MISSING →
+        ORGANIZED`` 是 D14-A 改挂分支的直达路径（文件已存在、仅归属错，
+        零重下），其余保持 M1 语义。
+        """
         transitions = {
-            self.MISSING: frozenset({self.DOWNLOADING, self.IGNORED}),
-            self.DOWNLOADING: frozenset({self.DOWNLOADED, self.IGNORED}),
-            self.DOWNLOADED: frozenset({self.ORGANIZED, self.IGNORED}),
+            self.MISSING: frozenset({self.DOWNLOADING, self.IGNORED, self.ORGANIZED}),
+            self.DOWNLOADING: frozenset({self.DOWNLOADED, self.IGNORED, self.MISSING}),
+            self.DOWNLOADED: frozenset({self.ORGANIZED, self.IGNORED, self.MISSING}),
             self.ORGANIZED: frozenset({self.UPGRADED, self.FLAGGED}),
             self.UPGRADED: frozenset({self.ORGANIZED}),
             self.IGNORED: frozenset(),
