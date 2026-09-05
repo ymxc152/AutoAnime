@@ -1,0 +1,35 @@
+{
+  "id": 209867,
+  "name": "葬送的芙莉莲",
+  "original_name": "葬送のフリーレン",
+  "original_language": "ja",
+  "first_air_date": "2023-09-29",
+  "number_of_seasons": 2,
+  "number_of_episodes": 56,
+  "genres": [
+    {
+      "id": 16,
+      "name": "动画"
+    },
+    {
+      "id": 10765,
+      "name": "科幻与奇幻"
+    }
+  ],
+  "seasons": [
+    {
+      "air_date": "2023-09-29",
+      "episode_count": 28,
+      "name": "第 1 季",
+      "season_number": 1
+    },
+    {
+      "air_date": "2026-01-16",
+      "episode_count": 28,
+      "name": "第 2 季",
+      "season_number": 2
+    }
+  ],
+  "status": "Returning Series",
+  "type": "Scripted"
+}
