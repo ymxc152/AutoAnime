@@ -43,7 +43,6 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import replace
-from typing import TypeAlias
 
 from autoanime.core.enums import Confidence
 from autoanime.core.interfaces import ParseContext, ParseResult, RawName
@@ -58,7 +57,7 @@ from autoanime.pipeline.l1.dialects import (
     parse_special,
 )
 
-DialectFn: TypeAlias = Callable[[RawName, ParseContext | None], ParseResult | None]
+type DialectFn = Callable[[RawName, ParseContext | None], ParseResult | None]
 
 # Fixed invocation order. It doubles as the final deterministic tie-breaker.
 DIALECT_PIPELINE: tuple[DialectFn, ...] = (

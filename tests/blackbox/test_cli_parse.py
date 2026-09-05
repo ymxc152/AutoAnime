@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 _REPO_ROOT = Path(__file__).parents[2]
 
@@ -20,7 +21,7 @@ def _run_parse(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _output_json(result: subprocess.CompletedProcess[str]) -> dict[str, object] | None:
+def _output_json(result: subprocess.CompletedProcess[str]) -> dict[str, Any] | None:
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
