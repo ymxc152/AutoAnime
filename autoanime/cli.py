@@ -161,6 +161,29 @@ def _parse_result_to_json(result: ParseResult | None) -> dict[str, object] | Non
     }
 
 
+def _confirm_reference_lookup(
+    settings: Settings, cache_store: SqliteStorage
+) -> ReferenceChain | None:
+    """The confirm-side reference lookup for alias backfill (PR7 M3/M2b).
+
+    The same chain the parse pipeline uses: providers registered through the
+    registry (each ``CachedReference``-wrapped over the confirm-side storage,
+    so the backfill query shares the reference cache), ordered by
+    ``reference_order``. ``reference_enabled=False`` yields ``None`` -- the
+    backfill hook is simply not wired and confirm behaves byte-identically
+    to the pre-M3 CLI.
+    """
+    if not settings.reference_enabled:
+        return None
+    registry = Registry()
+    register_reference_providers(
+        registry, cache_store=cache_store, reference_qps=settings.reference_qps
+    )
+    return ReferenceChain(
+        registry, order=settings.reference_order, enabled=settings.reference_enabled
+    )
+
+
 async def _confirm(args: argparse.Namespace) -> int:
     draft = await LocalRecognizer().parse(RawName(name=args.name))
     title = args.title or (draft.title if draft else None)
@@ -192,6 +215,7 @@ async def _confirm(args: argparse.Namespace) -> int:
             raw_name=args.name,
             source=MemorySource(args.source),
             bypass_lookup=access,
+            reference_lookup=_confirm_reference_lookup(settings, storage),
         )
     if outcome.bypassed:
         print(json.dumps({"bypassed": True, "entries": []}, ensure_ascii=False))
