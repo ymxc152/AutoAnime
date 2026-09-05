@@ -34,6 +34,7 @@ async def _collect_indexes(db_path: Path) -> dict[str, set[str]]:
 
         def _read(sync_connection: object) -> dict[str, set[str]]:
             inspector = inspect(sync_connection)
+            assert inspector is not None
             return {
                 table: {ix["name"] for ix in inspector.get_indexes(table)}
                 for table in ("parse_memory", "bypass_list")
