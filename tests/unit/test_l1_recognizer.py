@@ -140,6 +140,13 @@ def test_episode_within_release_progress_keeps_level() -> None:
         "",
         "Just Some Random Text.mkv",
         "random_text_only",
+        # Technical/noise-only names must not become title memories.
+        "1080p.WEB-DL.mkv",
+        "WEBRip.AAC.mkv",
+        "H.264.mkv",
+        "招募翻译.mp4",
+        "1080p",
+        "webrip",
     ],
 )
 def test_unrecognizable_names_return_none(name: str) -> None:

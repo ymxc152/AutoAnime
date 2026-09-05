@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from autoanime.core.enums import MemorySource, MemoryStatus
-from autoanime.core.interfaces import ParseResult, Storage
-from autoanime.core.models import BypassList, ParseMemory
+from autoanime.core.interfaces import ParseResult
+from autoanime.core.models import ParseMemory
+from autoanime.memory.store import SqliteStorage
 from autoanime.pipeline.l2 import (
     KEY_LEVEL_EXACT,
     KEY_LEVEL_SERIES,
@@ -61,29 +62,20 @@ class LearnOutcome:
 
 
 class StorageMemoryAccess:
-    """``MemoryWriteStore`` + ``BypassLookup`` over the generic ``Storage`` API.
+    """Write-side + bypass access over ``SqliteStorage`` DB predicates."""
 
-    Keeps every DB session inside the injected ``SqliteStorage``: lookups use
-    its public ``list`` and filter by key in Python (the v2 corpus is small;
-    T4 may add an indexed store implementation without touching this module).
-    """
-
-    def __init__(self, storage: Storage) -> None:
+    def __init__(self, storage: SqliteStorage) -> None:
         self._storage = storage
 
-    async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
-        for entry in await self._storage.list(ParseMemory):
-            if entry.key_level == key_level and entry.key_hash == key_hash:
-                return entry
-        return None
+    async def find_parse_memory(self, key_level: int, key_hash: str) -> ParseMemory | None:
+        return await self._storage.find_parse_memory(key_level, key_hash)
 
-    async def add(self, parse_memory: Any) -> None:
+    async def add(self, parse_memory: ParseMemory) -> None:
         await self._storage.add(parse_memory)
 
     async def has_bypass(self, pattern_hash: str) -> bool:
-        return any(
-            row.pattern_hash == pattern_hash for row in await self._storage.list(BypassList)
-        )
+        return await self._storage.find_bypass(pattern_hash) is not None
+
 
 
 def stored_result_for(confirmed: ParseResult, *, key_level: int) -> dict[str, object]:

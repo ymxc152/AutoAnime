@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -383,6 +383,35 @@ async def test_storage_memory_store_enhances_through_the_real_db(tmp_path: Path)
         rows = await storage.list(ParseMemory)
         assert len(rows) == 1
         assert rows[0].hit_count == 1
+
+
+
+class _ExplodingAuditGovernance:
+    def memory_hit_audit_row(self, **_kwargs: object) -> object:
+        raise RuntimeError("audit failed")
+
+
+async def test_hit_audit_failure_rolls_back_hit_count(tmp_path: Path) -> None:
+    async with SqliteStorage(f"sqlite+aiosqlite:///{tmp_path / 'memory.db'}") as storage:
+        row = ParseMemory(
+            key_level=KEY_LEVEL_SERIES,
+            key_hash="hit-audit-row",
+            title_shape="some show",
+            result={"title": "Some Show", "seasons": [1], "episode": None},
+        )
+        await storage.add(row)
+        store = StorageMemoryStore(
+            storage,
+            audit_governance=cast(MemoryGovernance, _ExplodingAuditGovernance()),
+        )
+
+        with pytest.raises(RuntimeError, match="audit failed"):
+            await store.record_hit(row, operation_id="batch")
+
+        refetched = await storage.get(ParseMemory, row.id)
+        assert refetched is not None
+        assert refetched.hit_count == 0
+        assert await storage.list(AuditLog) == []
 
 
 async def test_storage_memory_store_wires_hit_audit(tmp_path: Path) -> None:

@@ -51,6 +51,23 @@ ACTION_BYPASS_ADD = "bypass_add"
 DEFAULT_NO_HIT_DAYS_FOR_DEPRECATION = 30
 
 
+def memory_hit_audit_row(
+    *,
+    operation_id: str,
+    entity_id: int,
+    instruction: dict[str, object] | None = None,
+) -> AuditLog:
+    """Build a memory-hit audit row for use inside a caller transaction."""
+    return AuditLog(
+        operation_id=operation_id,
+        entity=ENTITY_PARSE_MEMORY,
+        action=ACTION_MEMORY_HIT,
+        entity_id=entity_id,
+        instruction=instruction or {},
+        actor=Actor.AUTO,
+    )
+
+
 @dataclass(frozen=True)
 class StatusDecision:
     """Outcome of the pure status state machine for one ParseMemory row."""
@@ -135,10 +152,7 @@ class MemoryGovernance:
 
     async def find_bypass(self, digest: str) -> BypassList | None:
         """The bypass row for a pattern digest, or ``None``."""
-        for row in await self._store.list(BypassList):
-            if row.pattern_hash == digest:
-                return row
-        return None
+        return await self._store.find_bypass(digest)
 
     async def bypassed_hashes(self) -> frozenset[str]:
         """Every registered bypass pattern digest."""
@@ -178,6 +192,20 @@ class MemoryGovernance:
         )
         await self._store.add(row)
         return row
+
+    def memory_hit_audit_row(
+        self,
+        *,
+        operation_id: str,
+        entity_id: int,
+        instruction: dict[str, object] | None = None,
+    ) -> AuditLog:
+        """Build a hit audit row for a caller-owned transaction."""
+        return memory_hit_audit_row(
+            operation_id=operation_id,
+            entity_id=entity_id,
+            instruction=instruction,
+        )
 
     async def record_memory_hit_audit(
         self,

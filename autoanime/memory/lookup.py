@@ -29,7 +29,7 @@ from uuid import uuid4
 
 from autoanime.core.enums import MemoryStatus
 from autoanime.core.interfaces import MemoryStore, ParseContext, ParseResult
-from autoanime.core.models import BypassList, ParseMemory
+from autoanime.core.models import ParseMemory
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.store import SqliteStorage
 from autoanime.pipeline.l2.bypass import pattern_hash
@@ -154,13 +154,10 @@ async def enhance_result(
 
 
 class StorageMemoryStore:
-    """``MemoryStore`` implementation over the generic ``SqliteStorage`` API.
+    """``MemoryStore`` implementation over ``SqliteStorage``.
 
-    Pure composition: every session is opened inside ``SqliteStorage``
-    methods; this class holds no session of its own. Reads filter in Python
-    over ``list`` because the generic store exposes no field queries; the
-    write path relies on ``Session.add`` save-or-update semantics for
-    detached rows.
+    Key and bypass reads use SQLite predicates. Hit counting and audit writes
+    share one transaction so the counter and its audit row cannot diverge.
     """
 
     def __init__(
@@ -169,38 +166,45 @@ class StorageMemoryStore:
         self._storage = storage
         self._audit_governance = audit_governance
 
-    async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
-        for memory in await self._storage.list(ParseMemory):
-            if memory.key_level == key_level and memory.key_hash == key_hash:
-                return memory
-        return None
+    async def find_parse_memory(self, key_level: int, key_hash: str) -> ParseMemory | None:
+        return await self._storage.find_parse_memory(key_level, key_hash)
 
     async def record_hit(
         self, parse_memory: Any, *, operation_id: str | None = None
     ) -> None:
-        parse_memory.hit_count = _as_count(parse_memory.hit_count) + 1
-        parse_memory.last_hit_at = datetime.now()
-        await self._storage.add(parse_memory)
-        if self._audit_governance is not None and parse_memory.id is not None:
-            await self._audit_governance.record_memory_hit_audit(
-                operation_id=operation_id or uuid4().hex,
-                entity_id=parse_memory.id,
-                instruction={
-                    "key_level": parse_memory.key_level,
-                    "trust": trust_score(
-                        _as_count(parse_memory.hit_count),
-                        _as_count(parse_memory.corrected_count)
-                    ),
-                },
-            )
+        new_count = _as_count(parse_memory.hit_count) + 1
+        hit_at = datetime.now()
+        async with self._storage.transaction() as session:
+            row = await session.merge(parse_memory)
+            row.hit_count = new_count
+            row.last_hit_at = hit_at
+            if self._audit_governance is not None and row.id is not None:
+                session.add(
+                    self._audit_governance.memory_hit_audit_row(
+                        operation_id=operation_id or uuid4().hex,
+                        entity_id=row.id,
+                        instruction={
+                            "key_level": row.key_level,
+                            "trust": trust_score(
+                                new_count,
+                                _as_count(row.corrected_count),
+                            ),
+                        },
+                    )
+                )
+        parse_memory.hit_count = new_count
+        parse_memory.last_hit_at = hit_at
 
     async def record_correction(self, parse_memory: Any) -> None:
-        parse_memory.corrected_count = _as_count(parse_memory.corrected_count) + 1
-        await self._storage.add(parse_memory)
+        new_count = _as_count(parse_memory.corrected_count) + 1
+        async with self._storage.transaction() as session:
+            row = await session.merge(parse_memory)
+            row.corrected_count = new_count
+        parse_memory.corrected_count = new_count
 
     async def has_bypass(self, pattern_hash: str) -> bool:
-        entries = await self._storage.list(BypassList)
-        return any(entry.pattern_hash == pattern_hash for entry in entries)
+        return await self._storage.find_bypass(pattern_hash) is not None
+
 
 
 def _is_active(status: Any) -> bool:

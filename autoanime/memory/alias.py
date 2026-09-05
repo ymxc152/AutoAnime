@@ -53,14 +53,8 @@ class AliasService:
         More than one series may legitimately claim an ambiguous title; the
         result is ordered by alias row id (registration order).
         """
-        normalized = alias_norm(title)
-        matches = [
-            row
-            for row in await self._store.list(Alias)
-            if row.alias_norm == normalized
-        ]
-        matches.sort(key=lambda row: row.id)
-        return [row.series_id for row in matches]
+        rows = await self._store.find_aliases_by_norm(alias_norm(title))
+        return [row.series_id for row in rows]
 
     async def find_series_id(self, title: str) -> int | None:
         """First series id matching the title, or ``None``."""
@@ -69,12 +63,8 @@ class AliasService:
 
     async def aliases_for_series(self, series_id: int) -> list[Alias]:
         """Every alias row registered for a series, ordered by id."""
-        rows = [row for row in await self._store.list(Alias) if row.series_id == series_id]
-        rows.sort(key=lambda row: row.id)
-        return rows
+        return await self._store.find_aliases_by_series(series_id)
 
     async def _find(self, series_id: int, normalized: str) -> Alias | None:
-        for row in await self._store.list(Alias):
-            if row.series_id == series_id and row.alias_norm == normalized:
-                return row
-        return None
+        rows = await self._store.find_aliases_by_norm(normalized)
+        return next((row for row in rows if row.series_id == series_id), None)
