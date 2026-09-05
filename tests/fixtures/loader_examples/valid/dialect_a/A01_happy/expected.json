@@ -1,0 +1,17 @@
+{
+  "title": "Some Title",
+  "season": 2,
+  "episode": 1,
+  "segment": "episode",
+  "fansub": "MWeb",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "folder"
+  }
+}

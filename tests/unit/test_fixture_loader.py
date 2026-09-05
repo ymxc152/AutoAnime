@@ -73,3 +73,54 @@ def test_loader_rejects_empty_files() -> None:
 def test_loader_rejects_dialect_mismatch() -> None:
     with pytest.raises(FixtureError, match="dialect mismatch"):
         load_case(ERROR_ROOT / "dialect_a" / "A03_mismatch")
+
+
+def test_load_case_parses_expected_json() -> None:
+    case = load_case(VALID_ROOT / "dialect_a" / "A01_happy")
+    expected = case.expected
+
+    assert expected is not None
+    assert expected.title == "Some Title"
+    assert expected.season == 2
+    assert expected.episode == 1
+    assert expected.segment == "episode"
+    assert expected.fansub == "MWeb"
+    assert expected.level == "medium"
+    assert expected.confidence == 0.6
+    assert expected.missing_fields == ()
+    assert expected.evidence == {
+        "title": "name",
+        "season": "name",
+        "episode": "name",
+        "segment": "name",
+        "fansub": "folder",
+    }
+
+
+def test_load_case_parses_expected_json_with_nulls_and_missing() -> None:
+    case = load_case(VALID_ROOT / "dialect_b" / "B01_single")
+    expected = case.expected
+
+    assert expected is not None
+    assert expected.title == "BLEACH Sennen Kessen-hen"
+    assert expected.season is None
+    assert expected.episode == 41
+    assert expected.fansub == "BeanSub"
+    assert expected.missing_fields == ("season",)
+    assert expected.evidence["season"] == "none"
+
+
+def test_load_case_without_expected_json_yields_none() -> None:
+    case = load_case(VALID_ROOT / "dialect_a" / "A02_stable")
+
+    assert case.expected is None
+
+
+def test_loader_rejects_invalid_segment_in_expected() -> None:
+    with pytest.raises(FixtureError, match="'segment' must be one of"):
+        load_case(ERROR_ROOT / "dialect_a" / "A05_invalid_expected")
+
+
+def test_loader_rejects_confidence_level_mismatch_in_expected() -> None:
+    with pytest.raises(FixtureError, match="'confidence' must be 1.0"):
+        load_case(ERROR_ROOT / "dialect_b" / "B02_confidence_mismatch")

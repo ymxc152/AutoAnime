@@ -10,6 +10,11 @@ from autoanime.core.interfaces import RawName
 _DEFAULT_ROOT = Path(__file__).parents[1] / "fixtures" / "samples"
 _DIALECT_PREFIX = "dialect_"
 
+_VALID_LEVELS = frozenset({"high", "medium", "low"})
+_VALID_SEGMENTS = frozenset({"episode", "season_pack", "movie"})
+_VALID_EVIDENCE_SOURCES = frozenset({"name", "folder", "context", "none"})
+_LEVEL_CONFIDENCE = {"high": 1.0, "medium": 0.6, "low": 0.2}
+
 
 class FixtureError(ValueError):
     """Raised when a fixture directory does not satisfy the loader contract."""
@@ -21,6 +26,19 @@ class FixtureFile:
 
 
 @dataclass(frozen=True)
+class FixtureExpected:
+    title: str
+    season: int | None
+    episode: int | None
+    segment: str
+    fansub: str | None
+    level: str
+    confidence: float
+    missing_fields: tuple[str, ...]
+    evidence: dict[str, str]
+
+
+@dataclass(frozen=True)
 class FixtureCase:
     id: str
     dialect: str
@@ -29,6 +47,7 @@ class FixtureCase:
     files: tuple[FixtureFile, ...]
     tags: tuple[str, ...]
     notes: str | None
+    expected: FixtureExpected | None = None
 
     def to_raw_names(self) -> list[RawName]:
         return [
@@ -105,7 +124,91 @@ def load_case(path: Path) -> FixtureCase:
         files=tuple(files),
         tags=tuple(raw_tags),
         notes=notes,
+        expected=_load_expected(path) if (path / "expected.json").is_file() else None,
     )
+
+
+def _load_expected(path: Path) -> FixtureExpected:
+    """Load and validate an optional expected.json next to context.json."""
+    expected_path = path / "expected.json"
+    try:
+        payload = json.loads(expected_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FixtureError(f"invalid expected.json in fixture directory: {path}") from exc
+
+    if not isinstance(payload, dict):
+        raise FixtureError(f"expected.json must contain an object in fixture directory: {path}")
+
+    title = _require_string(payload, "title")
+    season = _optional_int(payload, "season")
+    episode = _optional_int(payload, "episode")
+    segment = _require_choice(payload, "segment", _VALID_SEGMENTS)
+    fansub = _optional_string(payload, "fansub")
+    level = _require_choice(payload, "level", _VALID_LEVELS)
+
+    confidence = payload.get("confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise FixtureError(f"fixture field 'confidence' must be a number in directory: {path}")
+    if confidence != _LEVEL_CONFIDENCE[level]:
+        raise FixtureError(
+            f"fixture field 'confidence' must be {_LEVEL_CONFIDENCE[level]} for level "
+            f"{level!r} in directory: {path}"
+        )
+
+    raw_missing = payload.get("missing_fields", [])
+    if not isinstance(raw_missing, list) or any(
+        not isinstance(field, str) or not field for field in raw_missing
+    ):
+        raise FixtureError(
+            f"fixture field 'missing_fields' must be a list of non-empty strings "
+            f"in directory: {path}"
+        )
+
+    raw_evidence = payload.get("evidence", {})
+    if not isinstance(raw_evidence, dict):
+        raise FixtureError(f"fixture field 'evidence' must be an object in directory: {path}")
+    evidence: dict[str, str] = {}
+    for key, value in raw_evidence.items():
+        if not isinstance(key, str) or not key:
+            raise FixtureError(
+                f"fixture field 'evidence' keys must be non-empty strings in directory: {path}"
+            )
+        if value not in _VALID_EVIDENCE_SOURCES:
+            raise FixtureError(
+                f"fixture field 'evidence[{key}]' must be one of "
+                f"{sorted(_VALID_EVIDENCE_SOURCES)} in directory: {path}"
+            )
+        evidence[key] = value
+
+    return FixtureExpected(
+        title=title,
+        season=season,
+        episode=episode,
+        segment=segment,
+        fansub=fansub,
+        level=level,
+        confidence=float(confidence),
+        missing_fields=tuple(raw_missing),
+        evidence=evidence,
+    )
+
+
+def _optional_int(data: dict[str, Any], key: str) -> int | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise FixtureError(f"fixture field '{key}' must be an integer or null")
+    return value
+
+
+def _require_choice(data: dict[str, Any], key: str, choices: frozenset[str]) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or value not in choices:
+        raise FixtureError(
+            f"fixture field '{key}' must be one of {sorted(choices)}"
+        )
+    return value
 
 
 def _optional_string(data: dict[str, Any], key: str) -> str | None:

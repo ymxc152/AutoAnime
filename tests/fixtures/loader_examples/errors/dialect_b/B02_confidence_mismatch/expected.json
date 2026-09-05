@@ -1,0 +1,15 @@
+{
+  "title": "Title",
+  "season": null,
+  "episode": 1,
+  "segment": "episode",
+  "fansub": "Group",
+  "level": "high",
+  "confidence": 0.6,
+  "missing_fields": ["season"],
+  "evidence": {
+    "title": "name",
+    "episode": "name",
+    "fansub": "name"
+  }
+}

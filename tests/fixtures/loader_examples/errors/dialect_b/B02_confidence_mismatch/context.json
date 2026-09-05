@@ -1,0 +1,9 @@
+{
+  "id": "B02_confidence_mismatch",
+  "dialect": "B",
+  "folder": null,
+  "parent_path": "Z:/Downloads",
+  "files": [{"name": "[Group] Title - 01.mkv"}],
+  "tags": ["invalid"],
+  "notes": "expected.json 的 confidence 与 level 不一致"
+}

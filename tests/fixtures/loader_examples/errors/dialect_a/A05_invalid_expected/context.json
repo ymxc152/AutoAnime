@@ -1,0 +1,9 @@
+{
+  "id": "A05_invalid_expected",
+  "dialect": "A",
+  "folder": "Some.Folder",
+  "parent_path": "Z:/Downloads",
+  "files": [{"name": "Some.Title.S01E01.mkv"}],
+  "tags": ["invalid"],
+  "notes": "expected.json 使用了非法 segment 值"
+}
