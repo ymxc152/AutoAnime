@@ -6,6 +6,22 @@
 （正常命中、查无结果、非 JSON、429 退避、超时）× 两 adapter，另加
 注册/链组合、QPS 频控、纯函数（bare_query/pick_candidate/季号推导/
 Retry-After 解析）用例。
+
+PR7 M1 补充 fixture 来源（Bangumi 均为 2026-09 真实 API 录制后裁剪：
+search 条目仅保留 id/name/name_cn/type/date/platform/total_episodes/
+series/infobox（别名+中文名），详情仅保留 id/name/name_cn/eps/
+total_episodes/infobox（别名+中文名+话数）；bangumi_search_bocchi
+裁至前 6 条）：
+
+- ``bangumi_search_frieren_romaji``：POST /v0/search/subjects
+  keyword="Sousou no Frieren"（罗马音命中 400602 别名）；
+- ``bangumi_search_kusuriya_romaji``：keyword="Kusuriya no Hitorigoto"；
+- ``bangumi_search_bocchi``：keyword="孤独摇滚"（短 query）；
+- ``bangumi_subject_420628`` / ``bangumi_subject_328609``：对应详情；
+- ``tmdb_search_tv_frieren_zh`` / ``tmdb_search_tv_frieren_en``：手写
+  （本机无 api_key 无法录制），按官方 /3/search/tv 结构分别模拟
+  language=zh-CN（拉丁 query 返回中/日文名）与 language=en（英文名）
+  两种响应。
 """
 
 from __future__ import annotations
@@ -36,7 +52,7 @@ from autoanime.providers.bangumi import (
     detect_season_number,
     strip_season_markers,
 )
-from autoanime.providers.tmdb import TmdbReference
+from autoanime.providers.tmdb import TmdbReference, _merge_candidates
 
 FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "reference"
 
@@ -202,6 +218,29 @@ class TestPickCandidate:
     def test_short_query_skips_containment(self) -> None:
         candidates = [(1, ("刀剑神域外传",))]
         assert pick_candidate(candidates, "刀剑神域") is None  # 短 query 不参与包含匹配
+
+    def test_short_query_prefix_unique_punctuation_suffix_allowed(self) -> None:
+        # 「孤独摇滚」→「孤独摇滚！」：前缀命中、后缀纯标点、条目唯一 → 放行。
+        candidates = [
+            (328609, ("ぼっち・ざ・ろっく！", "孤独摇滚！")),
+            (537409, ("ぼっち・ざ・ろっく！ 第2期", "孤独摇滚！第二季")),
+        ]
+        assert pick_candidate(candidates, "孤独摇滚") == 328609
+
+    def test_short_query_prefix_multi_hits_rejected(self) -> None:
+        # 多个条目前缀命中（即使后缀纯标点）→ 多义保护，拒绝。
+        candidates = [(1, ("刀剑神域！",)), (2, ("刀剑神域：",))]
+        assert pick_candidate(candidates, "刀剑神域") is None
+
+    def test_short_query_prefix_content_suffix_rejected(self) -> None:
+        # 后缀含文字内容（第二季/外传）→ 语义延伸，不因唯一而放行。
+        candidates = [(1, ("刀剑神域 第二季",)), (2, ("刀剑神域外传",))]
+        assert pick_candidate(candidates, "刀剑神域") is None
+
+    def test_alias_in_candidate_names_exact_match(self) -> None:
+        # 候选名集合含别名（Bangumi 搜索条目自带 infobox 别名）→ 罗马音精确命中。
+        candidates = [(400602, ("葬送のフリーレン", "葬送的芙莉莲", "Sousou no Frieren"))]
+        assert pick_candidate(candidates, "Sousou no Frieren") == 400602
 
     def test_no_match_returns_none(self) -> None:
         candidates = [(1, ("绝命毒师",))]
@@ -372,6 +411,68 @@ class TestBangumiReference:
         assert sleeper.waits == [1.0, 1.0, 1.0]
         assert len(log.paths) == 4
 
+    async def test_romaji_query_hits_via_search_hit_aliases(self) -> None:
+        # 罗马音 query：搜索索引按别名命中，候选名集合含条目自带 infobox 别名
+        # → "Sousou no Frieren" 精确命中 400602（真实录制 fixture）。
+        log = RequestLog()
+        routes = {
+            ("POST", "/v0/search/subjects"): json_response(_fixture("bangumi_search_frieren_romaji.json")),
+            ("GET", "/v0/subjects/400602"): json_response(_fixture("bangumi_subject_400602.json")),
+        }
+        clock = FakeClock()
+        adapter = make_bangumi(routes, clock=clock, sleeper=FakeSleeper(clock), log=log)
+        facts = await adapter.lookup("Sousou no Frieren")
+        assert facts is not None
+        assert facts.source == "bangumi"
+        assert facts.canonical_title == "葬送的芙莉莲"
+        assert log.entries[0]["body"] == {
+            "keyword": "Sousou no Frieren",
+            "filter": {"type": [2]},
+        }
+        assert log.paths == ["/v0/search/subjects", "/v0/subjects/400602"]
+
+    async def test_romaji_query_kusuriya_hits(self) -> None:
+        # 罗马音 query 第二样本：Kusuriya no Hitorigoto → 420628（真实录制）。
+        log = RequestLog()
+        routes = {
+            ("POST", "/v0/search/subjects"): json_response(_fixture("bangumi_search_kusuriya_romaji.json")),
+            ("GET", "/v0/subjects/420628"): json_response(_fixture("bangumi_subject_420628.json")),
+        }
+        clock = FakeClock()
+        adapter = make_bangumi(routes, clock=clock, sleeper=FakeSleeper(clock), log=log)
+        facts = await adapter.lookup("Kusuriya no Hitorigoto")
+        assert facts is not None
+        assert facts.canonical_title == "药屋少女的呢喃"
+        assert facts.episode_count == 24
+        # 兄弟条目「第2期」参与推导：季列表 (1, 2)。
+        assert facts.seasons == (1, 2)
+        assert facts.aliases == (
+            "薬屋のひとりごと",
+            "药师少女的独语",
+            "Kusuriya no Hitorigoto",
+            "The Apothecary Diaries",
+        )
+        assert log.paths == ["/v0/search/subjects", "/v0/subjects/420628"]
+
+    async def test_short_chinese_query_prefix_unique_hits(self) -> None:
+        # 短中文 query（4 字）前缀唯一放行：「孤独摇滚」→「孤独摇滚！」
+        # （真实录制 fixture，total=18 裁至前 6 条）。
+        log = RequestLog()
+        routes = {
+            ("POST", "/v0/search/subjects"): json_response(_fixture("bangumi_search_bocchi.json")),
+            ("GET", "/v0/subjects/328609"): json_response(_fixture("bangumi_subject_328609.json")),
+        }
+        clock = FakeClock()
+        adapter = make_bangumi(routes, clock=clock, sleeper=FakeSleeper(clock), log=log)
+        facts = await adapter.lookup("孤独摇滚")
+        assert facts is not None
+        assert facts.canonical_title == "孤独摇滚！"
+        assert facts.episode_count == 12
+        # 兄弟条目「孤独摇滚！第二季」参与推导：季列表 (1, 2)。
+        assert facts.seasons == (1, 2)
+        assert log.entries[0]["body"] == {"keyword": "孤独摇滚", "filter": {"type": [2]}}
+        assert log.paths == ["/v0/search/subjects", "/v0/subjects/328609"]
+
 
 # ---------------------------------------------------------------------------
 # TMDB adapter
@@ -409,12 +510,15 @@ class TestTmdbReference:
         assert await adapter.lookup("葬送的芙莉莲") is None
 
     async def test_candidates_but_no_match_returns_none(self) -> None:
-        adapter = make_tmdb(TMDB_HIT_ROUTES)
+        # 双语 search：主语言未命中 → 补一次 en 查询 → 仍未命中 → None。
+        clock = FakeClock()
+        adapter = make_tmdb(TMDB_HIT_ROUTES, clock=clock, sleeper=FakeSleeper(clock))
         assert await adapter.lookup("魔女之旅") is None
 
     async def test_no_results_returns_none(self) -> None:
         routes = {("GET", "/3/search/tv"): json_response(_fixture("tmdb_search_tv_empty.json"))}
-        adapter = make_tmdb(routes)
+        clock = FakeClock()
+        adapter = make_tmdb(routes, clock=clock, sleeper=FakeSleeper(clock))
         assert await adapter.lookup("葬送的芙莉莲") is None
 
     async def test_non_json_response_returns_none(self) -> None:
@@ -471,6 +575,54 @@ class TestTmdbReference:
         adapter = make_tmdb(routes, clock=clock, sleeper=FakeSleeper(clock))
         assert await adapter.lookup("葬送的芙莉莲") is None
         assert len(calls) == 2
+
+    async def test_latin_query_bilingual_second_language_hit(self) -> None:
+        # 拉丁 query：zh-CN 返回的 name/original_name 全为中文/日文 → 主语言
+        # 未命中 → 补一次 en 查询 → 英文名包含 query → 命中；详情仍 zh-CN。
+        log = RequestLog()
+
+        def search_handler(request: httpx.Request) -> httpx.Response:
+            if request.url.params["language"] == "zh-CN":
+                return json_response(_fixture("tmdb_search_tv_frieren_zh.json"))
+            return json_response(_fixture("tmdb_search_tv_frieren_en.json"))
+
+        routes = {
+            ("GET", "/3/search/tv"): search_handler,
+            ("GET", "/3/tv/209867"): json_response(_fixture("tmdb_tv_209867_detail.json")),
+        }
+        clock = FakeClock()
+        sleeper = FakeSleeper(clock)
+        adapter = make_tmdb(routes, clock=clock, sleeper=sleeper, log=log)
+        facts = await adapter.lookup("Frieren")
+        assert facts is not None
+        assert facts.source == "tmdb"
+        assert facts.canonical_title == "葬送的芙莉莲"  # 详情仍走 zh-CN 本地化
+        assert facts.seasons == (1, 2)
+        assert facts.aliases == ("葬送のフリーレン",)
+        assert log.paths == ["/3/search/tv", "/3/search/tv", "/3/tv/209867"]
+        assert [entry["params"]["language"] for entry in log.entries] == ["zh-CN", "en", "zh-CN"]
+        assert log.entries[1]["params"]["query"] == "Frieren"
+        # 两次 search + 一次 detail，共两次 QPS 间隔。
+        assert sleeper.waits == [1.0, 1.0]
+
+    async def test_primary_language_hit_skips_second_language_query(self) -> None:
+        # 主语言（zh-CN）命中时不发第二语言查询（仅未命中才 +1 请求）。
+        log = RequestLog()
+        clock = FakeClock()
+        adapter = make_tmdb(TMDB_HIT_ROUTES, clock=clock, sleeper=FakeSleeper(clock), log=log)
+        facts = await adapter.lookup("葬送的芙莉莲")
+        assert facts is not None
+        assert log.paths == ["/3/search/tv", "/3/tv/209867"]
+        assert log.entries[0]["params"]["language"] == "zh-CN"
+
+    def test_bilingual_candidates_merged_dedup_by_id(self) -> None:
+        # 两语言候选并集：同 id 名字元组合并去重，主语言顺序在前。
+        primary = [(209867, ("葬送的芙莉莲", "葬送のフリーレン"))]
+        secondary = [(209867, ("Frieren: Beyond Journey's End", "葬送のフリーレン")), (1396, ("绝命毒师",))]
+        assert _merge_candidates(primary, secondary) == [
+            (209867, ("葬送的芙莉莲", "葬送のフリーレン", "Frieren: Beyond Journey's End")),
+            (1396, ("绝命毒师",)),
+        ]
 
 
 # ---------------------------------------------------------------------------
