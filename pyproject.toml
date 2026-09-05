@@ -35,8 +35,8 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-include = ["autoanime/**", "tests/**"]
-exclude = ["autoanime/alembic/script.py.mako", "tests/fixtures/**"]
+include = ["autoanime/**/*.py", "tests/**/*.py"]
+exclude = ["autoanime/alembic/script.py.mako"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
@@ -46,3 +46,4 @@ ignore = ["E501"]
 include = ["autoanime", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
+
