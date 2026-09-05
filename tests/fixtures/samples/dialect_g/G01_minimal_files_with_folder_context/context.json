@@ -16,7 +16,9 @@
   "tags": [
     "minimal_filename",
     "folder_context",
-    "season_pack"
+    "season_pack",
+    "derived_filename"
   ],
-  "notes": "方言 G：极简文件名，剧名/季号必须依赖文件夹上下文。"
+  "notes": "方言 G：极简文件名，剧名/季号必须依赖文件夹上下文。",
+  "parent_path": "Z:/Downloads"
 }

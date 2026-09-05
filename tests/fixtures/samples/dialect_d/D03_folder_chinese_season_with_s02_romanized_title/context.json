@@ -12,7 +12,9 @@
     "chinese_title",
     "season_number",
     "romanized_title",
-    "season_pack"
+    "season_pack",
+    "derived_filename"
   ],
-  "notes": "方言 D：文件夹级真实样本；文件名为按发布包派生的代表性文件名，用于测试文件夹名补齐上下文。"
+  "notes": "方言 D：文件夹级真实样本；文件名为按发布包派生的代表性文件名，用于测试文件夹名补齐上下文。",
+  "parent_path": "Z:/Downloads"
 }

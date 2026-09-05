@@ -16,7 +16,9 @@
   "tags": [
     "minimal_filename",
     "folder_context",
-    "season_number"
+    "season_number",
+    "derived_filename"
   ],
-  "notes": "方言 G：极简文件名 + 明确 S04 文件夹上下文。"
+  "notes": "方言 G：极简文件名 + 明确 S04 文件夹上下文。",
+  "parent_path": "Z:/Downloads"
 }

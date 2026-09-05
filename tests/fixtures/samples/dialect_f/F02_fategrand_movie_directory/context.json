@@ -11,7 +11,9 @@
     "movie",
     "fategrand",
     "bdrip",
-    "missing_space"
+    "missing_space",
+    "derived_filename"
   ],
-  "notes": "方言 F：剧场版无集数概念 + FateGrand 词内空格丢失；目录级真实样本，文件名为按发布包派生的代表性文件名。"
+  "notes": "方言 F：剧场版无集数概念 + FateGrand 词内空格丢失；目录级真实样本，文件名为按发布包派生的代表性文件名。",
+  "parent_path": "Z:/Downloads"
 }

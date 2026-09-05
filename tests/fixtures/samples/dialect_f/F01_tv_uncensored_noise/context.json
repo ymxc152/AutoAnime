@@ -11,7 +11,9 @@
     "tv_version_noise",
     "uncensored_noise",
     "ep_format",
-    "subtitle_language_noise"
+    "subtitle_language_noise",
+    "derived_filename"
   ],
-  "notes": "方言 F：TV版/无修版等版本噪声；目录级真实样本，文件名为按发布包派生的代表性文件名。"
+  "notes": "方言 F：TV版/无修版等版本噪声；目录级真实样本，文件名为按发布包派生的代表性文件名。",
+  "parent_path": "Z:/Downloads"
 }

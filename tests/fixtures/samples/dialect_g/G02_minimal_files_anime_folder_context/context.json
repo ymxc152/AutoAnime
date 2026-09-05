@@ -16,7 +16,9 @@
   "tags": [
     "minimal_filename",
     "folder_context",
-    "subtitle_group"
+    "subtitle_group",
+    "derived_filename"
   ],
-  "notes": "方言 G：极简文件名 + 字幕组文件夹上下文，季号藏在篇名。"
+  "notes": "方言 G：极简文件名 + 字幕组文件夹上下文，季号藏在篇名。",
+  "parent_path": "Z:/Downloads"
 }

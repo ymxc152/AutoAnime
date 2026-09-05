@@ -11,7 +11,9 @@
     "season_pack",
     "source_cr",
     "double_subtitle_group",
-    "nix_raws"
+    "nix_raws",
+    "derived_filename"
   ],
-  "notes": "方言 F：季包 + CR 来源 + 双字幕组；目录级真实样本，文件名为按发布包派生的代表性文件名。"
+  "notes": "方言 F：季包 + CR 来源 + 双字幕组；目录级真实样本，文件名为按发布包派生的代表性文件名。",
+  "parent_path": "Z:/Downloads"
 }
