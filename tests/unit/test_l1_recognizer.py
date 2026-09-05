@@ -125,7 +125,8 @@ def test_episode_within_release_progress_keeps_level() -> None:
     assert result is not None
     assert result.episode == 2
     assert result.level is Confidence.HIGH
-    assert "release_progress" not in result.evidence
+    # context 提供 release_progress 时证据总是记录来源（即使未触发降档）
+    assert result.evidence["release_progress"] == "context"
 
 
 # ---------------------------------------------------------------------------
