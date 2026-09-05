@@ -1,0 +1,22 @@
+{
+  "id": "L3_05_missing_optional_fields",
+  "llm_response": "{\"title\": \"Mushoku Tensei\", \"segment\": \"season_pack\", \"season\": 2}",
+  "query": {
+    "name": "Mushoku.Tensei.S2.Baha.1080p.mkv",
+    "expected": {
+      "title": "Mushoku Tensei",
+      "season": 2,
+      "episode": null,
+      "segment": "season_pack",
+      "fansub": null,
+      "level": "medium",
+      "confidence": 0.6,
+      "missing_fields": [],
+      "evidence": {
+        "title": "llm",
+        "season": "llm",
+        "segment": "llm"
+      }
+    }
+  }
+}
