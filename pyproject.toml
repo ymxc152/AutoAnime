@@ -41,6 +41,8 @@ include = [
   "autoanime/**/*.py",
   "tests/**/*.py",
   "scripts/validate_l1_corpus.py",
+  "scripts/validate_l2_corpus.py",
+  "scripts/validate_l3_corpus.py",
 ]
 exclude = ["autoanime/alembic/script.py.mako"]
 
@@ -49,7 +51,7 @@ select = ["E", "F", "I", "B", "UP"]
 ignore = ["E501"]
 
 [tool.pyright]
-include = ["autoanime", "tests", "scripts/validate_l1_corpus.py"]
+include = ["autoanime", "tests", "scripts/validate_l1_corpus.py", "scripts/validate_l2_corpus.py", "scripts/validate_l3_corpus.py"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 

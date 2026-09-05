@@ -39,6 +39,7 @@ from autoanime.core.interfaces import (
     RawName,
 )
 from autoanime.pipeline.l3 import (
+    LLM_MAX_RETRIES,
     LLM_TIMEOUT_S,
     LlmCache,
     LlmResponseError,
@@ -73,11 +74,13 @@ class LlmFallbackRecognizer:
         model: str | None = None,
         timeout_s: float = LLM_TIMEOUT_S,
         budget: int | None = None,
+        max_retries: int = LLM_MAX_RETRIES,
     ) -> None:
         self._enabled = enabled
         self._model = model
         self._timeout_s = timeout_s
         self._budget = budget
+        self._max_retries = max_retries
         # audit 计数（实例级，非全局）：真实调用数 / 不可用放弃数 / 解析失败数
         self._calls_used = 0
         self._unavailable_count = 0
@@ -91,6 +94,7 @@ class LlmFallbackRecognizer:
             model=settings.llm_model,
             timeout_s=settings.llm_timeout_s,
             budget=settings.llm_budget,
+            max_retries=settings.llm_max_retries,
         )
 
     @property
@@ -150,7 +154,7 @@ class LlmFallbackRecognizer:
                 )
             except Exception as exc:  # noqa: BLE001 - transport 失败一律按网络类降级
                 failed_attempts += 1
-                if transport_retry_allowed(failed_attempts):
+                if transport_retry_allowed(failed_attempts, max_retries=self._max_retries):
                     logger.debug(
                         "llm transport failed (%s), retrying, op=%s",
                         type(exc).__name__,

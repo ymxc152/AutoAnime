@@ -376,13 +376,28 @@ async def test_recognizer_satisfies_protocol() -> None:
 
 async def test_recognizer_from_settings() -> None:
     settings = Settings(
-        llm_enabled=True, llm_model="m1", llm_timeout_s=7.5, llm_budget=5
+        llm_enabled=True, llm_model="m1", llm_timeout_s=7.5, llm_budget=5,
+        llm_max_retries=1,
     )
     recognizer = LlmFallbackRecognizer.from_settings(settings)
     assert recognizer._enabled is True
     assert recognizer._model == "m1"
     assert recognizer._timeout_s == pytest.approx(7.5)
     assert recognizer._budget == 5
+    assert recognizer._max_retries == 1
+
+
+async def test_transport_retry_honors_max_retries() -> None:
+    """llm_max_retries 语义 = 最大总尝试次数（默认 2：初次+重试 1 次），配置可下调。"""
+    transport = ScriptedTransport([RuntimeError("boom")] * 3)
+    recognizer = _make_recognizer(max_retries=1)
+    result = await recognizer.enhance(
+        RawName(name="Retry.Config.S01E01.mkv"), None, None, transport, MemoryCacheStore()
+    )
+    assert result is None
+    # max_retries=1 → 仅初次 1 次调用，重试不发生
+    assert transport.call_count == 1
+    assert recognizer.unavailable_count == 1
 
 
 # ---------------------------------------------------------------------------

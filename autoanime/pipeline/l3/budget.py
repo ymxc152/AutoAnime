@@ -1,8 +1,8 @@
 """超时 / 重试 / 预算的判定纯函数与常量（PR5 统一契约）。
 
 - 超时 10s（真实计时在 transport/provider 层，这里只定常量与判定）；
-- 网络 / 超时类错误重试上限 ``LLM_MAX_RETRIES``（默认 2，可配置上限仍
-  以 config 为准——本模块是默认契约值）；
+- 网络失败总尝试上限 ``LLM_MAX_RETRIES``（含初次调用，默认 2 = 初次 + 重试 1 次；
+  运行时以 ``Settings.llm_max_retries`` 为准——本模块只提供默认契约值）；
 - schema 违规走纠正重试，上限 ``LLM_SCHEMA_CORRECTION_RETRIES``（1 次），
   再失败放弃并计数；
 - 预算默认不限（``budget=None``）；超限**只记 audit 不阻断**——判定函数
@@ -16,9 +16,14 @@ LLM_MAX_RETRIES: int = 2
 LLM_SCHEMA_CORRECTION_RETRIES: int = 1
 
 
-def transport_retry_allowed(failed_attempts: int) -> bool:
-    """网络/超时失败 ``failed_attempts`` 次后是否还允许重试（上限 2）。"""
-    return failed_attempts < LLM_MAX_RETRIES
+def transport_retry_allowed(
+    failed_attempts: int, max_retries: int = LLM_MAX_RETRIES
+) -> bool:
+    """网络/超时失败 ``failed_attempts`` 次后是否还允许重试（上限默认 2）。
+
+    ``max_retries`` 来自 ``Settings.llm_max_retries``；本模块常量只是默认契约值。
+    """
+    return failed_attempts < max_retries
 
 
 def schema_correction_allowed(corrections_made: int) -> bool:
