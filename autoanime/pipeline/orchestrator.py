@@ -8,7 +8,10 @@ The orchestrator owns the fixed routing contract:
   segment, then the arbiter. The three-way arbitration inputs are the L1
   draft, the L1+L2 fused result and the independent L3 draft; an L2 hit
   routes ``memory``, an L2 miss routes ``l3`` -- in both cases the final
-  fields come from the arbiter verdict.
+  fields come from the arbiter verdict. On an L2 miss, a best-effort
+  pre-L3 disambiguation (PR7 M2) re-queries L2 under the canonical title
+  the reference chain reports for the L1 draft; a canonical hit adopts the
+  exact same memory-hit semantics as a direct L2 hit.
 - L1 LOW and L1 ``None``: straight to the L3 segment (route ``l3``).
 
 Graceful degradation (PR4/PR5 contract):
@@ -34,7 +37,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import uuid4
 
@@ -51,6 +54,7 @@ from autoanime.core.interfaces import (
 from autoanime.memory.lookup import lookup_memory
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l2 import eligible_for_memory, pattern_hash
+from autoanime.pipeline.l2.draft import apply_memory_hit
 from autoanime.pipeline.l2.placeholders import build_title_shape
 from autoanime.pipeline.l2_memory import MemoryEnhancer
 from autoanime.pipeline.l3 import (
@@ -217,7 +221,13 @@ class Orchestrator:
                 l2_applied=False, l2_degraded=True, memory_seasons=(),
             )
         if enhanced is None:
-            # Miss: keep the L1 result as-is and continue through L3.
+            # Miss: best-effort canonical re-query (PR7 M2), then keep the L1
+            # result as-is and continue through L3.
+            canonical = await self._try_canonical_memory(
+                raw, result, context, operation_id
+            )
+            if canonical is not None:
+                return canonical
             return await self._finish(
                 raw, result, result, context, operation_id,
                 l2_applied=False, l2_degraded=False, memory_seasons=(),
@@ -226,6 +236,60 @@ class Orchestrator:
             raw, enhanced, result, context, operation_id,
             l2_applied=True, l2_degraded=False,
             memory_seasons=await self._memory_seasons(result, store),
+        )
+
+    async def _try_canonical_memory(
+        self,
+        raw: RawName,
+        result: ParseResult,
+        context: ParseContext | None,
+        operation_id: str,
+    ) -> RouteOutcome | None:
+        """Pre-L3 disambiguation (PR7 M2): re-query L2 under the canonical title.
+
+        On an L2 miss, the L1 draft's title shape is looked up through the
+        reference chain (reference_cache backed, so a repeat query shares the
+        L3 segment's cache and rate budget). When the chain reports a
+        non-empty ``canonical_title``, the same two-level ``lookup_memory``
+        search runs with that title in place of the L1 draft title -- the
+        level-1 key becomes the canonical shape and the level-2 key the
+        canonical shape plus the season/episode/fansub the L1 draft parsed
+        out. A hit adopts the exact memory-hit semantics of a direct L2 hit
+        (``apply_memory_hit`` + hit recording + ``route=memory``); every
+        degradation (no chain, chain miss, empty canonical title, canonical
+        L2 miss, any failure) silently falls back to the original path.
+        """
+        chain = self._reference_chain
+        store = self._memory_store
+        if chain is None or store is None:
+            return None
+        try:
+            facts = await chain.lookup(build_title_shape(result.title))
+        except Exception:
+            return None
+        canonical_title = facts.canonical_title if facts is not None else None
+        if not canonical_title:
+            return None
+        try:
+            # Key derivation reuses lookup_memory's pure helpers, so the
+            # canonical shape comes from the single source of truth
+            # (build_title_shape) and the two-level order mirrors the
+            # direct L2 search exactly.
+            canonical_draft = replace(result, title=canonical_title)
+            match = await lookup_memory(canonical_draft, store)
+        except Exception:
+            return None
+        if match is None:
+            return None
+        try:
+            enhanced = apply_memory_hit(result, match.hit)
+            await store.record_hit(match.memory, operation_id=operation_id)
+        except Exception:
+            return None
+        return await self._finish(
+            raw, enhanced, result, context, operation_id,
+            l2_applied=True, l2_degraded=False,
+            memory_seasons=await self._memory_seasons(canonical_draft, store),
         )
 
     async def _finish(
