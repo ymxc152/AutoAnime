@@ -114,7 +114,12 @@ def test_default_snapshot_path_falls_back_to_repository_notes(monkeypatch: pytes
     mod = _load_script()
     monkeypatch.delenv("AUTOANIME_L2_SNAPSHOT", raising=False)
 
-    assert mod.default_snapshot_path() == mod._ROOT.parent / "notes" / "samples" / "z_downloads_snapshot.txt"
+    relative = Path("notes") / "samples" / "z_downloads_snapshot.txt"
+    expected = next(
+        (directory / relative for directory in (mod._ROOT, *mod._ROOT.parents) if (directory / relative).is_file()),
+        mod._ROOT.parent / relative,
+    )
+    assert mod.default_snapshot_path() == expected
 
 
 # ---------------------------------------------------------------------------

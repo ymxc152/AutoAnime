@@ -55,13 +55,21 @@ class MemoryHit:
 
         Absent, mistyped or empty entries are treated as unknown rather than
         fatal: the stored dict is written by the learning side (T3) and read
-        defensively here.
+        defensively here. A series-level ``seasons`` list fills ``season``
+        only when it names exactly one season -- several learned seasons
+        under one series key are ambiguous and fill nothing. Legacy rows
+        with a single ``season`` key still read back.
         """
+        seasons = _as_int_list(stored.get("seasons"))
+        if seasons:
+            season: int | None = seasons[0] if len(seasons) == 1 else None
+        else:
+            season = _as_int(stored.get("season"))
         return cls(
             key_level=key_level,
             trust=trust,
             title=_as_str(stored.get("title")),
-            season=_as_int(stored.get("season")),
+            season=season,
             episode=_as_int(stored.get("episode")),
             segment=_as_segment(stored.get("segment")),
             fansub=_as_str(stored.get("fansub")),
@@ -134,6 +142,12 @@ def _as_str(value: object) -> str | None:
 
 def _as_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _as_int_list(value: object) -> list[int]:
+    return [v for v in value if isinstance(v, int) and not isinstance(v, bool)] if isinstance(
+        value, list
+    ) else []
 
 
 def _as_segment(value: object) -> Segment | None:

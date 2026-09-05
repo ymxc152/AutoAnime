@@ -28,5 +28,7 @@ class MemoryEnhancer:
         result: ParseResult,
         context: ParseContext | None,
         store: MemoryStore,
+        *,
+        operation_id: str | None = None,
     ) -> ParseResult | None:
-        return await enhance_result(result, context, store)
+        return await enhance_result(result, context, store, operation_id=operation_id)

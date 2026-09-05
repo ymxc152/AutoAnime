@@ -1,45 +1,3 @@
-"""L2 learning/write side (PR4 T2): confirmed results -> ``parse_memory``.
-
-This module is the composition layer of the L2 learn path: the pure pieces
-(key derivation, title shapes, trust thresholds, bypass digests) come from
-``autoanime.pipeline.l2`` (T1) and are reused verbatim; only the DB
-write/read composition lives here, and every session stays inside the
-injected ``SqliteStorage`` (this module only calls its public ``list`` /
-``add`` API).
-
-Learn flow per the unified L2 contract:
-
-1. Bypass gate: the raw release name's ``pattern_hash`` (T1 bypass) is
-   checked against the injected bypass lookup; a listed name is never
-   written to memory.
-2. One confirmed ``ParseResult`` is upserted at both key levels:
-
-   - level 1 (series workhorse): ``level1_key`` -- the title shape alone;
-     the stored result carries title/season/segment/fansub but **never** a
-     concrete episode (per-file detail must not leak into the series entry);
-   - level 2 (exact fallback): ``level2_key`` -- title shape + season /
-     episode structure + normalized fansub; the stored result carries every
-     confirmed field.
-
-3. Upsert semantics on the ``uq_parse_memory_key`` (key_level, key_hash)
-   constraint, implemented as find-then-insert/update:
-
-   - new key: insert with ``hit_count = corrected_count = 0`` and
-     ``status = ACTIVE`` (trust 0/0 = 1.0 per the T1 contract);
-   - same key, stored result unchanged: the entry is left untouched (a
-     re-confirmation is neither a hit nor a correction; hits are counted by
-     the lookup side);
-   - same key, stored result differs: this is a correction --
-     ``corrected_count += 1``, result/source/fansub_norm/title_shape are
-     replaced by the new confirmation, and ``status`` is recomputed from
-     the T1 trust score (``< 0.5`` demotes to PENDING, otherwise ACTIVE).
-
-   A correction that changes a key component (season/episode/fansub
-   content) derives a *new* key, so it inserts a new exact-level entry
-   while the series-level entry (whose key only depends on the title) is
-   updated in place.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -131,14 +89,16 @@ class StorageMemoryAccess:
 def stored_result_for(confirmed: ParseResult, *, key_level: int) -> dict[str, object]:
     """JSON payload stored in ``parse_memory.result`` for one confirmed result.
 
-    Level 1 deliberately stores ``episode: None``: the series-level entry
-    must never pin a concrete episode. Values are the JSON-safe shapes that
+    Level 1 deliberately stores ``episode: None`` and a ``seasons`` list: the
+    series-level entry must never pin a concrete episode, and one title shape
+    may legitimately cover several seasons (the season is merged in, never
+    corrected). Values are the JSON-safe shapes that
     ``MemoryHit.from_stored_result`` (T3 lookup side) reads back.
     """
     if key_level == KEY_LEVEL_SERIES:
         return {
             "title": confirmed.title,
-            "season": confirmed.season,
+            "seasons": [confirmed.season] if confirmed.season is not None else [],
             "episode": None,
             "segment": confirmed.segment.value,
             "fansub": confirmed.fansub,
@@ -168,6 +128,76 @@ def status_for_counts(hit_count: int, corrected_count: int) -> MemoryStatus:
     if should_demote_to_pending(trust_score(hit_count, corrected_count)):
         return MemoryStatus.PENDING
     return MemoryStatus.ACTIVE
+
+
+def _conflicting_result(
+    existing: dict[str, object], incoming: dict[str, object], *, key_level: int
+) -> bool:
+    """Whether two same-key answers disagree on a semantic memory field.
+
+    Series level never conflicts: the title shape is fansub- and season-
+    agnostic by contract, and a differing season is a legal multi-season
+    observation that ``_merge_series_result`` unions. At exact level the key
+    already pins season/episode/fansub, so a disagreement means the
+    non-key ``segment`` answer contradicts: a real correction.
+    """
+    if key_level == KEY_LEVEL_SERIES:
+        return False
+    fields: tuple[str, ...] = ("season", "episode", "segment")
+    for field_name in fields:
+        old = existing.get(field_name)
+        new = incoming.get(field_name)
+        if old is not None and new is not None and old != new:
+            return True
+    return False
+
+
+def _as_season_list(value: object) -> list[int]:
+    """Season ints from a stored ``seasons`` payload; anything else is empty."""
+    if isinstance(value, list):
+        return [v for v in value if isinstance(v, int) and not isinstance(v, bool)]
+    return []
+
+
+def _as_season_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _merge_series_result(
+    existing: dict[str, object], incoming: dict[str, object]
+) -> dict[str, object]:
+    """Union seasons and fill absent fields without overwriting confirmed values.
+
+    Legacy rows that carry a single ``season`` key are migrated to the
+    ``seasons`` list shape on merge.
+    """
+    merged = dict(existing)
+    for field_name in ("title", "episode", "segment", "fansub"):
+        if merged.get(field_name) is None and incoming.get(field_name) is not None:
+            merged[field_name] = incoming[field_name]
+    seasons = set(_as_season_list(merged.pop("seasons", None)))
+    legacy_season = _as_season_int(merged.pop("season", None))
+    if legacy_season is not None:
+        seasons.add(legacy_season)
+    incoming_seasons = _as_season_list(incoming.get("seasons"))
+    if not incoming_seasons:
+        single = _as_season_int(incoming.get("season"))
+        if single is not None:
+            incoming_seasons = [single]
+    seasons.update(incoming_seasons)
+    merged["seasons"] = sorted(seasons)
+    return merged
+
+
+def _merge_non_conflicting_result(
+    existing: dict[str, object], incoming: dict[str, object]
+) -> dict[str, object]:
+    """Fill absent stored fields without overwriting an already confirmed value."""
+    merged = dict(existing)
+    for field_name, value in incoming.items():
+        if merged.get(field_name) is None and value is not None:
+            merged[field_name] = value
+    return merged
 
 
 async def upsert_parse_memory(
@@ -200,14 +230,29 @@ async def upsert_parse_memory(
         await store.add(entry)
         return entry
 
-    if dict(existing.result or {}) != result:
-        # Same key, different confirmed content: a correction.
-        existing.corrected_count += 1
-        existing.result = result
-        existing.source = source
-        existing.fansub_norm = fansub_norm(confirmed.fansub)
-        existing.title_shape = build_title_shape(confirmed.title)
-        existing.status = status_for_counts(existing.hit_count, existing.corrected_count)
+    old_result = dict(existing.result or {})
+    if old_result != result:
+        if key_level == KEY_LEVEL_SERIES:
+            # A differing season under the same series key is a legal
+            # multi-season observation: union it, never treat it as a
+            # correction (the series key is season-agnostic by contract).
+            existing.result = _merge_series_result(old_result, result)
+        elif _conflicting_result(old_result, result, key_level=key_level):
+            # Same exact key, different confirmed content: a correction.
+            existing.corrected_count += 1
+            existing.result = result
+            existing.source = source
+            existing.fansub_norm = fansub_norm(confirmed.fansub)
+            existing.title_shape = build_title_shape(confirmed.title)
+            if existing.status is not MemoryStatus.DEPRECATED:
+                # DEPRECATED is terminal (T4 governance); corrections keep it.
+                existing.status = status_for_counts(
+                    existing.hit_count, existing.corrected_count
+                )
+        else:
+            # A completeness fill: update without treating a different-shaped
+            # observation as a user correction.
+            existing.result = _merge_non_conflicting_result(old_result, result)
         await store.add(existing)
     # Same key, same content: re-confirmation is a no-op (no hit counting here).
     return existing

@@ -16,7 +16,8 @@ from autoanime.core.interfaces import (
     ParseResult,
     RawName,
 )
-from autoanime.core.models import BypassList, ParseMemory
+from autoanime.core.models import AuditLog, BypassList, ParseMemory
+from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.lookup import (
     StorageMemoryStore,
     enhance_result,
@@ -81,7 +82,9 @@ class FakeMemoryStore:
     async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
         return self._rows.get((key_level, key_hash))
 
-    async def record_hit(self, parse_memory: Any) -> None:
+    async def record_hit(
+        self, parse_memory: Any, *, operation_id: str | None = None
+    ) -> None:
         self.recorded_hits.append(parse_memory)
 
     async def record_correction(self, parse_memory: Any) -> None:
@@ -254,15 +257,18 @@ async def test_enhance_returns_none_and_records_nothing_on_empty_store() -> None
     assert store.recorded_hits == []
 
 
-async def test_enhance_skips_fusion_for_bypassed_release() -> None:
+
+async def test_enhance_skips_fusion_for_bypassed_raw_name() -> None:
     result = _l1_azurlane()
+    raw_name = "Anime.AzurLane.Slow.Ahead.E03.1080p.Baha.WEB-DL.mkv"
     store = FakeMemoryStore(
         _row_for(result.title),
-        bypassed=frozenset({pattern_hash("Anime.AzurLane.Slow.Ahead")}),
+        bypassed=frozenset({pattern_hash(raw_name)}),
     )
 
-    assert await enhance_result(result, None, store) is None
+    assert await enhance_result(result, None, store, raw_name=raw_name) is None
     assert store.recorded_hits == []
+
 
 
 # --- roundtrip lookup fixtures (real L1 + fake store) -----------------------
@@ -377,3 +383,35 @@ async def test_storage_memory_store_enhances_through_the_real_db(tmp_path: Path)
         rows = await storage.list(ParseMemory)
         assert len(rows) == 1
         assert rows[0].hit_count == 1
+
+
+async def test_storage_memory_store_wires_hit_audit(tmp_path: Path) -> None:
+    async with SqliteStorage(f"sqlite+aiosqlite:///{tmp_path / 'memory.db'}") as storage:
+        store = StorageMemoryStore(storage, audit_governance=MemoryGovernance(storage))
+        row = ParseMemory(
+            key_level=KEY_LEVEL_SERIES,
+            key_hash=key_hash(level1_key("Anime AzurLane Slow Ahead")),
+            title_shape=level1_key("Anime AzurLane Slow Ahead"),
+            result={
+                "title": "Anime AzurLane Slow Ahead",
+                "season": 2,
+                "episode": None,
+                "segment": "season_pack",
+                "fansub": "MWeb",
+            },
+        )
+        await storage.add(row)
+
+        l1_result = await LocalRecognizer().parse(
+            RawName(name="Anime.AzurLane.Slow.Ahead.E03.1080p.Baha.WEB-DL.mkv", parent_path="Z:/Downloads")
+        )
+        assert l1_result is not None
+        enhanced = await MemoryEnhancer().enhance(l1_result, None, store)
+
+        assert enhanced is not None
+        audits = await storage.list(AuditLog)
+        assert len(audits) == 1
+        assert audits[0].entity == "parse_memory"
+        assert audits[0].action == "memory_hit"
+        assert audits[0].entity_id == row.id
+        assert audits[0].instruction["key_level"] == KEY_LEVEL_SERIES

@@ -25,10 +25,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from autoanime.core.enums import MemoryStatus
 from autoanime.core.interfaces import MemoryStore, ParseContext, ParseResult
 from autoanime.core.models import BypassList, ParseMemory
+from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.store import SqliteStorage
 from autoanime.pipeline.l2.bypass import pattern_hash
 from autoanime.pipeline.l2.draft import MemoryHit, apply_memory_hit
@@ -127,24 +129,27 @@ async def enhance_result(
     result: ParseResult,
     context: ParseContext | None,
     store: MemoryStore,
+    *,
+    raw_name: str | None = None,
+    operation_id: str | None = None,
 ) -> ParseResult | None:
-    """Full query path: bypass gate -> lookup -> fusion -> hit recording.
+    """Full query path: optional raw-name bypass gate -> lookup -> fusion -> hit recording.
 
     Returns the enhanced ParseResult on a consumed hit; ``None`` when the
     release is bypassed or memory has nothing that participates, in which
-    case the orchestrator routes by the L1 result alone. ``context`` is
-    accepted for protocol alignment and currently carries no query-side
-    weight.
+    case the orchestrator routes by the L1 result alone. ``raw_name`` may be
+    supplied by non-orchestrator callers; the orchestrator owns the
+    authoritative raw-name gate and may leave it out. ``operation_id`` groups
+    the hit audit rows of one parse pass into one batch.
     """
-    if await store.has_bypass(pattern_hash(result.title)):
+    if raw_name is not None and await store.has_bypass(pattern_hash(raw_name)):
         return None
-
     match = await lookup_memory(result, store)
     if match is None:
         return None
 
     enhanced = apply_memory_hit(result, match.hit)
-    await store.record_hit(match.memory)
+    await store.record_hit(match.memory, operation_id=operation_id)
     return enhanced
 
 
@@ -158,8 +163,11 @@ class StorageMemoryStore:
     detached rows.
     """
 
-    def __init__(self, storage: SqliteStorage) -> None:
+    def __init__(
+        self, storage: SqliteStorage, *, audit_governance: MemoryGovernance | None = None
+    ) -> None:
         self._storage = storage
+        self._audit_governance = audit_governance
 
     async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
         for memory in await self._storage.list(ParseMemory):
@@ -167,10 +175,24 @@ class StorageMemoryStore:
                 return memory
         return None
 
-    async def record_hit(self, parse_memory: Any) -> None:
+    async def record_hit(
+        self, parse_memory: Any, *, operation_id: str | None = None
+    ) -> None:
         parse_memory.hit_count = _as_count(parse_memory.hit_count) + 1
         parse_memory.last_hit_at = datetime.now()
         await self._storage.add(parse_memory)
+        if self._audit_governance is not None and parse_memory.id is not None:
+            await self._audit_governance.record_memory_hit_audit(
+                operation_id=operation_id or uuid4().hex,
+                entity_id=parse_memory.id,
+                instruction={
+                    "key_level": parse_memory.key_level,
+                    "trust": trust_score(
+                        _as_count(parse_memory.hit_count),
+                        _as_count(parse_memory.corrected_count)
+                    ),
+                },
+            )
 
     async def record_correction(self, parse_memory: Any) -> None:
         parse_memory.corrected_count = _as_count(parse_memory.corrected_count) + 1

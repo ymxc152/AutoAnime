@@ -37,6 +37,10 @@ def default_snapshot_path() -> Path:
     from_env = os.getenv("AUTOANIME_L1_SNAPSHOT")
     if from_env:
         return Path(from_env).expanduser()
+    for directory in (_ROOT, *_ROOT.parents):
+        candidate = directory / _SNAPSHOT_RELATIVE_PATH
+        if candidate.is_file():
+            return candidate
     return _ROOT.parent / _SNAPSHOT_RELATIVE_PATH
 
 _MAX_FAILED_SAMPLES = 10

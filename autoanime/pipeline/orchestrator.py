@@ -24,6 +24,7 @@ labels the route each result takes; no L3 logic is invoked.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import uuid4
 
 from autoanime.core.enums import Confidence
 from autoanime.core.interfaces import (
@@ -121,7 +122,9 @@ class Orchestrator:
         except Exception:
             return RouteOutcome(result, ROUTE_L3, degraded=True)
         try:
-            enhanced = await self._enhancer.enhance(result, context, store)
+            enhanced = await self._enhancer.enhance(
+                result, context, store, operation_id=uuid4().hex
+            )
         except Exception:
             return RouteOutcome(result, ROUTE_L3, degraded=True)
         if enhanced is None:

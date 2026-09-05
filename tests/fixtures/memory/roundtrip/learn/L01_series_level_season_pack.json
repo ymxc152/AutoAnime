@@ -28,7 +28,7 @@
       "fansub_norm": "mweb",
       "result": {
         "title": "Anime AzurLane Slow Ahead",
-        "season": 2,
+        "seasons": [2],
         "episode": null,
         "segment": "season_pack",
         "fansub": "MWeb"

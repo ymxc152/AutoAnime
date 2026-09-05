@@ -88,7 +88,9 @@ class MemoryStore(Protocol):
     """
 
     async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None: ...
-    async def record_hit(self, parse_memory: Any) -> None: ...
+    async def record_hit(
+        self, parse_memory: Any, *, operation_id: str | None = None
+    ) -> None: ...
     async def record_correction(self, parse_memory: Any) -> None: ...
     async def has_bypass(self, pattern_hash: str) -> bool: ...
 
@@ -108,6 +110,8 @@ class MemoryRecognizer(Protocol):
         result: ParseResult,
         context: ParseContext | None,
         store: MemoryStore,
+        *,
+        operation_id: str | None = None,
     ) -> ParseResult | None: ...
 
 
