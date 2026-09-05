@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     String,
     UniqueConstraint,
 )
@@ -111,6 +112,7 @@ class ParseMemory(Base):
     __table_args__ = (
         CheckConstraint("key_level IN (1, 2)", name="ck_parse_memory_key_level"),
         UniqueConstraint("key_level", "key_hash", name="uq_parse_memory_key"),
+        Index("ix_parse_memory_key_level_hash", "key_level", "key_hash"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -137,6 +139,7 @@ class Alias(Base):
 
 class BypassList(Base):
     __tablename__ = "bypass_list"
+    __table_args__ = (Index("ix_bypass_list_pattern_hash", "pattern_hash"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     pattern_hash: Mapped[str]
