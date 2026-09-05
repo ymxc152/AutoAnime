@@ -8,7 +8,8 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from autoanime.core.models import Alias, Base, BypassList, ParseMemory
+from autoanime.core.models import Alias, Base, BypassList, LlmCacheRow, ParseMemory
+from autoanime.pipeline.l3.cache_key import LlmCache
 
 
 class SqliteStorage:
@@ -81,6 +82,51 @@ class SqliteStorage:
             )
             return result.scalar_one_or_none()
 
+    async def get_llm_cache(self, pattern_hash: str) -> LlmCache | None:
+        """按 pattern_hash 精确读一条 LLM 缓存（PR5 LlmCacheStore 读语义）。
+
+        只按键取回录制的响应原文，转换为 l3 的 ``LlmCache`` 数据类；
+        响应解析失败按 miss 处理是调用方（T2 识别器）的职责，store 层
+        无条件返回存储内容。未命中返回 ``None``。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(LlmCacheRow).where(LlmCacheRow.pattern_hash == pattern_hash)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return LlmCache(
+                pattern_hash=row.pattern_hash,
+                response=row.response_text,
+                model=row.model,
+            )
+
+    async def put_llm_cache(self, cache: LlmCache) -> None:
+        """写一条 LLM 缓存（PR5 LlmCacheStore 写语义）。
+
+        无脑存取：是否只缓存 schema 合法的真实调用响应由写侧（T3）
+        保证，store 层不做校验。同一 pattern_hash 重复写入覆盖旧记录
+        （每 pattern 至多一行）。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(LlmCacheRow).where(LlmCacheRow.pattern_hash == cache.pattern_hash)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                session.add(
+                    LlmCacheRow(
+                        pattern_hash=cache.pattern_hash,
+                        response_text=cache.response,
+                        model=cache.model,
+                    )
+                )
+            else:
+                row.response_text = cache.response
+                row.model = cache.model
+            await session.commit()
+
     async def find_aliases_by_norm(self, alias_norm: str) -> list[Alias]:
         async with self._session_factory() as session:
             result = await session.execute(
@@ -110,3 +156,21 @@ class SqliteStorage:
 
     async def __aexit__(self, *_exc_info: object) -> None:
         await self.close()
+
+
+class StorageLlmCacheStore:
+    """``LlmCacheStore``（PR5 T1 契约）在 ``SqliteStorage`` 上的适配器。
+
+    Protocol 的 ``get``/``put`` 与 ``SqliteStorage`` 既有泛型 ``get`` /
+    ``add`` 命名冲突，故具体读写落在 ``SqliteStorage.get_llm_cache`` /
+    ``put_llm_cache``，本类只做签名适配；DB 会话仍只在 store 层内部。
+    """
+
+    def __init__(self, storage: SqliteStorage) -> None:
+        self._storage = storage
+
+    async def get(self, pattern_hash: str) -> LlmCache | None:
+        return await self._storage.get_llm_cache(pattern_hash)
+
+    async def put(self, cache: LlmCache) -> None:
+        await self._storage.put_llm_cache(cache)
