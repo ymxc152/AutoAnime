@@ -226,6 +226,29 @@ def test_memory_hit_from_stored_result_tolerates_bad_entries() -> None:
     assert hit.fansub is None
 
 
+def test_memory_hit_reads_seasons_list_from_stored_result() -> None:
+    """Single learned season fills; several learned seasons are ambiguous; legacy reads."""
+    single = MemoryHit.from_stored_result(
+        {"title": "Some Show", "seasons": [2], "episode": None},
+        key_level=KEY_LEVEL_SERIES,
+        trust=1.0,
+    )
+    multi = MemoryHit.from_stored_result(
+        {"title": "Some Show", "seasons": [1, 2], "episode": None},
+        key_level=KEY_LEVEL_SERIES,
+        trust=1.0,
+    )
+    legacy = MemoryHit.from_stored_result(
+        {"title": "Some Show", "season": 3, "episode": None},
+        key_level=KEY_LEVEL_SERIES,
+        trust=1.0,
+    )
+
+    assert single.season == 2
+    assert multi.season is None
+    assert legacy.season == 3
+
+
 def test_apply_memory_hit_fills_missing_fields_and_upgrades_medium() -> None:
     hit = MemoryHit(key_level=KEY_LEVEL_SERIES, trust=1.0, season=1)
     enhanced = apply_memory_hit(_bleach_result(), hit)
@@ -307,7 +330,9 @@ def test_memory_protocols_are_runtime_checkable() -> None:
         async def find_parse_memory(self, key_level: int, key_hash: str) -> object | None:
             return None
 
-        async def record_hit(self, parse_memory: object) -> None:
+        async def record_hit(
+            self, parse_memory: object, *, operation_id: str | None = None
+        ) -> None:
             return None
 
         async def record_correction(self, parse_memory: object) -> None:

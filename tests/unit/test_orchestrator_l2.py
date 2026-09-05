@@ -70,7 +70,9 @@ class FakeMemoryStore:
         self.lookup_calls += 1
         return self._rows.get((key_level, key_hash))
 
-    async def record_hit(self, parse_memory: Any) -> None:
+    async def record_hit(
+        self, parse_memory: Any, *, operation_id: str | None = None
+    ) -> None:
         self.recorded_hits.append(parse_memory)
 
     async def record_correction(self, parse_memory: Any) -> None:
@@ -86,7 +88,9 @@ class BrokenMemoryStore:
     async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
         raise RuntimeError("store unavailable")
 
-    async def record_hit(self, parse_memory: Any) -> None:
+    async def record_hit(
+        self, parse_memory: Any, *, operation_id: str | None = None
+    ) -> None:
         raise RuntimeError("store unavailable")
 
     async def record_correction(self, parse_memory: Any) -> None:

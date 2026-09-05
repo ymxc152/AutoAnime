@@ -20,6 +20,7 @@ from autoanime.config import Settings
 from autoanime.core.enums import Confidence, MemorySource, MemoryStatus, Segment
 from autoanime.core.interfaces import ParseResult
 from autoanime.core.models import BypassList, ParseMemory
+from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import (
     BypassLookup,
     MemoryWriteStore,
@@ -206,6 +207,7 @@ def test_series_stored_result_never_carries_an_episode() -> None:
     exact = stored_result_for(confirmed, key_level=KEY_LEVEL_EXACT)
 
     assert series["episode"] is None
+    assert series["seasons"] == [1]
     assert series["segment"] == "episode"
     assert exact["episode"] == 5
     assert exact["fansub"] == "MWeb"
@@ -329,7 +331,52 @@ async def test_relearn_identical_result_is_a_noop() -> None:
     assert all(row.status is MemoryStatus.ACTIVE for row in rows)
 
 
-async def test_correction_on_same_key_replaces_result_and_counts() -> None:
+
+
+async def test_series_level_variant_is_not_a_correction() -> None:
+    season_pack = _confirmed(
+        {
+            "title": "Some Show",
+            "season": 1,
+            "episode": None,
+            "segment": "season_pack",
+            "fansub": "MWeb",
+            "level": "high",
+            "confidence": 1.0,
+        }
+    )
+    episode = _confirmed(
+        {
+            "title": "Some Show",
+            "season": 1,
+            "episode": 2,
+            "segment": "episode",
+            "fansub": "OtherGroup",
+            "level": "high",
+            "confidence": 1.0,
+        }
+    )
+    async with SqliteStorage(_MEMORY_DB) as storage:
+        access = StorageMemoryAccess(storage)
+        await learn_confirmation(
+            access, confirmed=season_pack, raw_name="Some.Show.S01-MWeb", bypass_lookup=_FakeBypass()
+        )
+        await learn_confirmation(
+            access, confirmed=episode, raw_name="Some.Show.S01E02.mkv", bypass_lookup=_FakeBypass()
+        )
+        rows = await storage.list(ParseMemory)
+
+    series = next(row for row in rows if row.key_level == KEY_LEVEL_SERIES)
+    assert series.corrected_count == 0
+    assert series.hit_count == 0
+    assert series.status is MemoryStatus.ACTIVE
+    # Completeness and legal series variants never poison the workhorse row.
+    assert dict(series.result)["seasons"] == [1]
+    assert dict(series.result)["segment"] == "season_pack"
+    assert dict(series.result)["fansub"] == "MWeb"
+
+
+async def test_segment_correction_on_same_exact_key_replaces_result_and_counts() -> None:
     first = _confirmed(
         {
             "title": "Some Show",
@@ -341,14 +388,14 @@ async def test_correction_on_same_key_replaces_result_and_counts() -> None:
             "confidence": 1.0,
         }
     )
-    # Same fansub_norm (mweb) -> same exact key; only the raw fansub differs.
+    # Same exact key: only the non-key segment field disagrees.
     corrected = _confirmed(
         {
             "title": "Some Show",
             "season": 1,
             "episode": 5,
-            "segment": "episode",
-            "fansub": "MWEB",
+            "segment": "season_pack",
+            "fansub": "MWeb",
             "level": "high",
             "confidence": 1.0,
         }
@@ -367,13 +414,85 @@ async def test_correction_on_same_key_replaces_result_and_counts() -> None:
         )
         rows = await storage.list(ParseMemory)
 
-    assert len(rows) == 2
-    for row in rows:
-        assert row.corrected_count == 1
-        assert row.hit_count == 0
-        # trust = 0/(0+1) = 0.0 < 0.5 -> PENDING
-        assert row.status is MemoryStatus.PENDING
-        assert dict(row.result)["fansub"] == "MWEB"
+    series_rows = [row for row in rows if row.key_level == KEY_LEVEL_SERIES]
+    exact_rows = [row for row in rows if row.key_level == KEY_LEVEL_EXACT]
+    assert all(row.corrected_count == 0 and row.status is MemoryStatus.ACTIVE for row in series_rows)
+    assert len(exact_rows) == 1
+    assert exact_rows[0].corrected_count == 1
+    assert exact_rows[0].hit_count == 0
+    # trust = 0/(0+1) = 0.0 < 0.5 -> PENDING
+    assert exact_rows[0].status is MemoryStatus.PENDING
+    assert dict(exact_rows[0].result)["segment"] == "season_pack"
+
+
+async def test_correction_keeps_deprecated_entry_terminal() -> None:
+    first = _confirmed(
+        {
+            "title": "Some Show",
+            "season": 1,
+            "episode": 5,
+            "segment": "episode",
+            "fansub": "MWeb",
+            "level": "high",
+            "confidence": 1.0,
+        }
+    )
+    corrected = _confirmed(
+        {
+            "title": "Some Show",
+            "season": 1,
+            "episode": 5,
+            "segment": "season_pack",
+            "fansub": "MWeb",
+            "level": "high",
+            "confidence": 1.0,
+        }
+    )
+    async with SqliteStorage(_MEMORY_DB) as storage:
+        access = StorageMemoryAccess(storage)
+        await learn_confirmation(
+            access, confirmed=first, raw_name="Some.Show.S01E05.mkv", bypass_lookup=_FakeBypass()
+        )
+        await learn_confirmation(
+            access,
+            confirmed=corrected,
+            raw_name="Some.Show.S01E05.mkv",
+            bypass_lookup=_FakeBypass(),
+        )
+        # trust = 0 -> PENDING; a sweep with no hits deprecates the exact entry
+        # (the series row saw a no-op re-confirm and stays ACTIVE).
+        report = await MemoryGovernance(storage).sweep_status()
+        assert report.deprecated == 1
+        rows = await storage.list(ParseMemory)
+        assert all(
+            row.status is (MemoryStatus.DEPRECATED if row.key_level == KEY_LEVEL_EXACT else MemoryStatus.ACTIVE)
+            for row in rows
+        )
+
+        # Re-confirming with another conflict never resurrects DEPRECATED.
+        reconfirmed = _confirmed(
+            {
+                "title": "Some Show",
+                "season": 1,
+                "episode": 5,
+                "segment": "movie",
+                "fansub": "MWeb",
+                "level": "high",
+                "confidence": 1.0,
+            }
+        )
+        await learn_confirmation(
+            access,
+            confirmed=reconfirmed,
+            raw_name="Some.Show.S01E05.mkv",
+            bypass_lookup=_FakeBypass(),
+        )
+        rows = await storage.list(ParseMemory)
+
+    assert all(row.status is MemoryStatus.DEPRECATED for row in rows if row.key_level == KEY_LEVEL_EXACT)
+    exact = next(row for row in rows if row.key_level == KEY_LEVEL_EXACT)
+    assert exact.corrected_count == 2
+    assert dict(exact.result)["segment"] == "movie"
 
 
 async def test_correction_changing_exact_key_inserts_new_row() -> None:
@@ -414,11 +533,12 @@ async def test_correction_changing_exact_key_inserts_new_row() -> None:
 
     series_rows = [row for row in rows if row.key_level == KEY_LEVEL_SERIES]
     exact_rows = [row for row in rows if row.key_level == KEY_LEVEL_EXACT]
-    # Series key only depends on the title: corrected in place, trust 0 -> PENDING.
+    # Series key only depends on the title: a differing season is a legal
+    # multi-season observation, merged into the seasons list (no correction).
     assert len(series_rows) == 1
-    assert series_rows[0].corrected_count == 1
-    assert series_rows[0].status is MemoryStatus.PENDING
-    assert dict(series_rows[0].result)["season"] == 2
+    assert series_rows[0].corrected_count == 0
+    assert series_rows[0].status is MemoryStatus.ACTIVE
+    assert dict(series_rows[0].result)["seasons"] == [1, 2]
     # Exact key moved with the season: the old entry stays, the new one is fresh.
     assert len(exact_rows) == 2
     assert {dict(row.result)["season"] for row in exact_rows} == {1, 2}
@@ -533,7 +653,7 @@ def test_cli_confirm_uses_l1_draft_defaults_and_writes_memory(
     assert series.title_shape == "some show"
     assert dict(series.result) == {
         "title": "Some Show",
-        "season": None,
+        "seasons": [],
         "episode": None,
         "segment": "episode",
         "fansub": "MWeb",

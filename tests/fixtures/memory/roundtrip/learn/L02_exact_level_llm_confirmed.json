@@ -28,7 +28,7 @@
       "fansub_norm": "beansub&fzsd&lolihouse",
       "result": {
         "title": "BLEACH Sennen Kessen-hen",
-        "season": 1,
+        "seasons": [1],
         "episode": null,
         "segment": "episode",
         "fansub": "BeanSub&FZSD&LoliHouse"
