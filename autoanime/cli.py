@@ -17,7 +17,11 @@ from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.pipeline.l3_llm import LlmFallbackRecognizer
 from autoanime.pipeline.orchestrator import Orchestrator
-from autoanime.providers import LLM_TRANSPORT_NAME, register_providers
+from autoanime.providers import (
+    LLM_TRANSPORT_NAME,
+    register_providers,
+    register_reference_providers,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -115,6 +119,16 @@ async def _build_orchestrator(
         await storage.close()
         return _degraded_orchestrator(), None, transport_obj
     governance = MemoryGovernance(storage)
+    # 参考源接线（PR6）：storage 就绪后带剧目级缓存与可选频控注册真实插件，
+    # 再重建链（ReferenceChain 构造时解析 Registry）。降级路径沿用注册前的
+    # 空链（lookup 恒 None，优雅降级），注册的 adapter 客户端为懒创建，
+    # 一次性 CLI 进程结束即释放，无需显式 aclose。
+    register_reference_providers(
+        registry, cache_store=storage, reference_qps=settings.reference_qps
+    )
+    reference_chain = ReferenceChain(
+        registry, order=settings.reference_order, enabled=settings.reference_enabled
+    )
     return (
         Orchestrator(
             memory_store=StorageMemoryStore(storage, audit_governance=governance),
