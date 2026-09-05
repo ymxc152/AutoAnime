@@ -3,22 +3,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 from collections.abc import Sequence
 
 from autoanime.config import Settings, load_settings
 from autoanime.core.enums import Confidence, MemorySource, MemoryStatus, Segment
 from autoanime.core.interfaces import ParseResult, RawName
+from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.orchestrator import Orchestrator
-
-# L2 pipeline switch: set AUTOANIME_L2_ENABLED=0/false/no/off to run the
-# parse command on the L1-only path (graceful degradation, PR4 contract).
-_L2_ENABLED_ENV = "AUTOANIME_L2_ENABLED"
-_L2_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -69,16 +64,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _l2_enabled() -> bool:
-    raw = os.environ.get(_L2_ENABLED_ENV)
-    if raw is None:
-        return True
-    return raw.strip().casefold() not in _L2_DISABLED_VALUES
-
-
 async def _build_orchestrator(settings: Settings) -> tuple[Orchestrator, SqliteStorage | None]:
     """Wire the fixed orchestrator; an unusable memory store degrades to L1-only."""
-    if not _l2_enabled():
+    if not settings.l2_enabled:
         return Orchestrator(l2_enabled=False), None
     try:
         storage = SqliteStorage(settings.database_url)
@@ -89,7 +77,7 @@ async def _build_orchestrator(settings: Settings) -> tuple[Orchestrator, SqliteS
     except Exception:
         await storage.close()
         return Orchestrator(), None
-    return Orchestrator(memory_store=StorageMemoryStore(storage)), storage
+    return Orchestrator(memory_store=StorageMemoryStore(storage, audit_governance=MemoryGovernance(storage))), storage
 
 
 def _parse_result_to_json(result: ParseResult | None) -> dict[str, object] | None:

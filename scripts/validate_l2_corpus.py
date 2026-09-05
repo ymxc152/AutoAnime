@@ -70,6 +70,10 @@ def default_snapshot_path() -> Path:
     from_env = os.getenv("AUTOANIME_L2_SNAPSHOT")
     if from_env:
         return Path(from_env).expanduser()
+    for directory in (_ROOT, *_ROOT.parents):
+        candidate = directory / _SNAPSHOT_RELATIVE_PATH
+        if candidate.is_file():
+            return candidate
     return _ROOT.parent / _SNAPSHOT_RELATIVE_PATH
 
 
@@ -599,6 +603,9 @@ async def run_two_pass(
 
         pass2_records = await run_pass(entries, orchestrator)
         pass2 = pass_stats(pass2_records)
+        # The L2 eligibility denominator is the pass1 MEDIUM population;
+        # successful fusion intentionally shrinks pass2 remaining MEDIUM count.
+        pass2["l2_eligible"] = eligible
         pass2["l2_hit"] = pass2["routes"][ROUTE_MEMORY]
         pass2["l2_miss"] = max(eligible - pass2["l2_hit"] - pass2["degraded"], 0)
         pass2["hit_rate"] = round(pass2["l2_hit"] / eligible, 4) if eligible else 0.0

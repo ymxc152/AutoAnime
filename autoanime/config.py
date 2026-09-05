@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     library_path: Path = Path("./library")
     download_path: Path = Path("./downloads")
     dry_run: bool = True
+    l2_enabled: bool = True
     log_level: str = "INFO"
     llm_api_key: SecretStr | None = None
 
