@@ -53,7 +53,11 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Local-first anime library automation.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("run", help="Process the download queue (placeholder)")
+    run_help = (
+        "Run one subscription-loop cycle now (startup reconcile + "
+        "download poll + RSS poll; 与 rerun 共用同一实现，A7)"
+    )
+    subparsers.add_parser("run", help=run_help, description=run_help)
     subparsers.add_parser("import", help="Import a local library (placeholder)")
     confirm_parser = subparsers.add_parser(
         "confirm",
@@ -387,11 +391,12 @@ async def _subscribe(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _rerun(args: argparse.Namespace) -> int:
-    """CLI 手动触发一轮订阅闭环（与调度器共用 poll 入口，A7）。
+async def _run_loop_cycle(args: argparse.Namespace) -> int:
+    """一轮订阅闭环（CLI run/rerun 共用实现，与调度器共用 poll 入口，A7）。
 
     顺序：启动补扫（悬挂任务）→ 下载比对 → RSS 轮询（--source-id 限定单
-    源）。输出 JSON 汇总；下载器不可达如实记 notes 不视为失败。
+    源，仅 rerun 提供该参数）。输出 JSON 汇总；下载器不可达如实记 notes
+    不视为失败。
     """
     settings = load_settings()
     components = build_loop(settings)
@@ -401,10 +406,11 @@ async def _rerun(args: argparse.Namespace) -> int:
             now=_now()
         )
         downloads = await components.download_poller.poll_once(now=_now())
-        if args.source_id is not None:
-            source = await components.store.get_rss_source(args.source_id)
+        source_id: int | None = getattr(args, "source_id", None)
+        if source_id is not None:
+            source = await components.store.get_rss_source(source_id)
             if source is None:
-                print(json.dumps({"error": f"rss source {args.source_id} not found"}))
+                print(json.dumps({"error": f"rss source {source_id} not found"}))
                 return 1
             outcome = await components.rss_poller.poll_source(source, now=_now())
             outcomes = [outcome]
@@ -660,7 +666,9 @@ async def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "subscribe":
         return await _subscribe(args)
     if args.command == "rerun":
-        return await _rerun(args)
+        return await _run_loop_cycle(args)
+    if args.command == "run":
+        return await _run_loop_cycle(args)
     if args.command == "parse":
         settings = load_settings()
         orchestrator, storage, transport_obj = await _build_orchestrator(settings)

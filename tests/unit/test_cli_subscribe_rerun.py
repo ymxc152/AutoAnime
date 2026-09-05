@@ -84,3 +84,33 @@ def test_rerun_unknown_source_id_fails_cleanly(db_path: Path) -> None:
     code, out, _err = _run_cli("rerun", "--source-id", "999")
     assert code == 1
     assert "not found" in out
+
+
+def test_run_matches_rerun_offline(db_path: Path) -> None:
+    """run 与 rerun 共用同一轮闭环实现（空源 + 无在途下载 = 纯离线路径）。"""
+    code1, _out1, _err = _run_cli(
+        "subscribe", "--title-cn", "孤独摇滚", "--episodes", "1",
+        "--rss-url", "https://mikanani.me/RSS/MyBangumi?token=x",
+    )
+    assert code1 == 0
+    code2, out2, _err = _run_cli("run")
+    assert code2 == 0
+    payload = json.loads(out2.splitlines()[-1])
+    assert payload["rss"]["errors"] == []
+    assert payload["download"]["checked"] == 0
+    assert payload["reconciled"] == 0
+    code3, out3, _err = _run_cli("rerun")
+    assert code3 == 0
+    payload3 = json.loads(out3.splitlines()[-1])
+    assert set(payload) == set(payload3)  # 同一实现的同一输出形状
+
+
+def test_run_help_carries_real_semantics(capsys: pytest.CaptureFixture[str]) -> None:
+    """run --help 去掉 placeholder 字样，给出真实语义说明。"""
+    with pytest.raises(SystemExit) as excinfo:
+        main(["run", "--help"])
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert "placeholder" not in out
+    assert "reconcile" in out
+    assert "subscription-loop cycle" in out
