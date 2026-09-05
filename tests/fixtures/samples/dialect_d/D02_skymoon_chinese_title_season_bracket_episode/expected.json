@@ -1,0 +1,17 @@
+{
+  "title": "魔法光源股份有限公司",
+  "season": 2,
+  "episode": 6,
+  "segment": "episode",
+  "fansub": "Skymoon",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

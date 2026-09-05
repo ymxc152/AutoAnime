@@ -1,0 +1,17 @@
+{
+  "title": "葬送的芙莉莲 Sousou no Frieren",
+  "season": 2,
+  "episode": 10,
+  "segment": "episode",
+  "fansub": "云光字幕组",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}
