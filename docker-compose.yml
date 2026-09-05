@@ -1,0 +1,46 @@
+# AutoAnime v2 docker-compose（E4，D10 验收剧本的一键起入口）
+#
+# ⚠️ B8 同盘纪律：backend 的 ./library 与 ./downloads 两个挂载点必须落在
+#    同一盘/同一卷，hardlink 洗版才生效；跨盘时按 D9 全量降级 copy
+#    （strict 策略则直接跳过）。详见 docs/DEPLOY.md。
+#
+# ⚠️ 安全（拍板 D6/README）：单用户本地工具——勿暴露公网；LAN 内建议
+#    设置 AUTOANIME_API_TOKEN（.env，不进 git）。
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: autoanime-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 容器内固定路径（与下方 volume 挂载点一一对应；库与下载同盘）
+      - AUTOANIME_LIBRARY_PATH=/data/library
+      - AUTOANIME_DOWNLOAD_PATH=/data/downloads
+      - AUTOANIME_QUARANTINE_PATH=/data/quarantine
+      - AUTOANIME_DATABASE_URL=sqlite+aiosqlite:////data/autoanime.db
+    ports:
+      - "${AUTOANIME_API_PORT:-8000}:8000"
+    volumes:
+      - ./data:/data          # 数据库 + 隔离区（数据卷）
+      - ./library:/data/library    # 媒体库（Jellyfin/Plex 指这里）
+      - ./downloads:/data/downloads # 下载目录（qBittorrent 保存路径）
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: autoanime-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${AUTOANIME_WEB_PORT:-3080}:80"
