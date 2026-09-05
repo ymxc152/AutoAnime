@@ -1,0 +1,17 @@
+{
+  "title": "碧藍航線 微速前進！",
+  "season": 2,
+  "episode": 2,
+  "segment": "episode",
+  "fansub": "ANi",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

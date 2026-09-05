@@ -1,0 +1,17 @@
+{
+  "title": "骸骨骑士大人异世界冒险中",
+  "season": 2,
+  "episode": null,
+  "segment": "season_pack",
+  "fansub": null,
+  "level": "high",
+  "confidence": 1.0,
+  "missing_fields": [],
+  "evidence": {
+    "title": "folder",
+    "season": "name",
+    "episode": "none",
+    "segment": "name",
+    "fansub": "none"
+  }
+}

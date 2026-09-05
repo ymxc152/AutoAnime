@@ -1,0 +1,19 @@
+{
+  "title": "不虐待我的繼母與繼姐",
+  "season": null,
+  "episode": 2,
+  "segment": "episode",
+  "fansub": "ANi",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [
+    "season"
+  ],
+  "evidence": {
+    "title": "name",
+    "season": "none",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}
