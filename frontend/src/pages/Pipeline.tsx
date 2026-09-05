@@ -174,7 +174,6 @@ export function PipelinePage() {
               fitView
               fitViewOptions={{ padding: 0.15 }}
               minZoom={0.4}
-              proOptions={{ hideAttribution: true }}
             >
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
             </ReactFlow>
