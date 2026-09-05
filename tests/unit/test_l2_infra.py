@@ -249,6 +249,31 @@ def test_memory_hit_reads_seasons_list_from_stored_result() -> None:
     assert legacy.season == 3
 
 
+
+def test_apply_memory_hit_partial_hit_does_not_create_high_with_missing_fields() -> None:
+    result = ParseResult(
+        title="Show",
+        season=None,
+        episode=3,
+        segment=Segment.EPISODE,
+        fansub=None,
+        level=Confidence.MEDIUM,
+        confidence=0.6,
+        missing_fields=("season",),
+        evidence={"title": "name", "season": "none", "episode": "name", "segment": "name", "fansub": "none"},
+    )
+    hit = MemoryHit(key_level=KEY_LEVEL_SERIES, trust=1.0, fansub="MWeb")
+    enhanced = apply_memory_hit(result, hit)
+
+    assert enhanced.fansub == "MWeb"
+    assert enhanced.season is None
+    assert enhanced.level is Confidence.MEDIUM
+    assert enhanced.confidence == 0.6
+    assert enhanced.missing_fields == ("season",)
+    assert enhanced.evidence["fansub"] == "memory"
+    assert enhanced.evidence["key_level"] == "memory:1"
+
+
 def test_apply_memory_hit_fills_missing_fields_and_upgrades_medium() -> None:
     hit = MemoryHit(key_level=KEY_LEVEL_SERIES, trust=1.0, season=1)
     enhanced = apply_memory_hit(_bleach_result(), hit)

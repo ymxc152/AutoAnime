@@ -10,9 +10,10 @@ contract:
   ``folder`` are untouchable in any case (filename-first continues to hold);
 - every filled field's evidence becomes ``memory``;
 - on any hit the evidence gains ``key_level``: ``memory:1`` / ``memory:2``;
-- a trusted hit (trust >= 0.8) that filled at least one field raises an L1
-  MEDIUM result to HIGH; below the fusion threshold only evidence is
-  supplemented and the level is unchanged.
+- a trusted hit (trust >= 0.8) may raise an L1 MEDIUM result to HIGH
+  only when the merged result is complete (no missing fields); a partial
+  hit supplements evidence but preserves MEDIUM; below the fusion
+  threshold only evidence is supplemented and the level is unchanged.
 
 Pure functions only.
 """
@@ -112,7 +113,10 @@ def apply_memory_hit(result: ParseResult, hit: MemoryHit) -> ParseResult:
 
     level = result.level
     if filled and can_fuse(hit.trust):
-        level = fused_level(result.level, trusted_hit=True)
+        complete = not missing_fields_for(
+            title=new_title, season=new_season, episode=new_episode, segment=new_segment
+        )
+        level = fused_level(result.level, trusted_hit=complete)
 
     return ParseResult(
         title=new_title,

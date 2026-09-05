@@ -115,8 +115,8 @@ class Orchestrator:
             return RouteOutcome(result, ROUTE_L3, degraded=True)
         try:
             # Authoritative raw-name bypass gate (PR4 T3 design point): a
-            # bypassed release neither fuses nor records a hit, and the
-            # title-level gate inside the enhancer cannot see the raw name.
+            # bypassed release neither fuses nor records a hit. The raw name is
+            # available here, not inside the L2 ParseResult contract.
             if await store.has_bypass(pattern_hash(raw.name)):
                 return RouteOutcome(result, ROUTE_L3)
         except Exception:
