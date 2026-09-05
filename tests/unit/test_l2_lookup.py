@@ -350,6 +350,17 @@ async def test_storage_memory_store_find_hit_and_bypass(tmp_path: Path) -> None:
         assert await store.has_bypass(key_hash("Some.Noisy.Release"))
 
 
+async def test_storage_memory_store_wires_alias_read_through(tmp_path: Path) -> None:
+    """PR7 M2b：StorageMemoryStore 必须透传 find_alias_key，否则 CLI 生产装配下
+    orchestrator 的 alias 环鸭子类型探测失败，静默退化为参考链路径。"""
+    async with SqliteStorage(f"sqlite+aiosqlite:///{tmp_path / 'memory.db'}") as storage:
+        store = StorageMemoryStore(storage)
+        await storage.put_alias_map({"sousou no frieren": "葬送的芙莉莲"}, "bangumi")
+
+        assert await store.find_alias_key("sousou no frieren") == "葬送的芙莉莲"
+        assert await store.find_alias_key("葬送的芙莉莲") is None
+
+
 async def test_storage_memory_store_enhances_through_the_real_db(tmp_path: Path) -> None:
     async with SqliteStorage(f"sqlite+aiosqlite:///{tmp_path / 'memory.db'}") as storage:
         store = StorageMemoryStore(storage)

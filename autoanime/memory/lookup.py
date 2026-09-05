@@ -169,6 +169,11 @@ class StorageMemoryStore:
     async def find_parse_memory(self, key_level: int, key_hash: str) -> ParseMemory | None:
         return await self._storage.find_parse_memory(key_level, key_hash)
 
+    async def find_alias_key(self, title_shape_norm: str) -> str | None:
+        # PR7 M2b: 透传 title_aliases 读侧，否则 orchestrator 的 alias 环
+        # 鸭子类型探测失败、生产装配下静默退化为参考链路径。
+        return await self._storage.find_alias_key(title_shape_norm)
+
     async def record_hit(
         self, parse_memory: Any, *, operation_id: str | None = None
     ) -> None:
