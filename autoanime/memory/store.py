@@ -8,7 +8,14 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from autoanime.core.models import Alias, Base, BypassList, LlmCacheRow, ParseMemory
+from autoanime.core.models import (
+    Alias,
+    Base,
+    BypassList,
+    LlmCacheRow,
+    ParseMemory,
+    ReferenceCache,
+)
 from autoanime.pipeline.l3.cache_key import LlmCache
 
 
@@ -125,6 +132,45 @@ class SqliteStorage:
             else:
                 row.response_text = cache.response
                 row.model = cache.model
+            await session.commit()
+
+    async def find_reference_cache(self, title_shape: str, provider: str) -> ReferenceCache | None:
+        """按 ``(title_shape, provider)`` 精确读一条参考源缓存（PR6 P2）。
+
+        无条件返回存储内容：是否过期、``facts`` JSON 是否可解析由调用方
+        （``memory.reference_cache.CachedReference``）判定，store 层不解释
+        语义。未命中返回 ``None``。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ReferenceCache).where(
+                    ReferenceCache.title_shape == title_shape,
+                    ReferenceCache.provider == provider,
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def add_reference_cache(self, row: ReferenceCache) -> None:
+        """写一条参考源缓存（PR6 P2）。
+
+        同一 ``(title_shape, provider)`` 重复写入覆盖旧记录（含正/负缓存
+        互相覆盖）；每对至多一行，由 ``uq_reference_cache_shape_provider``
+        约束兜底。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ReferenceCache).where(
+                    ReferenceCache.title_shape == row.title_shape,
+                    ReferenceCache.provider == row.provider,
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing is None:
+                session.add(row)
+            else:
+                existing.facts = row.facts
+                existing.fetched_at = row.fetched_at
+                existing.expires_at = row.expires_at
             await session.commit()
 
     async def find_aliases_by_norm(self, alias_norm: str) -> list[Alias]:

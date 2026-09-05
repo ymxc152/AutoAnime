@@ -208,3 +208,26 @@ class LlmCacheRow(Base):
     response_text: Mapped[str] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class ReferenceCache(Base):
+    """``reference_cache`` 表：参考源剧目级缓存（PR6 P2）。
+
+    以 ``(title_shape, provider)`` 为键，每对至多一行：``title_shape``
+    是 L2 规范化标题形状（casefold、占位符化），``provider`` 是参考源
+    注册名（如 ``"bangumi"``）。``facts`` 存 ``ReferenceFacts`` 形状的
+    JSON（负缓存存 ``{"negative": true}`` 标记）；``expires_at`` 为空
+    表示永不过期，非空由读取方与当前时间比较判定失效。
+    """
+
+    __tablename__ = "reference_cache"
+    __table_args__ = (
+        UniqueConstraint("title_shape", "provider", name="uq_reference_cache_shape_provider"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title_shape: Mapped[str] = mapped_column(String)
+    provider: Mapped[str] = mapped_column(String)
+    facts: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
