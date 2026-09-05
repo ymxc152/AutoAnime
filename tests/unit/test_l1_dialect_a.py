@@ -136,9 +136,34 @@ def test_episode_beyond_release_progress_drops_to_low() -> None:
     assert result.evidence["release_progress"] == "context"
 
 
-@pytest.mark.parametrize("name", ["", "Just Some Random Text.mkv", "random_text_only"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "Just Some Random Text.mkv",
+        "random_text_only",
+        # Regression: pure-bracket / batch names used to raise ValueError from
+        # to_parse_result (segment unset) instead of returning None.
+        "[Nekomoe kissaten&LoliHouse] Akane-banashi [03-06][WebRip 1080p HEVC-10bit AAC ASSx2]",
+        "[64bitsub][Haibara-kun no Tsuyokute Seishun New Game][08][1920x1080][AVC_AAC][CHT].mp4",
+    ],
+)
 def test_unrecognizable_names_return_none(name: str) -> None:
     assert dot.parse(RawName(name=name)) is None
+
+
+def test_folder_rescues_segmentless_name() -> None:
+    """The segment guard runs after the folder merge, not before it."""
+    result = dot.parse(
+        RawName(
+            name="Some.Title.1080p.WEB-DL.AAC2.0.H.264-MWeb",
+            folder="Some.Title.S02.1080p.Baha.WEB-DL.AAC2.0.H.264-MWeb",
+        )
+    )
+    assert result is not None
+    assert result.segment is Segment.SEASON_PACK
+    assert result.season == 2
+    assert result.evidence["season"] == "folder"
 
 
 def test_folder_equal_to_name_is_not_reparsed() -> None:

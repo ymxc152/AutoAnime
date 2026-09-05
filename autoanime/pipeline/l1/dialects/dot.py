@@ -63,7 +63,10 @@ def parse(raw: RawName, context: ParseContext | None = None) -> ParseResult | No
     draft = apply_release_progress(draft, context)
     if context is not None and context.release_progress is not None:
         draft = replace(draft, evidence={**draft.evidence, "release_progress": SOURCE_CONTEXT})
-    if not draft.title:
+    if not draft.title or draft.segment is None:
+        # No segment landmark in name or folder (e.g. pure-bracket or batch
+        # names): not a meaningful dialect-A result, hand back to the other
+        # dialects instead of violating the ParseResult precondition.
         return None
     return draft.finalized().to_parse_result()
 
