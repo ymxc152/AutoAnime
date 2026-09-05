@@ -30,6 +30,13 @@ def test_load_case_builds_structured_case() -> None:
     assert raw_names[0].parent_path == case.parent_path
 
 
+def test_load_case_allows_null_folder() -> None:
+    case = load_case(VALID_ROOT / "dialect_b" / "B01_single")
+
+    assert case.folder is None
+    assert case.to_raw_names()[0].folder is None
+
+
 def test_load_dialects_uses_stable_order() -> None:
     cases = load_dialects("A", "b", root=VALID_ROOT)
 

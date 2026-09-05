@@ -24,7 +24,7 @@ class FixtureFile:
 class FixtureCase:
     id: str
     dialect: str
-    folder: str
+    folder: str | None
     parent_path: str
     files: tuple[FixtureFile, ...]
     tags: tuple[str, ...]
@@ -60,7 +60,7 @@ def load_case(path: Path) -> FixtureCase:
 
     case_id = _require_string(payload, "id")
     dialect = _require_string(payload, "dialect")
-    folder = _require_string(payload, "folder")
+    folder = _optional_string(payload, "folder")
     parent_path = _require_string(payload, "parent_path")
 
     expected_dialect = path.parent.name.removeprefix(_DIALECT_PREFIX)
@@ -106,6 +106,13 @@ def load_case(path: Path) -> FixtureCase:
         tags=tuple(raw_tags),
         notes=notes,
     )
+
+
+def _optional_string(data: dict[str, Any], key: str) -> str | None:
+    value = data.get(key)
+    if value is not None and (not isinstance(value, str) or not value):
+        raise FixtureError(f"fixture field '{key}' must be null or a non-empty string")
+    return value
 
 
 def _dialect_directories(root: Path) -> list[Path]:
