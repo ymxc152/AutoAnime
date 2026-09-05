@@ -138,6 +138,26 @@ class Alias(Base):
     source: Mapped[str]
 
 
+class TitleAlias(Base):
+    """``title_aliases`` 窄表（PR7 M3）：alias shape → canonical shape。
+
+    confirm 成功回填的「任意语言标题变体 → 参考源 canonical」映射：
+    ``title_shape_norm`` 是别名经 ``build_title_shape`` 归一后的 L2 标题
+    形状（即查询侧实际会拿到的 key），``canonical_shape`` 是参考源
+    ``canonical_title`` 归一后的规范形状，``source`` 记录 canonical 的
+    参考源注册名（如 ``"bangumi"``）。查询侧（M2）用它零外呼完成任意
+    语言变体 → canonical 的归一；alias shape 与 canonical shape 相同的
+    条目不写（写侧 ``put_alias_map`` 跳过）。
+    """
+
+    __tablename__ = "title_aliases"
+
+    title_shape_norm: Mapped[str] = mapped_column(String, primary_key=True)
+    canonical_shape: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
 class BypassList(Base):
     __tablename__ = "bypass_list"
     __table_args__ = (Index("ix_bypass_list_pattern_hash", "pattern_hash"),)
