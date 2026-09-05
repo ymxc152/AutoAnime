@@ -1,0 +1,19 @@
+{
+  "title": "Haibara-kun no Tsuyokute Seishun New Game",
+  "season": null,
+  "episode": 12,
+  "segment": "episode",
+  "fansub": "64bitsub",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [
+    "season"
+  ],
+  "evidence": {
+    "title": "name",
+    "season": "none",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}
