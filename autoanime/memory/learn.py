@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from autoanime.core.enums import MemorySource, MemoryStatus
 from autoanime.core.interfaces import ParseResult
@@ -19,12 +21,22 @@ from autoanime.pipeline.l2 import (
     should_demote_to_pending,
     trust_score,
 )
+from autoanime.pipeline.l3.reference import ReferenceFacts
+
+logger = logging.getLogger(__name__)
+
+ALIAS_BACKFILL_TIMEOUT_S = 3.0
+"""alias 回填参考源查询的严格超时（秒）：miss 外呼最多阻塞 confirm 这么久。"""
 
 __all__ = [
+    "ALIAS_BACKFILL_TIMEOUT_S",
+    "AliasBackfillStore",
     "BypassLookup",
     "LearnOutcome",
     "MemoryWriteStore",
+    "ReferenceLookup",
     "StorageMemoryAccess",
+    "backfill_title_aliases",
     "derive_memory_key",
     "learn_confirmation",
     "status_for_counts",
@@ -39,6 +51,21 @@ class MemoryWriteStore(Protocol):
 
     async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None: ...
     async def add(self, parse_memory: Any) -> None: ...
+
+
+@runtime_checkable
+class AliasBackfillStore(Protocol):
+    """``title_aliases`` 写侧窄协议（PR7 M3 回填钩子用）。"""
+
+    async def put_alias_map(self, mapping: dict[str, str], source: str) -> None: ...
+
+
+@runtime_checkable
+class ReferenceLookup(Protocol):
+    """参考源查询窄协议：``CachedReference``/``ReferenceChain`` 均结构化满足。"""
+
+    async def lookup(self, title_shape: str) -> ReferenceFacts | None: ...
+
 
 
 @runtime_checkable
@@ -75,6 +102,12 @@ class StorageMemoryAccess:
 
     async def has_bypass(self, pattern_hash: str) -> bool:
         return await self._storage.find_bypass(pattern_hash) is not None
+
+    async def find_alias_key(self, title_shape_norm: str) -> str | None:
+        return await self._storage.find_alias_key(title_shape_norm)
+
+    async def put_alias_map(self, mapping: dict[str, str], source: str) -> None:
+        await self._storage.put_alias_map(mapping, source)
 
 
 
@@ -250,6 +283,66 @@ async def upsert_parse_memory(
     return existing
 
 
+async def backfill_title_aliases(
+    store: AliasBackfillStore,
+    reference_lookup: ReferenceLookup,
+    *,
+    confirmed: ParseResult,
+) -> None:
+    """Confirm 成功路径尾部的 alias 回填（PR7 M3）。
+
+    以 confirmed 标题的 title shape 查一次参考源（调用方传
+    ``CachedReference`` 包装的链时缓存命中零外呼，miss 才外呼且受
+    ``ALIAS_BACKFILL_TIMEOUT_S`` 严格超时约束），把 ``canonical_title``
+    与 ``aliases`` 经 ``build_title_shape`` 归一后以「alias shape →
+    canonical shape」写入 ``title_aliases`` 窄表。查询侧确认时的标题
+    形状本身也纳入映射（它正是未来查询会出现的形状）。
+
+    护栏：任何失败（参考源不可用/超时/异常、``canonical_title`` 为空、
+    写库失败）静默跳过并记日志——绝不向调用方抛错，绝不阻断 confirm
+    主流程，也不影响已写入的 ``parse_memory`` 事实。self 映射（alias
+    shape == canonical shape）由 ``put_alias_map`` 跳过。
+    """
+    try:
+        mapping, source = await _alias_mapping_from_reference(reference_lookup, confirmed)
+    except Exception:
+        logger.warning("alias backfill: reference lookup failed or timed out; skipping")
+        return
+    if not mapping:
+        return
+    try:
+        await store.put_alias_map(mapping, source)
+    except Exception:
+        logger.warning("alias backfill: alias map write failed; skipping")
+
+
+async def _alias_mapping_from_reference(
+    reference_lookup: ReferenceLookup, confirmed: ParseResult
+) -> tuple[dict[str, str], str]:
+    """查参考源并归一出「alias shape → canonical shape」映射。
+
+    参考源 miss/超时/无 ``canonical_title``/归一为空都返回空映射（跳过
+    信号）；查询超时由 ``ALIAS_BACKFILL_TIMEOUT_S`` 硬性封顶。
+    """
+    query_shape = build_title_shape(confirmed.title)
+    if not query_shape:
+        return {}, ""
+    facts = await asyncio.wait_for(
+        reference_lookup.lookup(query_shape), timeout=ALIAS_BACKFILL_TIMEOUT_S
+    )
+    if facts is None or not facts.canonical_title:
+        return {}, ""
+    canonical_shape = build_title_shape(facts.canonical_title)
+    if not canonical_shape:
+        return {}, ""
+    mapping: dict[str, str] = {query_shape: canonical_shape}
+    for alias in facts.aliases:
+        alias_shape = build_title_shape(alias)
+        if alias_shape:
+            mapping[alias_shape] = canonical_shape
+    return mapping, facts.source or "unknown"
+
+
 async def learn_confirmation(
     store: MemoryWriteStore,
     *,
@@ -257,11 +350,16 @@ async def learn_confirmation(
     raw_name: str,
     source: MemorySource = MemorySource.MANUAL,
     bypass_lookup: BypassLookup | None = None,
+    reference_lookup: ReferenceLookup | None = None,
 ) -> LearnOutcome:
     """Learn one confirmed result: bypass gate, then upsert both key levels.
 
     ``raw_name`` is the release name the confirmation refers to; its T1
     bypass digest is checked first, and a listed name writes nothing.
+
+    ``reference_lookup`` 非空时（PR7 M3），ParseMemory 两级写成功后做一次
+    alias 回填（见 ``backfill_title_aliases``）：回填失败静默，不影响
+    主流程结果。
     """
     if bypass_lookup is not None and await bypass_lookup.has_bypass(pattern_hash(raw_name)):
         return LearnOutcome(entries=(), bypassed=True)
@@ -272,5 +370,14 @@ async def learn_confirmation(
             await upsert_parse_memory(
                 store, confirmed=confirmed, key_level=key_level, source=source
             )
+        )
+    if reference_lookup is not None:
+        # 回填在成功路径尾部，且自身吞掉一切异常：主流程已落库的事实
+        # 不受参考源可用性影响。store 由装配侧（StorageMemoryAccess）
+        # 保证同时具备 put_alias_map 能力，这里收窄协议即可。
+        await backfill_title_aliases(
+            cast(AliasBackfillStore, store),
+            reference_lookup,
+            confirmed=confirmed,
         )
     return LearnOutcome(entries=tuple(entries), bypassed=False)

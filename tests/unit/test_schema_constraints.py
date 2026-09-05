@@ -53,7 +53,7 @@ async def _add_episode(session, series: Series, season: Season | None = None) ->
     return episode
 
 
-async def test_exactly_twelve_tables(session) -> None:
+async def test_exactly_thirteen_tables(session) -> None:
     result = await session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
     names = {row[0] for row in result}
     expected = {
@@ -63,6 +63,7 @@ async def test_exactly_twelve_tables(session) -> None:
         "release_record",
         "parse_memory",
         "alias",
+        "title_aliases",
         "bypass_list",
         "pending_queue",
         "audit_log",

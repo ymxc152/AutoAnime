@@ -15,6 +15,7 @@ from autoanime.core.models import (
     LlmCacheRow,
     ParseMemory,
     ReferenceCache,
+    TitleAlias,
 )
 from autoanime.pipeline.l3.cache_key import LlmCache
 
@@ -171,6 +172,38 @@ class SqliteStorage:
                 existing.facts = row.facts
                 existing.fetched_at = row.fetched_at
                 existing.expires_at = row.expires_at
+            await session.commit()
+
+    async def find_alias_key(self, title_shape_norm: str) -> str | None:
+        """按 alias shape 读 canonical shape（PR7 M3 title_aliases 读侧）。
+
+        返回 ``title_aliases`` 表中该形状对应的 ``canonical_shape``；未命中
+        返回 ``None``。查询侧（M2）用它把任意语言变体零外呼归一到
+        canonical 形状。
+        """
+        async with self._session_factory() as session:
+            row = await session.get(TitleAlias, title_shape_norm)
+            return row.canonical_shape if row is not None else None
+
+    async def put_alias_map(self, mapping: dict[str, str], source: str) -> None:
+        """幂等 upsert 一批「alias shape → canonical shape」映射（PR7 M3）。
+
+        每个别形状至多一行（主键 ``title_shape_norm``，重复写入覆盖旧
+        canonical）；``alias shape == canonical shape`` 的条目跳过不写
+        （canonical 自身不是别名）。``source`` 记录 canonical 的参考源
+        注册名（如 ``"bangumi"``）。
+        """
+        async with self._session_factory() as session:
+            for alias_shape, canonical_shape in mapping.items():
+                if alias_shape == canonical_shape:
+                    continue
+                await session.merge(
+                    TitleAlias(
+                        title_shape_norm=alias_shape,
+                        canonical_shape=canonical_shape,
+                        source=source,
+                    )
+                )
             await session.commit()
 
     async def find_aliases_by_norm(self, alias_norm: str) -> list[Alias]:
