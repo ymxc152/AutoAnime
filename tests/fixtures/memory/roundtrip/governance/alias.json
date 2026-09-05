@@ -1,0 +1,7 @@
+{
+  "note": "alias 辅助命中用例：为同一剧目注册多个标题别名，matching_titles 必须解析到该剧目，non_matching_titles 不得命中",
+  "series_id": 1,
+  "aliases": ["Sousou no Frieren", "葬送的芙莉莲"],
+  "matching_titles": ["sousou no frieren", "Sousou.No.Frieren", "葬送的芙莉莲"],
+  "non_matching_titles": ["Frieren", "葬送的捣蛋鬼"]
+}
