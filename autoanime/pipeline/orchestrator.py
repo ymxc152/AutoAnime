@@ -9,9 +9,11 @@ The orchestrator owns the fixed routing contract:
   draft, the L1+L2 fused result and the independent L3 draft; an L2 hit
   routes ``memory``, an L2 miss routes ``l3`` -- in both cases the final
   fields come from the arbiter verdict. On an L2 miss, a best-effort
-  pre-L3 disambiguation (PR7 M2) re-queries L2 under the canonical title
-  the reference chain reports for the L1 draft; a canonical hit adopts the
-  exact same memory-hit semantics as a direct L2 hit.
+  pre-L3 disambiguation (PR7 M2/M2b) re-queries L2 under a canonical
+  title: the ``title_aliases`` read side first (pure DB read, zero
+  network), then the canonical title the reference chain reports; a
+  canonical hit adopts the exact same memory-hit semantics as a direct
+  L2 hit.
 - L1 LOW and L1 ``None``: straight to the L3 segment (route ``l3``).
 
 Graceful degradation (PR4/PR5 contract):
@@ -36,9 +38,9 @@ Arbiter audit rows (R8) are persisted through the narrow
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import uuid4
 
 from autoanime.core.enums import Confidence
@@ -245,36 +247,99 @@ class Orchestrator:
         context: ParseContext | None,
         operation_id: str,
     ) -> RouteOutcome | None:
-        """Pre-L3 disambiguation (PR7 M2): re-query L2 under the canonical title.
+        """Pre-L3 disambiguation (PR7 M2/M2b): re-query L2 under a canonical title.
 
-        On an L2 miss, the L1 draft's title shape is looked up through the
-        reference chain (reference_cache backed, so a repeat query shares the
-        L3 segment's cache and rate budget). When the chain reports a
-        non-empty ``canonical_title``, the same two-level ``lookup_memory``
-        search runs with that title in place of the L1 draft title -- the
-        level-1 key becomes the canonical shape and the level-2 key the
-        canonical shape plus the season/episode/fansub the L1 draft parsed
-        out. A hit adopts the exact memory-hit semantics of a direct L2 hit
-        (``apply_memory_hit`` + hit recording + ``route=memory``); every
-        degradation (no chain, chain miss, empty canonical title, canonical
-        L2 miss, any failure) silently falls back to the original path.
+        On an L2 miss, the L1 draft's title shape is resolved to a canonical
+        title through two links, cheapest first:
+
+        1. the ``title_aliases`` read side (PR7 M2b) -- a pure DB read (the
+           alias key is the draft's shape, the value the canonical shape);
+           a hit costs zero network calls;
+        2. the reference chain (PR7 M2, reference_cache backed, so a repeat
+           query shares the L3 segment's cache and rate budget).
+
+        When either link yields a non-empty canonical title (the alias link
+        yields a canonical shape, which ``build_title_shape`` is idempotent
+        on for every shape it itself produces under normal titles), the same
+        two-level ``lookup_memory`` search runs with that title in place of
+        the L1 draft title -- the level-1 key becomes the canonical shape and
+        the level-2 key the canonical shape plus the season/episode/fansub
+        the L1 draft parsed out. A hit adopts the exact memory-hit semantics
+        of a direct L2 hit (``apply_memory_hit`` + hit recording +
+        ``route=memory``); every degradation (no store, alias miss, no chain,
+        chain miss, empty canonical title, canonical L2 miss, any failure)
+        silently falls through to the next link or the original path.
         """
-        chain = self._reference_chain
         store = self._memory_store
-        if chain is None or store is None:
+        if store is None:
+            return None
+        shape = build_title_shape(result.title)
+        # Link 1 (PR7 M2b): the alias table -- pure DB read, no network. The
+        # store carries the narrow ``find_alias_key`` extension (PR7 M3);
+        # absent on fakes or failing, the link is silently skipped.
+        canonical_shape = await self._alias_canonical_shape(store, shape)
+        if canonical_shape is not None:
+            outcome = await self._canonical_memory_hit(
+                raw, result, canonical_shape, context, operation_id, store
+            )
+            if outcome is not None:
+                return outcome
+        # Link 2 (PR7 M2): the reference chain, behavior unchanged.
+        chain = self._reference_chain
+        if chain is None:
             return None
         try:
-            facts = await chain.lookup(build_title_shape(result.title))
+            facts = await chain.lookup(shape)
         except Exception:
             return None
         canonical_title = facts.canonical_title if facts is not None else None
         if not canonical_title:
             return None
+        return await self._canonical_memory_hit(
+            raw, result, canonical_title, context, operation_id, store
+        )
+
+    async def _alias_canonical_shape(
+        self, store: MemoryStore, title_shape: str
+    ) -> str | None:
+        """The alias read side (PR7 M2b): shape -> canonical shape or ``None``.
+
+        ``find_alias_key`` is duck-typed off the store (the ``MemoryStore``
+        protocol stays PR4-narrow); a missing method or a failing query is
+        logged and treated as a miss, never an error.
+        """
+        finder = getattr(store, "find_alias_key", None)
+        if not callable(finder):
+            return None
+        alias_lookup = cast(
+            "Callable[[str], Awaitable[str | None]]", finder
+        )
         try:
-            # Key derivation reuses lookup_memory's pure helpers, so the
-            # canonical shape comes from the single source of truth
-            # (build_title_shape) and the two-level order mirrors the
-            # direct L2 search exactly.
+            found = await alias_lookup(title_shape)
+        except Exception:
+            logger.warning(
+                "alias lookup failed; continuing without alias", exc_info=True
+            )
+            return None
+        return found if found else None
+
+    async def _canonical_memory_hit(
+        self,
+        raw: RawName,
+        result: ParseResult,
+        canonical_title: str,
+        context: ParseContext | None,
+        operation_id: str,
+        store: MemoryStore,
+    ) -> RouteOutcome | None:
+        """Re-query L2 under a canonical title and adopt a hit (PR7 M2 semantics).
+
+        Key derivation reuses lookup_memory's pure helpers, so the canonical
+        shape comes from the single source of truth (build_title_shape) and
+        the two-level order mirrors the direct L2 search exactly. A miss (or
+        any failure) returns ``None`` so the caller falls through.
+        """
+        try:
             canonical_draft = replace(result, title=canonical_title)
             match = await lookup_memory(canonical_draft, store)
         except Exception:

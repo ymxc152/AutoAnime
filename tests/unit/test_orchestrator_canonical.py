@@ -15,8 +15,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
+
+import pytest
 
 from autoanime.core.enums import Confidence, Segment
 from autoanime.core.interfaces import (
@@ -110,19 +112,38 @@ class FakeMemoryRow:
 
 
 class FakeMemoryStore:
-    """In-memory ``MemoryStore`` fake; ``fail_after`` 模拟重查时 store 故障."""
+    """In-memory ``MemoryStore`` fake; ``fail_after`` 模拟重查时 store 故障.
 
-    def __init__(self, *rows: FakeMemoryRow, fail_after: int | None = None) -> None:
+    ``alias_map``/``alias_error`` 模拟 PR7 M3 ``find_alias_key`` 读侧（M2b
+    接线用）；不传时行为与纯 PR4 store 一致。
+    """
+
+    def __init__(
+        self,
+        *rows: FakeMemoryRow,
+        fail_after: int | None = None,
+        alias_map: dict[str, str] | None = None,
+        alias_error: Exception | None = None,
+    ) -> None:
         self._rows = {(row.key_level, row.key_hash): row for row in rows}
         self.recorded_hits: list[Any] = []
         self.lookup_calls = 0
         self._fail_after = fail_after
+        self._alias_map = alias_map if alias_map is not None else {}
+        self._alias_error = alias_error
+        self.alias_lookups: list[str] = []
 
     async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
         self.lookup_calls += 1
         if self._fail_after is not None and self.lookup_calls > self._fail_after:
             raise RuntimeError("store unavailable")
         return self._rows.get((key_level, key_hash))
+
+    async def find_alias_key(self, title_shape_norm: str) -> str | None:
+        self.alias_lookups.append(title_shape_norm)
+        if self._alias_error is not None:
+            raise self._alias_error
+        return self._alias_map.get(title_shape_norm)
 
     async def record_hit(
         self, parse_memory: Any, *, operation_id: str | None = None
@@ -451,3 +472,178 @@ async def test_disambiguation_and_arbiter_share_reference_cache() -> None:
     assert outcome.route == ROUTE_MEMORY
     assert outcome.l2_applied is True
     assert len(upstream.lookups) == 1
+
+
+# --- alias read-side (PR7 M2b): the alias table is the first lookup link -------
+
+
+async def test_alias_hit_requery_hit_routes_memory_without_reference_call() -> None:
+    # The alias table maps the L1 draft's shape to the canonical shape; the
+    # canonical level-1 key hits. The reference chain is never consulted
+    # (zero network), and the semantics match a direct L2 hit.
+    store = FakeMemoryStore(
+        _canonical_series_row(),
+        alias_map={build_title_shape(ROMAJI): build_title_shape(CANONICAL)},
+    )
+    provider = FakeReferenceProvider()  # any chain lookup would be a miss
+
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(provider),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.l2_applied is True
+    assert outcome.degraded is False
+    assert outcome.result is not None
+    assert outcome.result.season == 2
+    assert outcome.result.fansub == "MSubs"
+    assert outcome.result.evidence["season"] == "memory"
+    assert outcome.result.evidence["key_level"] == "memory:1"
+    assert len(store.recorded_hits) == 1
+    assert store.alias_lookups == [build_title_shape(ROMAJI)]
+    assert provider.lookups == []
+
+
+async def test_alias_hit_requery_miss_falls_through_to_reference_chain() -> None:
+    # The alias hit's canonical shape has no memory row: the pass continues
+    # down the reference chain link, whose canonical title does hit.
+    other_shape = build_title_shape("名脈役割の別作品")
+    store = FakeMemoryStore(
+        _canonical_series_row(),
+        alias_map={build_title_shape(ROMAJI): other_shape},
+    )
+    provider = FakeReferenceProvider({build_title_shape(ROMAJI): _canonical_facts()})
+
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(provider),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.l2_applied is True
+    assert outcome.result is not None
+    assert outcome.result.season == 2
+    assert len(store.recorded_hits) == 1
+    assert provider.lookups == [build_title_shape(ROMAJI)]
+
+
+async def test_alias_miss_keeps_m2_reference_chain_behavior() -> None:
+    # Regression lock: an alias miss behaves exactly like PR7 M2 -- the same
+    # chain lookup runs and its canonical re-query adopts the hit.
+    store = FakeMemoryStore(_canonical_series_row())  # alias map empty
+    provider = FakeReferenceProvider({build_title_shape(ROMAJI): _canonical_facts()})
+
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(provider),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.l2_applied is True
+    assert outcome.result is not None
+    assert outcome.result.evidence["season"] == "memory"
+    assert len(store.recorded_hits) == 1
+    assert store.alias_lookups == [build_title_shape(ROMAJI)]
+    assert provider.lookups == [build_title_shape(ROMAJI)]
+
+
+async def test_alias_store_error_falls_through_to_reference_chain_silently() -> None:
+    # A failing alias read never breaks the pass: the chain link still runs.
+    store = FakeMemoryStore(
+        _canonical_series_row(),
+        alias_error=RuntimeError("alias table unavailable"),
+    )
+    provider = FakeReferenceProvider({build_title_shape(ROMAJI): _canonical_facts()})
+
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(provider),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.l2_applied is True
+    assert len(store.recorded_hits) == 1
+
+
+async def test_store_without_alias_extension_falls_through_to_reference_chain() -> None:
+    # ``find_alias_key`` is duck-typed off the store: a PR4-era store without
+    # the PR7 M3 extension simply skips the alias link.
+    class BareMemoryStore(FakeMemoryStore):
+        find_alias_key = None  # type: ignore[assignment]
+
+    store = BareMemoryStore(_canonical_series_row())
+    provider = FakeReferenceProvider({build_title_shape(ROMAJI): _canonical_facts()})
+
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(provider),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.l2_applied is True
+    assert len(store.recorded_hits) == 1
+
+
+async def test_alias_hit_with_non_stable_shape_falls_through_to_reference_chain() -> None:
+    # Known build_title_shape non-idempotency edge (digit-adjacent separators
+    # survive the first fold, then fold once the anchor digits are replaced).
+    # When the alias table stores such a non-stable canonical shape, the alias
+    # link's re-query re-derives a different key and silently misses; the
+    # reference chain -- whose canonical title is the real title -- still
+    # rescues the hit. Degradation only costs the chain call, never
+    # correctness.
+    canonical_title = "Show.Name.S02E05.720p"
+    l1_title = "Show Name S02E05"
+    alias_shape = build_title_shape(l1_title)  # no digit-adjacent separator
+    canonical_shape = build_title_shape(canonical_title)  # non-stable shape
+    row = FakeMemoryRow(
+        key_level=KEY_LEVEL_EXACT,
+        key_hash=key_hash(level2_key(canonical_title, None, 5, None)),
+        result={"title": "Show Name S02E05.720p", "season": 1, "episode": 5,
+                "segment": "episode"},
+    )
+    store = FakeMemoryStore(row, alias_map={alias_shape: canonical_shape})
+    provider = FakeReferenceProvider(
+        {alias_shape: ReferenceFacts(canonical_title=canonical_title, source="fake")}
+    )
+    l1 = replace(
+        _l1(), title=l1_title, season=None, episode=5, missing_fields=("season",)
+    )
+
+    outcome = await _wired_orchestrator(
+        l1, store=store, chain=_chain(provider),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.l2_applied is True
+    assert outcome.result is not None
+    assert outcome.result.episode == 5
+    assert len(store.recorded_hits) == 1
+    assert provider.lookups == [alias_shape]
+
+
+# --- build_title_shape idempotency (the alias link's key assumption) -----------
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Kono Subarashii Sekai ni Shukufuku wo",
+        "Frieren: Beyond Journey   Season  2",  # mixed case + multi-space
+        "[Sub] Some Show - 03 (1080p)",
+        "第 2 季 某某物语 第 12 话",
+        "Mixed CASE  Title with   Spaces",
+        "season {season} episode {ep}",  # an already-shaped string
+        "一燈  -  EP10",
+    ],
+)
+def test_build_title_shape_is_idempotent(title: str) -> None:
+    # The alias link re-uses a canonical *shape* as the draft title, so
+    # re-shaping it (inside lookup_memory's key derivation) must be a no-op.
+    assert build_title_shape(build_title_shape(title)) == build_title_shape(title)
+
+
+def test_build_title_shape_known_non_idempotent_edge_is_documented() -> None:
+    # Decimal-style separators adjacent to digits survive the first fold (the
+    # folding keeps decimals intact); once the anchor digits are replaced the
+    # separator becomes foldable. Only release-name-like titles with digit
+    # neighbors hit this; the alias link degrades through the reference chain
+    # (see test_alias_hit_with_non_stable_shape_falls_through_to_reference_chain).
+    title = "Show.Name.S02E05.720p"
+    assert build_title_shape(build_title_shape(title)) != build_title_shape(title)
