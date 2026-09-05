@@ -1,0 +1,17 @@
+{
+  "title": "FateGrand Order Shuukyoku Tokuiten - Kani Jikan Shinden Solomon",
+  "season": null,
+  "episode": null,
+  "segment": "movie",
+  "fansub": "7³ACG",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "none",
+    "episode": "none",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

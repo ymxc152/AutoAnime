@@ -1,0 +1,17 @@
+{
+  "title": "Honzuki no Gekokujou",
+  "season": 4,
+  "episode": 1,
+  "segment": "episode",
+  "fansub": "SweetSub",
+  "level": "high",
+  "confidence": 1.0,
+  "missing_fields": [],
+  "evidence": {
+    "title": "folder",
+    "season": "folder",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "folder"
+  }
+}
