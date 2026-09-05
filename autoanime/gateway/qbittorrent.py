@@ -1,0 +1,1 @@
+"""qBittorrent downloader adapter."""

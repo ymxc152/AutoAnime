@@ -47,3 +47,9 @@ scripts/test_nvidia_api.py
 .cache_scan_audit.json
 .repair_plan_hell.json
 审计报告_动漫库.md
+
+*.db
+*.sqlite
+.venv/
+.pytest_cache/
+.ruff_cache/
