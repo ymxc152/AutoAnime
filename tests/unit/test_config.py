@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from autoanime.config import load_settings
 
 
@@ -65,3 +67,46 @@ def test_llm_api_key_stays_out_of_toml(tmp_path: Path) -> None:
     settings = load_settings(path)
 
     assert settings.llm_api_key is None
+
+
+def test_api_section_defaults() -> None:
+    settings = load_settings(Path("does-not-exist.toml"))
+
+    # D6：默认空 token = 关闭认证。
+    assert settings.api_token.get_secret_value() == ""
+    assert settings.api_host == "127.0.0.1"
+    assert settings.api_port == 8000
+    assert settings.api_cors_dev_origins == ["http://localhost:5173"]
+    assert settings.api_sse_heartbeat_s == 30.0
+    assert settings.api_sse_replay_limit == 50
+
+
+def test_api_token_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTOANIME_API_TOKEN", "secret-token")
+
+    settings = load_settings(Path("does-not-exist.toml"))
+
+    assert settings.api_token.get_secret_value() == "secret-token"
+
+
+def test_api_fields_read_toml(tmp_path: Path) -> None:
+    path = tmp_path / "autoanime.toml"
+    path.write_text(
+        'api_host = "0.0.0.0"\n'
+        "api_port = 9911\n"
+        'api_cors_dev_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]\n'
+        "api_sse_heartbeat_s = 15.0\n"
+        "api_sse_replay_limit = 10\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(path)
+
+    assert settings.api_host == "0.0.0.0"
+    assert settings.api_port == 9911
+    assert settings.api_cors_dev_origins == [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    assert settings.api_sse_heartbeat_s == 15.0
+    assert settings.api_sse_replay_limit == 10

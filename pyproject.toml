@@ -14,6 +14,10 @@ dependencies = [
   "pydantic-settings>=2.3",
   "anitopy>=2.1.1",
   "httpx>=0.27",
+  # M3 后端(E2):三件均钉精确版本(计划钉版纪律;sse-starlette 3.4.11 与 Plan §0.1 一致)
+  "fastapi==0.141.1",
+  "uvicorn==0.52.4",
+  "sse-starlette==3.4.11",
 ]
 
 [project.scripts]

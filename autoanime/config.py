@@ -28,6 +28,20 @@ class Settings(BaseSettings):
     # 频控（P1 adapter 内部 HTTP 层已有默认 1 QPS 节流兜底）。
     reference_qps: float | None = None
 
+    # ------------------------------------------------------------------
+    # API / Web 服务（E2 M3 后端增量；独立 section，不动上方既有字段）
+    # ------------------------------------------------------------------
+    # 简单 token 认证（拍板 D6）：AUTOANIME_API_TOKEN 非空时校验
+    # X-API-Token 头（SSE 另支持同值 query param，B7），空串 = 关闭认证。
+    api_token: SecretStr = SecretStr("")
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+    # --dev 模式下放开的 CORS 来源（Vite dev server 默认 5173）。
+    api_cors_dev_origins: list[str] = ["http://localhost:5173"]
+    # SSE：无消息心跳间隔（秒，注释帧防代理超时）与 Last-Event-ID 重放条数上限。
+    api_sse_heartbeat_s: float = 30.0
+    api_sse_replay_limit: int = 50
+
     model_config = SettingsConfigDict(env_prefix="AUTOANIME_", extra="ignore")
 
 
