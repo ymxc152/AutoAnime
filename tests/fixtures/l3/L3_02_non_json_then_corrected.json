@@ -1,0 +1,25 @@
+{
+  "id": "L3_02_non_json_then_corrected",
+  "llm_response": "Sorry, I cannot answer that in JSON right now.",
+  "correction_response": "{\"title\": \"Sousou no Frieren\", \"season\": 1, \"episode\": 3, \"segment\": \"episode\", \"fansub\": \"LoliHouse\"}",
+  "query": {
+    "name": "[LoliHouse] Sousou no Frieren - 03 [WebRip 1080p HEVC-10bit].mkv",
+    "expected": {
+      "title": "Sousou no Frieren",
+      "season": 1,
+      "episode": 3,
+      "segment": "episode",
+      "fansub": "LoliHouse",
+      "level": "medium",
+      "confidence": 0.6,
+      "missing_fields": [],
+      "evidence": {
+        "title": "llm",
+        "season": "llm",
+        "episode": "llm",
+        "segment": "llm",
+        "fansub": "llm"
+      }
+    }
+  }
+}

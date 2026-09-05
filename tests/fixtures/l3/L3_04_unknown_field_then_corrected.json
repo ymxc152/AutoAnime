@@ -1,0 +1,24 @@
+{
+  "id": "L3_04_unknown_field_then_corrected",
+  "llm_response": "{\"title\": \"Spy x Family\", \"season\": 1, \"episode\": 5, \"segment\": \"episode\", \"fansub\": null, \"confidence\": 0.9}",
+  "correction_response": "{\"title\": \"Spy x Family\", \"season\": 1, \"episode\": 5, \"segment\": \"episode\", \"fansub\": null}",
+  "query": {
+    "name": "Spy.x.Family.S01E05.1080p.Baha.WEB-DL.mkv",
+    "expected": {
+      "title": "Spy x Family",
+      "season": 1,
+      "episode": 5,
+      "segment": "episode",
+      "fansub": null,
+      "level": "medium",
+      "confidence": 0.6,
+      "missing_fields": [],
+      "evidence": {
+        "title": "llm",
+        "season": "llm",
+        "episode": "llm",
+        "segment": "llm"
+      }
+    }
+  }
+}

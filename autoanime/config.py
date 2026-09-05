@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     l2_enabled: bool = True
     log_level: str = "INFO"
     llm_api_key: SecretStr | None = None
+    llm_enabled: bool = False
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_timeout_s: float = 10.0
+    llm_max_retries: int = 2
+    llm_budget: int | None = None
+    reference_enabled: bool = True
+    reference_order: list[str] = ["bangumi", "tmdb"]
 
     model_config = SettingsConfigDict(env_prefix="AUTOANIME_", extra="ignore")
 

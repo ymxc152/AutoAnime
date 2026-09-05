@@ -1,0 +1,9 @@
+{
+  "id": "L3_03_non_json_gives_up",
+  "llm_response": "not json at all",
+  "correction_response": "still not json, sorry",
+  "query": {
+    "name": "Unrecognizable.Release.Name.E01.mkv",
+    "expected": null
+  }
+}
