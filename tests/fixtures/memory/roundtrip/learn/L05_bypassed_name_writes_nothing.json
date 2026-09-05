@@ -1,0 +1,25 @@
+{
+  "id": "L05_bypassed_name_writes_nothing",
+  "raw_name": "Noisy.Release.S01E01.Group.mkv",
+  "source": "manual",
+  "repeat": 1,
+  "bypassed": true,
+  "confirmed": {
+    "title": "Noisy Release",
+    "season": 1,
+    "episode": 1,
+    "segment": "episode",
+    "fansub": "Group",
+    "level": "high",
+    "confidence": 1.0,
+    "missing_fields": [],
+    "evidence": {
+      "title": "name",
+      "season": "name",
+      "episode": "name",
+      "segment": "name",
+      "fansub": "name"
+    }
+  },
+  "expected": []
+}

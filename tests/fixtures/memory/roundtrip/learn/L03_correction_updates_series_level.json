@@ -1,0 +1,90 @@
+{
+  "id": "L03_correction_updates_series_level",
+  "raw_name": "Some.Show.S01E05.Baha.1080p.mkv",
+  "source": "manual",
+  "repeat": 1,
+  "bypassed": false,
+  "confirmed": {
+    "title": "Some Show",
+    "season": 1,
+    "episode": 5,
+    "segment": "episode",
+    "fansub": "WrongFansub",
+    "level": "high",
+    "confidence": 1.0,
+    "missing_fields": [],
+    "evidence": {
+      "title": "name",
+      "season": "name",
+      "episode": "name",
+      "segment": "name",
+      "fansub": "name"
+    }
+  },
+  "corrections": [
+    {
+      "title": "Some Show",
+      "season": 1,
+      "episode": 5,
+      "segment": "episode",
+      "fansub": "RightFansub",
+      "level": "high",
+      "confidence": 1.0,
+      "missing_fields": [],
+      "evidence": {
+        "title": "name",
+        "season": "name",
+        "episode": "name",
+        "segment": "name",
+        "fansub": "name"
+      }
+    }
+  ],
+  "expected": [
+    {
+      "key_level": 1,
+      "title_shape": "some show",
+      "fansub_norm": "rightfansub",
+      "result": {
+        "title": "Some Show",
+        "season": 1,
+        "episode": null,
+        "segment": "episode",
+        "fansub": "RightFansub"
+      },
+      "hit_count": 0,
+      "corrected_count": 1,
+      "status": "pending"
+    },
+    {
+      "key_level": 2,
+      "title_shape": "some show",
+      "fansub_norm": "wrongfansub",
+      "result": {
+        "title": "Some Show",
+        "season": 1,
+        "episode": 5,
+        "segment": "episode",
+        "fansub": "WrongFansub"
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    },
+    {
+      "key_level": 2,
+      "title_shape": "some show",
+      "fansub_norm": "rightfansub",
+      "result": {
+        "title": "Some Show",
+        "season": 1,
+        "episode": 5,
+        "segment": "episode",
+        "fansub": "RightFansub"
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    }
+  ]
+}

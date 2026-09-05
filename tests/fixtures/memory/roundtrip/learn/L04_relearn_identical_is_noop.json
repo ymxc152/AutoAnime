@@ -1,0 +1,56 @@
+{
+  "id": "L04_relearn_identical_is_noop",
+  "raw_name": "Another.Show.E01.Baha.1080p.mkv",
+  "source": "llm_auto",
+  "repeat": 2,
+  "bypassed": false,
+  "confirmed": {
+    "title": "Another Show",
+    "season": null,
+    "episode": 1,
+    "segment": "episode",
+    "fansub": null,
+    "level": "high",
+    "confidence": 1.0,
+    "missing_fields": [],
+    "evidence": {
+      "title": "name",
+      "season": "none",
+      "episode": "name",
+      "segment": "name",
+      "fansub": "none"
+    }
+  },
+  "expected": [
+    {
+      "key_level": 1,
+      "title_shape": "another show",
+      "fansub_norm": null,
+      "result": {
+        "title": "Another Show",
+        "season": null,
+        "episode": null,
+        "segment": "episode",
+        "fansub": null
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    },
+    {
+      "key_level": 2,
+      "title_shape": "another show",
+      "fansub_norm": null,
+      "result": {
+        "title": "Another Show",
+        "season": null,
+        "episode": 1,
+        "segment": "episode",
+        "fansub": null
+      },
+      "hit_count": 0,
+      "corrected_count": 0,
+      "status": "active"
+    }
+  ]
+}
