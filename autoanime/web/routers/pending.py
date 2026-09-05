@@ -12,7 +12,6 @@ from fastapi import APIRouter, HTTPException
 from autoanime.core.enums import MemorySource, PendingStatus, ResolvedBy
 from autoanime.core.events import EventCategory
 from autoanime.core.models import PendingQueue
-from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.store import SqliteStorage
 from autoanime.web.deps import (

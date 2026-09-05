@@ -17,7 +17,6 @@ from autoanime.core.events import EventCategory
 from autoanime.core.models import AuditLog
 from autoanime.web.deps import ApiStoreDep, BusDep, GovernanceDep
 from autoanime.web.learning import ACTION_ROLLBACK, publish
-from autoanime.web.queries import ApiStore
 from autoanime.web.schemas import RollbackOut
 
 router = APIRouter(prefix="/organize", tags=["organize"])
@@ -25,8 +24,10 @@ router = APIRouter(prefix="/organize", tags=["organize"])
 V1_REVERSIBLE_ENTITIES = frozenset({"parse_memory"})
 
 
-def _apply_reverse(entity: str, entity_id: int | None, reverse: dict[str, object]) -> dict[str, object]:
-    """执行 reverse 指令的 v1 子集；返回 applied/skipped 明细。"""
+def _split_reverse(
+    entity: str, entity_id: int | None, reverse: dict[str, object]
+) -> tuple[dict[str, object], dict[str, object]]:
+    """执行 reverse 指令的 v1 子集；返回 (applied, skipped) 明细。"""
     applied: dict[str, object] = {}
     skipped: dict[str, object] = {}
     for key, value in reverse.items():
@@ -34,7 +35,7 @@ def _apply_reverse(entity: str, entity_id: int | None, reverse: dict[str, object
             applied[key] = value
         else:
             skipped[key] = value
-    return {"applied": applied, "skipped": skipped}
+    return applied, skipped
 
 
 @router.post("/{audit_id}/rollback", response_model=RollbackOut)
@@ -54,9 +55,7 @@ async def rollback_organize(
             detail=f"audit row {audit_id} carries no reverse instruction; nothing to roll back",
         )
 
-    detail = _apply_reverse(row.entity, row.entity_id, reverse)
-    applied = dict(detail["applied"])  # type: ignore[arg-type]
-    skipped = dict(detail["skipped"])  # type: ignore[arg-type]
+    applied, skipped = _split_reverse(row.entity, row.entity_id, reverse)
     if "status" in applied and row.entity_id is not None:
         restored = await store.restore_parse_memory_status(
             row.entity_id, str(applied["status"])

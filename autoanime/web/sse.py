@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 from sse_starlette.event import ServerSentEvent
@@ -68,7 +68,7 @@ async def event_stream(
     options: SseOptions,
     last_event_id: int | None = None,
     replay: int | None = None,
-) -> AsyncIterator[ServerSentEvent]:
+) -> AsyncGenerator[ServerSentEvent, None]:
     """SSE 主体生成器；退出路径（断线/服务关闭）统一在 finally 退订。"""
     subscription = bus.subscribe()
     try:
@@ -96,7 +96,7 @@ async def event_stream(
                 event = await asyncio.wait_for(
                     subscription.queue.get(), timeout=options.heartbeat_s
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield ServerSentEvent(comment="heartbeat")
                 continue
             if event is None:

@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 
 import pytest
 
+from autoanime.core.enums import Actor
 from autoanime.core.events import Event, EventCategory, InMemoryEventBus
 from autoanime.core.models import AuditLog
 from autoanime.memory.store import SqliteStorage
 from autoanime.web.queries import ApiStore
 from autoanime.web.sse import SseOptions, event_stream, parse_last_event_id
-from autoanime.core.enums import Actor
 
 
 @pytest.fixture
-async def storage() -> SqliteStorage:
+async def storage() -> AsyncIterator[SqliteStorage]:
     store = SqliteStorage("sqlite+aiosqlite:///:memory:")
     await store.create_all()
     yield store
@@ -71,7 +72,7 @@ async def test_event_stream_replays_after_last_event_id(storage: SqliteStorage) 
     encoded = [frame.encode().decode("utf-8") for frame in replayed]
     assert f"id: {ids[1]}" in encoded[0]
     assert "event: parse" in encoded[0]
-    payload = json.loads(replayed[0].data)
+    payload = json.loads(str(replayed[0].data))
     assert payload["category"] == "parse"
     assert payload["payload"]["operation_id"] == "op2"
     # 之后是静默等待（30s 心跳内不会再有帧）：验证无多余回放后收尾。
@@ -80,7 +81,6 @@ async def test_event_stream_replays_after_last_event_id(storage: SqliteStorage) 
 
 async def test_event_stream_explicit_replay_recent(storage: SqliteStorage) -> None:
     ids = await _seed_audit(storage, [_audit_row("op1"), _audit_row("op2")])
-    api_store = ApiStore(storage)
     stream = event_stream(
         store=ApiStore(storage),
         bus=InMemoryEventBus(),

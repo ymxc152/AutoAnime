@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from autoanime.web.schemas import (
     Page,
@@ -56,7 +56,7 @@ def test_rss_source_out_never_carries_token() -> None:
 def test_rss_source_create_token_is_secret() -> None:
     body = RssSourceCreateIn(url="https://example.invalid/rss", season_id=1)
     assert body.token is None
-    body = RssSourceCreateIn(url="https://example.invalid/rss", season_id=1, token="abc")
+    body = RssSourceCreateIn(url="https://example.invalid/rss", season_id=1, token=SecretStr("abc"))
     assert body.token is not None
     assert body.token.get_secret_value() == "abc"
     assert "abc" not in body.model_dump_json()

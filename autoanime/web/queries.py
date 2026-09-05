@@ -13,7 +13,6 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any
 
 from sqlalchemy import BigInteger, delete, func, select
 
@@ -21,9 +20,9 @@ from autoanime.core.enums import MemoryStatus, PendingStatus, ResolvedBy
 from autoanime.core.models import (
     AuditLog,
     Episode,
-    PendingQueue,
     ParseEvents,
     ParseMemory,
+    PendingQueue,
     RssSource,
     Season,
     Series,

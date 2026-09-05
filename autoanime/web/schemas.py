@@ -8,20 +8,17 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator, model_validator
 
-T = TypeVar("T")
 
-
-class Page(BaseModel, Generic[T]):
-    """统一分页信封：total 为过滤条件下的总行数。"""
+class Page[ItemT](BaseModel):
+    """统一分页信封：total 为过滤条件下的总行数（PEP 695 泛型模型）。"""
 
     total: int
     limit: int
     offset: int
-    items: list[T]
+    items: list[ItemT]
 
 
 # ---------------------------------------------------------------------------

@@ -18,8 +18,10 @@ async def test_publish_fans_out_to_all_subscribers() -> None:
 
     await bus.publish(_event())
 
-    assert (await asyncio.wait_for(sub_a.queue.get(), timeout=1)).message == "hello"
-    assert (await asyncio.wait_for(sub_b.queue.get(), timeout=1)).message == "hello"
+    first = await asyncio.wait_for(sub_a.queue.get(), timeout=1)
+    second = await asyncio.wait_for(sub_b.queue.get(), timeout=1)
+    assert first is not None and first.message == "hello"
+    assert second is not None and second.message == "hello"
 
 
 async def test_unsubscribe_stops_delivery_and_close_is_idempotent() -> None:
@@ -48,7 +50,8 @@ async def test_slow_consumer_drops_oldest_not_blocks_publisher() -> None:
     for index in range(5):
         await bus.publish(_event(f"e{index}"))
 
-    messages = [sub.queue.get_nowait().message for _ in range(2)]
+    frames = [sub.queue.get_nowait() for _ in range(2)]
+    messages = [frame.message for frame in frames if frame is not None]
     # 队列保持有界：最旧的 e0/e1/e2 被丢弃，保留最新的 e3/e4。
     assert messages == ["e3", "e4"]
     assert sub.queue.qsize() == 0

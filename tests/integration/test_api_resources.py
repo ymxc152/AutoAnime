@@ -7,25 +7,22 @@ GET/PUT、metrics 聚合。全部离线。
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from collections.abc import AsyncIterator
+from datetime import date
 from pathlib import Path
-from typing import AsyncIterator
 
 import httpx
 import pytest
 
 from autoanime.config import Settings
-from autoanime.core.enums import Actor, MemoryStatus, PendingStatus
-from autoanime.core.events import Event, EventCategory
+from autoanime.core.enums import Actor, MemoryStatus
 from autoanime.core.models import (
     AuditLog,
-    Episode,
-    ParseMemory,
     ParseEvents,
+    ParseMemory,
     PendingQueue,
 )
 from autoanime.memory.governance import MemoryGovernance
-from autoanime.pipeline.l2 import pattern_hash
 from autoanime.pipeline.l3.reference import ReferenceFacts
 from autoanime.web.app import create_app
 
@@ -38,7 +35,7 @@ async def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     for key in list(os.environ):
         if key.startswith("AUTOANIME_"):
             monkeypatch.delenv(key, raising=False)
-    instance = Settings(_env_file=None)
+    instance = Settings()
     instance.database_url = f"sqlite+aiosqlite:///{(tmp_path / 'api.db').as_posix()}"
     instance.reference_enabled = False  # 单测离线：alias 回填外呼关闭
     instance.api_sse_heartbeat_s = 0.2
@@ -140,7 +137,6 @@ async def test_pending_confirm_learns_parse_memory(client) -> None:
     assert body["learned_entries"] == 2  # parse_memory 两级
     assert body["bypassed"] is False
 
-    governance = MemoryGovernance(app_state.storage)
     memories = await app_state.storage.list(ParseMemory)
     assert len(memories) == 2
     assert all(row.source == "manual" for row in memories)
