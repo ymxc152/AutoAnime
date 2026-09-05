@@ -1,0 +1,17 @@
+{
+  "title": "Tensei Shitara Slime Datta Ken",
+  "season": 4,
+  "episode": 14,
+  "segment": "episode",
+  "fansub": "BeanSub&LoliHouse",
+  "level": "high",
+  "confidence": 1.0,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "title": "LasTame",
+  "season": 2,
+  "episode": 1,
+  "segment": "episode",
+  "fansub": "FreesiaSub&LoliHouse",
+  "level": "high",
+  "confidence": 1.0,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

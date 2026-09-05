@@ -1,0 +1,19 @@
+{
+  "title": "Akane-banashi",
+  "season": null,
+  "episode": 3,
+  "segment": "episode",
+  "fansub": "Nekomoe kissaten&LoliHouse",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [
+    "season"
+  ],
+  "evidence": {
+    "title": "name",
+    "season": "none",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

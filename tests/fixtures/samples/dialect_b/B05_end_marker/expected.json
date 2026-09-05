@@ -1,0 +1,19 @@
+{
+  "title": "Chitose-kun wa Ramune Bin no Naka",
+  "season": null,
+  "episode": 13,
+  "segment": "episode",
+  "fansub": "DMG&SumiSora&LoliHouse",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [
+    "season"
+  ],
+  "evidence": {
+    "title": "name",
+    "season": "none",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}
