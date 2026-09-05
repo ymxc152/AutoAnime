@@ -108,9 +108,10 @@ class QbittorrentGateway:
     async def ping(self) -> bool:
         """登录探测（启动补扫前判断网关是否可用；失败不 crash）。"""
         try:
-            client = self._get_client()
+            client: Any = self._get_client()
         except Exception as exc:
             raise GatewayError(f"qbittorrent client init failed: {type(exc).__name__}") from None
+        # qbittorrent-api 无完整类型标注：局部 Any 化后正常属性访问。
         await self._call("auth_logon", client.auth_logon)
         return True
 
