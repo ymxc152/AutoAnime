@@ -1,0 +1,61 @@
+{
+  "note": "status 淘汰状态机用例：trust<0.5 的 ACTIVE 先降 PENDING；已 PENDING 且无近期命中的淘汰为 DEPRECATED；DEPRECATED 终态；now 与 last_hit_at 均为 naive 本地时间",
+  "no_hit_days_for_deprecation": 30,
+  "now": "2026-09-05T12:00:00",
+  "cases": [
+    {
+      "name": "fresh_learned_stays_active",
+      "status": "active",
+      "hit_count": 0,
+      "corrected_count": 0,
+      "last_hit_at": null,
+      "expected_status": "active",
+      "expected_action": null
+    },
+    {
+      "name": "low_trust_active_demoted_to_pending",
+      "status": "active",
+      "hit_count": 1,
+      "corrected_count": 3,
+      "last_hit_at": "2026-09-01T00:00:00",
+      "expected_status": "pending",
+      "expected_action": "demote_pending"
+    },
+    {
+      "name": "pending_recent_hit_keeps_grace_window",
+      "status": "pending",
+      "hit_count": 2,
+      "corrected_count": 3,
+      "last_hit_at": "2026-09-01T00:00:00",
+      "expected_status": "pending",
+      "expected_action": null
+    },
+    {
+      "name": "pending_never_hit_deprecated",
+      "status": "pending",
+      "hit_count": 0,
+      "corrected_count": 2,
+      "last_hit_at": null,
+      "expected_status": "deprecated",
+      "expected_action": "deprecate"
+    },
+    {
+      "name": "pending_stale_last_hit_deprecated",
+      "status": "pending",
+      "hit_count": 1,
+      "corrected_count": 3,
+      "last_hit_at": "2026-07-01T00:00:00",
+      "expected_status": "deprecated",
+      "expected_action": "deprecate"
+    },
+    {
+      "name": "deprecated_is_terminal",
+      "status": "deprecated",
+      "hit_count": 0,
+      "corrected_count": 9,
+      "last_hit_at": null,
+      "expected_status": "deprecated",
+      "expected_action": null
+    }
+  ]
+}

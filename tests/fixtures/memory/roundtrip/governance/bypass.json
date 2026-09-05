@@ -1,0 +1,10 @@
+{
+  "note": "bypass 治理用例：同一 pattern 的多种拼写必须归一到同一 digest；unrelated_name 必须不被命中",
+  "reason": "parser broken on this release",
+  "pattern_names": [
+    "Some.Show.S01E01.Baha.WEB-DL.mkv",
+    "some show s01e01 baha web-dl",
+    "Some.Show.S01E01.Baha.WEB-DL"
+  ],
+  "unrelated_name": "Another.Show.S02E05.SubsPlease.mkv"
+}
