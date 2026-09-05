@@ -1,0 +1,17 @@
+{
+  "title": "AzurLane Slow Ahead",
+  "season": 2,
+  "episode": 1,
+  "segment": "episode",
+  "fansub": "MWeb",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "folder",
+    "season": "folder",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "folder"
+  }
+}

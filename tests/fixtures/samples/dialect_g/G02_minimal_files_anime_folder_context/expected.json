@@ -1,0 +1,17 @@
+{
+  "title": "BLEACH Sennen Kessen-hen",
+  "season": null,
+  "episode": 41,
+  "segment": "episode",
+  "fansub": "BeanSub&FZSD&LoliHouse",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": ["season"],
+  "evidence": {
+    "title": "folder",
+    "season": "none",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "folder"
+  }
+}
