@@ -53,7 +53,7 @@ async def _add_episode(session, series: Series, season: Season | None = None) ->
     return episode
 
 
-async def test_exactly_thirteen_tables(session) -> None:
+async def test_exactly_fourteen_tables(session) -> None:
     result = await session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
     names = {row[0] for row in result}
     expected = {
@@ -70,8 +70,26 @@ async def test_exactly_thirteen_tables(session) -> None:
         "parse_events",
         "llm_cache",
         "reference_cache",
+        "rss_sources",
     }
     assert names == expected
+
+
+async def test_rss_source_defaults(session) -> None:
+    from autoanime.core.models import RssSource
+
+    season = await _add_season(session, await _add_series(session))
+
+    row = RssSource(url="https://mikanani.me/RSS/MyBangumi?token=secret", season_id=season.id)
+    session.add(row)
+    await session.flush()
+    assert row.enabled is True
+    assert row.token is None
+    assert row.last_polled_at is None
+
+    # season_id 是指向 season 的外键（模型层约束存在）。
+    fk_targets = {fk.column.table.name for fk in RssSource.__table__.foreign_keys}
+    assert fk_targets == {"season"}
 
 
 async def test_movie_episode_can_use_null_season(session) -> None:
