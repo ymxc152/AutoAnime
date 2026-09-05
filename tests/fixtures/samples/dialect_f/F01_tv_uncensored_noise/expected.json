@@ -1,0 +1,17 @@
+{
+  "title": "尼古喵喵",
+  "season": null,
+  "episode": 3,
+  "segment": "episode",
+  "fansub": null,
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": ["season"],
+  "evidence": {
+    "title": "name",
+    "season": "none",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "none"
+  }
+}

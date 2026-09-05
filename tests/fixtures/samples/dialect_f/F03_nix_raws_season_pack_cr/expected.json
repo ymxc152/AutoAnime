@@ -1,0 +1,17 @@
+{
+  "title": "Super no Ura de Yani Suu Futari",
+  "season": 1,
+  "episode": null,
+  "segment": "season_pack",
+  "fansub": "SC_TC",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "none",
+    "segment": "name",
+    "fansub": "name"
+  }
+}
