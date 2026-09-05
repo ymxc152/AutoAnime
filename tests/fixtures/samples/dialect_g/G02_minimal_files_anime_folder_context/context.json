@@ -1,0 +1,22 @@
+{
+  "id": "G02_minimal_files_anime_folder_context",
+  "dialect": "G",
+  "folder": "[BeanSub&FZSD&LoliHouse] BLEACH Sennen Kessen-hen [WebRip 1080p HEVC-10bit AAC ASSx2]",
+  "files": [
+    {
+      "name": "41.mkv"
+    },
+    {
+      "name": "42.mkv"
+    },
+    {
+      "name": "43.mkv"
+    }
+  ],
+  "tags": [
+    "minimal_filename",
+    "folder_context",
+    "subtitle_group"
+  ],
+  "notes": "方言 G：极简文件名 + 字幕组文件夹上下文，季号藏在篇名。"
+}

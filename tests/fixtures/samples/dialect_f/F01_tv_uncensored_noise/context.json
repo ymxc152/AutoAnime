@@ -1,0 +1,17 @@
+{
+  "id": "F01_tv_uncensored_noise",
+  "dialect": "F",
+  "folder": "[TV版&无修版] 尼古喵喵 - EP03 [简／繁] (1080p H.264 AAC SRTx2)",
+  "files": [
+    {
+      "name": "尼古喵喵.EP03.简繁.1080p.H.264.AAC.SRTx2.mkv"
+    }
+  ],
+  "tags": [
+    "tv_version_noise",
+    "uncensored_noise",
+    "ep_format",
+    "subtitle_language_noise"
+  ],
+  "notes": "方言 F：TV版/无修版等版本噪声；目录级真实样本，文件名为按发布包派生的代表性文件名。"
+}

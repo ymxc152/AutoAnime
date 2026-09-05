@@ -1,0 +1,22 @@
+{
+  "id": "G01_minimal_files_with_folder_context",
+  "dialect": "G",
+  "folder": "Anime.AzurLane.Slow.Ahead.S02.1080p.Baha.WEB-DL.AAC2.0.H.264-MWeb",
+  "files": [
+    {
+      "name": "01.mkv"
+    },
+    {
+      "name": "02.mkv"
+    },
+    {
+      "name": "03.mkv"
+    }
+  ],
+  "tags": [
+    "minimal_filename",
+    "folder_context",
+    "season_pack"
+  ],
+  "notes": "方言 G：极简文件名，剧名/季号必须依赖文件夹上下文。"
+}

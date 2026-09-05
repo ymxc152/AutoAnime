@@ -1,0 +1,17 @@
+{
+  "id": "D02_skymoon_chinese_title_season_bracket_episode",
+  "dialect": "D",
+  "folder": null,
+  "files": [
+    {
+      "name": "[Skymoon] 魔法光源股份有限公司 第二季 [06].mp4"
+    }
+  ],
+  "tags": [
+    "chinese_subtitle_group",
+    "chinese_title",
+    "season_number",
+    "bracket_episode"
+  ],
+  "notes": "方言 D：季号藏在中文标题内，集数在方括号段。"
+}

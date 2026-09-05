@@ -1,0 +1,22 @@
+{
+  "id": "G03_minimal_files_season_folder_context",
+  "dialect": "G",
+  "folder": "[SweetSub] Honzuki no Gekokujou S04",
+  "files": [
+    {
+      "name": "01.mp4"
+    },
+    {
+      "name": "02.mp4"
+    },
+    {
+      "name": "03.mp4"
+    }
+  ],
+  "tags": [
+    "minimal_filename",
+    "folder_context",
+    "season_number"
+  ],
+  "notes": "方言 G：极简文件名 + 明确 S04 文件夹上下文。"
+}

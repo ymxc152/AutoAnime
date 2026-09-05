@@ -1,0 +1,18 @@
+{
+  "id": "D03_folder_chinese_season_with_s02_romanized_title",
+  "dialect": "D",
+  "folder": "[骸骨骑士大人异世界冒险中 第二季].Gaikotsu.Kishi-sama.Tadaima.Isekai.e.Odekake-chuu.2026.S02.Complete.1080p.CR.WEB-DL.H264.AAC-UBWEB",
+  "files": [
+    {
+      "name": "Gaikotsu.Kishi-sama.Tadaima.Isekai.e.Odekake-chuu.2026.S02.Complete.1080p.CR.WEB-DL.H264.AAC-UBWEB.mkv"
+    }
+  ],
+  "tags": [
+    "folder_context",
+    "chinese_title",
+    "season_number",
+    "romanized_title",
+    "season_pack"
+  ],
+  "notes": "方言 D：文件夹级真实样本；文件名为按发布包派生的代表性文件名，用于测试文件夹名补齐上下文。"
+}
