@@ -196,6 +196,27 @@ class AuditLog(Base):
     actor: Mapped[Actor] = mapped_column(_enum(Actor), default=Actor.AUTO)
 
 
+class RssSource(Base):
+    """``rss_sources`` 表（审核 B3，E2 增量）：RSS 订阅源，挂 season。
+
+    Mikan 订阅粒度是季度 subject，多季番剧 = 多条 RSS 源，故外键指向
+    ``season.id`` 而非 series。``token`` 是 RSS 私有令牌（如 Mikan 的
+    ``?token=``）：DB 侧仅存字符串（单用户本地库），API schema 层以
+    ``SecretStr`` 承载且任何读取端点都不回显（只回 ``has_token``）。
+    ``last_polled_at`` 由调度器（E4）写，本表建表即可用。
+    """
+
+    __tablename__ = "rss_sources"
+    __table_args__ = (Index("ix_rss_sources_season_id", "season_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String)
+    token: Mapped[str | None] = mapped_column(String, nullable=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("season.id"), nullable=False)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ParseEvents(Base):
     __tablename__ = "parse_events"
 
