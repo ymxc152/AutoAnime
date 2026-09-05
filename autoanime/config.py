@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # 缓存包装层的每 provider token bucket 速率（QPS）；None = 不启用包装层
     # 频控（P1 adapter 内部 HTTP 层已有默认 1 QPS 节流兜底）。
     reference_qps: float | None = None
+    # L3 机会主义合批阈值（ARCHITECTURE 9.3b，E1）：库存队列自然堆积
+    # ≥ batch_min_size 个「同目录+同字幕组」文件才打包，单批上限
+    # batch_max_size；订阅场景单文件快路径永不凑批（入口语义，非配置）。
+    batch_min_size: int = 5
+    batch_max_size: int = 20
 
     # ------------------------------------------------------------------
     # API / Web 服务（E2 M3 后端增量；独立 section，不动上方既有字段）

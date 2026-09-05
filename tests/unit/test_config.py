@@ -32,6 +32,28 @@ def test_l3_fields_defaults() -> None:
     assert settings.reference_qps is None
 
 
+def test_batch_threshold_defaults() -> None:
+    # E1 合批阈值契约（ARCHITECTURE 9.3b）：队列自然堆积 ≥5 才打包，上限 20。
+    settings = load_settings(Path("does-not-exist.toml"))
+
+    assert settings.batch_min_size == 5
+    assert settings.batch_max_size == 20
+
+
+def test_batch_threshold_reads_toml(tmp_path: Path) -> None:
+    path = tmp_path / "autoanime.toml"
+    path.write_text(
+        "batch_min_size = 8\n"
+        "batch_max_size = 32\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(path)
+
+    assert settings.batch_min_size == 8
+    assert settings.batch_max_size == 32
+
+
 def test_l3_fields_read_toml(tmp_path: Path) -> None:
     path = tmp_path / "autoanime.toml"
     path.write_text(

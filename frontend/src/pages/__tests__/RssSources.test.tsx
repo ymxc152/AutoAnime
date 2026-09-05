@@ -1,5 +1,6 @@
 /*
- * RSSSources 冒烟 + 交互:表格、启停开关、移除确认。
+ * RSSSources 冒烟 + 交互(对齐后端 RssSourceCreateIn:season_id 必填):
+ * 表格、启停开关、移除确认、创建校验。
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -51,5 +52,26 @@ describe('RssSourcesPage', () => {
     await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
     await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('请填写源地址')).toBeInTheDocument()
+  })
+
+  it('缺关联季 ID 提交显示校验错误(对齐后端 season_id 必填)', async () => {
+    const user = userEvent.setup()
+    renderPage(<RssSourcesPage />)
+    await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
+    await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(await screen.findByText('请填写关联季 ID')).toBeInTheDocument()
+  })
+
+  it('填写地址与关联季后创建成功', async () => {
+    const user = userEvent.setup()
+    renderPage(<RssSourcesPage />)
+    await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
+    await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
+    await user.type(screen.getByLabelText('关联季'), '2')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(
+      await screen.findByText('https://mikanani.me/RSS/Bangumi?subgroupid=583'),
+    ).toBeInTheDocument()
   })
 })

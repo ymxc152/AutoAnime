@@ -1,8 +1,9 @@
 /*
- * Pending —— 待确认队列(人工介入率主战场)。
- * 列表 → 点开抽屉:逐字段 diff 视图,每个字段标注证据来源(name/folder/memory/llm)
- * 与置信度;纠正表单提交 POST /api/pending/{id}/correct(触发学习三件套);
- * 另有按当前结果确认(confirm)与拒绝(reject)。
+ * Pending —— 待确认队列(人工介入主战场)。对齐后端 PendingOut:
+ * 逐字段草稿来自 context(title/season/episode/segment/fansub);
+ * 后端不提供证据来源/置信度标注,抽屉不做来源徽标(优雅降级)。
+ * 纠正提交 POST /api/pending/{id}/correct:title 必填——未纠正也始终
+ * 带上当前 title(触发学习三件套);confirm/reject 另有两键。
  */
 import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
@@ -19,52 +20,46 @@ import {
   Field,
   Input,
   PageTitle,
-  StatusMark,
+  Select,
   type Column,
 } from '../components'
 import { formatDateTime } from '../lib/views'
-import type { EvidenceSource, PendingItemDto } from '../api/types'
+import type { PendingItemDto } from '../api/types'
 
-const evidenceTone: Record<EvidenceSource, 'info' | 'neutral' | 'success' | 'warning'> = {
-  name: 'info',
-  folder: 'neutral',
-  memory: 'success',
-  llm: 'warning',
-}
-
-const evidenceLabels: Record<EvidenceSource, string> = {
-  name: strings.pending.evidence.name,
-  folder: strings.pending.evidence.folder,
-  memory: strings.pending.evidence.memory,
-  llm: strings.pending.evidence.llm,
+/** context 草稿值 → 展示文本(缺失显示 —) */
+function contextText(item: PendingItemDto, key: string): string {
+  const value = item.context[key]
+  if (value === undefined || value === null || value === '') return '—'
+  return String(value)
 }
 
 interface FieldView {
   key: string
   label: string
   value: string
-  source: EvidenceSource
-  confidence: string
 }
 
 function fieldViews(item: PendingItemDto): FieldView[] {
   return [
-    { key: 'title', label: strings.pending.fieldTitle, value: item.parsed.title.value ?? '—', source: item.parsed.title.source, confidence: item.parsed.title.confidence },
-    { key: 'season', label: strings.pending.fieldSeason, value: String(item.parsed.season.value ?? '—'), source: item.parsed.season.source, confidence: item.parsed.season.confidence },
-    { key: 'episode', label: strings.pending.fieldEpisode, value: String(item.parsed.episode.value ?? '—'), source: item.parsed.episode.source, confidence: item.parsed.episode.confidence },
-    { key: 'fansub', label: strings.pending.fieldFansub, value: item.parsed.fansub.value ?? '—', source: item.parsed.fansub.source, confidence: item.parsed.fansub.confidence },
-    { key: 'resolution', label: strings.pending.fieldResolution, value: item.parsed.resolution.value ?? '—', source: item.parsed.resolution.source, confidence: item.parsed.resolution.confidence },
+    { key: 'title', label: strings.pending.fieldTitle, value: contextText(item, 'title') },
+    { key: 'season', label: strings.pending.fieldSeason, value: contextText(item, 'season') },
+    { key: 'episode', label: strings.pending.fieldEpisode, value: contextText(item, 'episode') },
+    { key: 'segment', label: strings.pending.fieldSegment, value: contextText(item, 'segment') },
+    { key: 'fansub', label: strings.pending.fieldFansub, value: contextText(item, 'fansub') },
   ]
 }
 
-/** 纠正表单 + diff 视图抽屉 */
+const SEGMENT_OPTIONS = ['episode', 'season_pack', 'movie'] as const
+
+/** 纠正表单 + 草稿字段视图抽屉 */
 function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone: () => void; onClose: () => void }) {
+  // 表单初值 = 行内 context 草稿;title 始终提交(后端 PendingCorrectIn 必填)
   const [form, setForm] = useState({
-    title: item.parsed.title.value ?? '',
-    season: item.parsed.season.value?.toString() ?? '',
-    episode: item.parsed.episode.value?.toString() ?? '',
-    fansub: item.parsed.fansub.value ?? '',
-    resolution: item.parsed.resolution.value ?? '',
+    title: contextText(item, 'title') === '—' ? '' : contextText(item, 'title'),
+    season: contextText(item, 'season') === '—' ? '' : contextText(item, 'season'),
+    episode: contextText(item, 'episode') === '—' ? '' : contextText(item, 'episode'),
+    segment: contextText(item, 'segment'),
+    fansub: contextText(item, 'fansub') === '—' ? '' : contextText(item, 'fansub'),
   })
   const [submitting, setSubmitting] = useState<'correct' | 'confirm' | 'reject' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -76,12 +71,13 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
     setError(null)
     try {
       if (action === 'correct') {
+        // 契约:title 必填(未纠正也带原值);数字字段空串=不覆盖(回退草稿)
         await api.pending.correct(item.id, {
-          title: form.title === '' ? undefined : form.title,
-          season: form.season === '' ? undefined : Number(form.season),
-          episode: form.episode === '' ? undefined : Number(form.episode),
-          fansub: form.fansub === '' ? undefined : form.fansub,
-          resolution: form.resolution === '' ? undefined : form.resolution,
+          title: form.title,
+          ...(form.season !== '' ? { season: Number(form.season) } : {}),
+          ...(form.episode !== '' ? { episode: Number(form.episode) } : {}),
+          ...(form.segment !== '' ? { segment: form.segment } : {}),
+          ...(form.fansub !== '' ? { fansub: form.fansub } : {}),
         })
       } else if (action === 'confirm') {
         await api.pending.confirm(item.id)
@@ -109,17 +105,8 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
                 key={view.key}
                 className="flex items-center justify-between gap-2 border-b border-line py-2 last:border-b-0"
               >
-                <span className="flex items-center gap-2">
-                  <StatusMark tone={evidenceTone[view.source]} size={7} />
-                  <span className="text-sm text-ink">{view.label}</span>
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="data-text text-sm text-ink">{view.value}</span>
-                  <Badge tone={evidenceTone[view.source]} mark>
-                    {evidenceLabels[view.source]}
-                  </Badge>
-                  <span className="text-xs text-ink-secondary data-text">{view.confidence}</span>
-                </span>
+                <span className="text-sm text-ink">{view.label}</span>
+                <span className="data-text text-sm text-ink">{view.value}</span>
               </li>
             ))}
           </ul>
@@ -159,18 +146,24 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
                 onChange={(e) => setForm({ ...form, episode: e.target.value.replace(/[^\d]/g, '') })}
               />
             </Field>
+            <Field label={strings.pending.fieldSegment} htmlFor="correct-segment">
+              <Select
+                id="correct-segment"
+                value={form.segment}
+                onChange={(e) => setForm({ ...form, segment: e.target.value })}
+              >
+                {SEGMENT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {strings.pending.segment[option]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <Field label={strings.pending.fieldFansub} htmlFor="correct-fansub">
               <Input
                 id="correct-fansub"
                 value={form.fansub}
                 onChange={(e) => setForm({ ...form, fansub: e.target.value })}
-              />
-            </Field>
-            <Field label={strings.pending.fieldResolution} htmlFor="correct-resolution">
-              <Input
-                id="correct-resolution"
-                value={form.resolution}
-                onChange={(e) => setForm({ ...form, resolution: e.target.value })}
               />
             </Field>
             <div className="col-span-2 mt-1 flex flex-wrap gap-2">

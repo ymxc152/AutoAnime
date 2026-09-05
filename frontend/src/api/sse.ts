@@ -37,7 +37,11 @@ export const nativeEventSourceFactory: EventSourceFactory = (url) => {
   }
 }
 
-/** /api/events 地址组装:token + last_event_id 查询参数 */
+/**
+ * /api/events 地址组装:token + last_event_id 查询参数。
+ * 后端 header Last-Event-ID 与 query last_event_id 都支持,这里统一走
+ * query(EventSource 无法带自定义头;断线重连由本模块显式重建连接)。
+ */
 export function buildEventsUrl(lastEventId?: string | null): string {
   const params = new URLSearchParams()
   const token =

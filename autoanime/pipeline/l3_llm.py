@@ -29,6 +29,7 @@ prompt/解析/预算/缓存键纯函数直接复用 ``pipeline.l3``（T1），�
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 from autoanime.config import Settings
 from autoanime.core.interfaces import (
@@ -44,10 +45,12 @@ from autoanime.pipeline.l3 import (
     LlmCache,
     LlmResponseError,
     budget_exceeded,
+    build_batch_prompt,
     build_correction_prompt,
     build_prompt,
     l3_parse_result,
     llm_cache_key,
+    parse_batch_response,
     parse_llm_response,
     schema_correction_allowed,
     transport_retry_allowed,
@@ -198,6 +201,130 @@ class LlmFallbackRecognizer:
                 operation_id,
             )
             return l3_parse_result(draft)
+
+    async def enhance_batch(
+        self,
+        raws: Sequence[RawName],
+        results: Sequence[ParseResult | None],
+        context: ParseContext | None,
+        transport: LlmTransport,
+        cache_store: LlmCacheStore,
+        *,
+        fansub: str | None = None,
+        operation_id: str | None = None,
+    ) -> list[ParseResult | None]:
+        """批量 L3 主流程（E1，9.3b 机会主义合批的 L3 侧契约）。
+
+        与单文件 ``enhance`` 的差异：
+
+        - 批内**一次**真实 transport 调用（数组输出 prompt）；``calls_used``
+          计 1 次真实调用，transport 网络重试不计（同一口径）；
+        - 批量响应逐项校验（``parse_batch_response``）：合法项直接采纳；
+          失败项**单独**回落单文件 ``enhance``（各自走 llm_cache 读写、
+          transport 重试与 schema 纠正语义）——失败不连坐；
+        - 批量调用本身不读不写 llm_cache（批量 prompt 无稳定单 pattern
+          键；单文件重试路径的缓存语义原样保留）；
+        - 整批响应非法等价于全批失败：全部项走单文件路径；
+        - 不可用（disabled / model 缺失）：全 ``None``、零调用（R7 语义）；
+          返回列表与 ``raws`` 逐位对齐。
+
+        上下文注入 v1 子集：已知字幕组（批的分组键）+ ``ParseContext``；
+        top-5 别名与集数约束需要 series 级映射，进 backlog。
+        """
+        count = len(raws)
+        if not self._enabled or self._model is None or count == 0:
+            return [None] * count
+
+        prompt = build_batch_prompt(
+            [raw.name for raw in raws], fansub=fansub, context=context
+        )
+        counted = False
+        attempts = 0
+        while True:
+            try:
+                response = await transport.complete(
+                    prompt, model=self._model, timeout_s=self._timeout_s
+                )
+            except Exception as exc:  # noqa: BLE001 - transport 失败一律按网络类降级
+                attempts += 1
+                if transport_retry_allowed(attempts, max_retries=self._max_retries):
+                    logger.debug(
+                        "llm batch transport failed (%s), retrying, op=%s",
+                        type(exc).__name__,
+                        operation_id,
+                    )
+                    continue
+                logger.warning(
+                    "llm batch transport unavailable after %d attempts (%s), op=%s",
+                    attempts,
+                    type(exc).__name__,
+                    operation_id,
+                )
+                # 批量调用不可用：整批回落单文件路径（每项有自己的重试语义）。
+                return await self._single_file_fallback(
+                    raws, results, context, transport, cache_store, operation_id
+                )
+            if not counted:
+                self._calls_used += 1
+                counted = True
+                self._audit_budget(operation_id)
+            drafts = parse_batch_response(response, count)
+            if all(draft is None for draft in drafts):
+                # 整批响应非法（不纠正——批量路径 v1 不做 schema 纠正重试）：
+                # 全批走单文件路径兜底。
+                return await self._single_file_fallback(
+                    raws, results, context, transport, cache_store, operation_id
+                )
+            out: list[ParseResult | None] = []
+            for position, draft in enumerate(drafts):
+                if draft is None:
+                    # 失败项单独重试，不连坐。
+                    out.append(
+                        await self._retry_single(
+                            raws[position], results[position], context,
+                            transport, cache_store, operation_id,
+                        )
+                    )
+                    continue
+                out.append(l3_parse_result(draft))
+            return out
+
+    async def _retry_single(
+        self,
+        raw: RawName,
+        result: ParseResult | None,
+        context: ParseContext | None,
+        transport: LlmTransport,
+        cache_store: LlmCacheStore,
+        operation_id: str | None,
+    ) -> ParseResult | None:
+        """批量失败项的单文件重试（完整单文件语义：缓存/重试/纠正）。"""
+        try:
+            return await self.enhance(
+                raw, result, context, transport, cache_store, operation_id=operation_id
+            )
+        except Exception:  # noqa: BLE001 - 单项重试失败绝不影响批内其他项
+            logger.warning(
+                "llm batch single retry failed for %r, op=%s", raw.name, operation_id
+            )
+            return None
+
+    async def _single_file_fallback(
+        self,
+        raws: Sequence[RawName],
+        results: Sequence[ParseResult | None],
+        context: ParseContext | None,
+        transport: LlmTransport,
+        cache_store: LlmCacheStore,
+        operation_id: str | None,
+    ) -> list[ParseResult | None]:
+        """整批回落：逐项走单文件路径；单项失败不阻断其余项。"""
+        return [
+            await self._retry_single(
+                raw, result, context, transport, cache_store, operation_id
+            )
+            for raw, result in zip(raws, results, strict=True)
+        ]
 
     async def _safe_get(
         self, cache_store: LlmCacheStore, pattern_hash: str, operation_id: str | None

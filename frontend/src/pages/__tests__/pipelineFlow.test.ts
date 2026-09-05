@@ -1,5 +1,5 @@
 /*
- * Pipeline 流量模型单测(mock SSE 事件驱动):路径映射、token 推进、计数累加、边点亮。
+ * Pipeline 流量模型单测:路径映射(含优雅降级)、基线派生、token 推进、计数累加、边点亮。
  */
 import {
   activeEdgesOf,
@@ -7,9 +7,10 @@ import {
   initialFlowState,
   passingNodes,
   pathForEvent,
+  pipelineBaseline,
   type FlowState,
 } from '../pipelineFlow'
-import type { SseEvent } from '../../api/types'
+import type { Metrics, SseEvent } from '../../api/types'
 
 function parseEvent(payload: Record<string, unknown>): SseEvent {
   return { id: '1', category: 'parse', message: '解析', payload, ts: '2026-09-06T10:00:00Z' }
@@ -60,11 +61,63 @@ describe('pathForEvent', () => {
     ])
   })
 
+  it('优雅降级:parse 事件缺 level/outcome/confidence 时不画路径(只进最近列表)', () => {
+    // 后端 web 层 parse 事件 payload 只有 pending_id/title/audit_id
+    expect(pathForEvent(parseEvent({ pending_id: 7, title: '葬送的芙莉莲', audit_id: 42 }))).toBeNull()
+    expect(pathForEvent(parseEvent({}))).toBeNull()
+  })
+
   it('download/organize/system 事件路径', () => {
     expect(pathForEvent(eventWith('download'))).toEqual(['input', 'l1'])
     expect(pathForEvent(eventWith('organize'))).toEqual(['arbiter', 'organize'])
     expect(pathForEvent(eventWith('system'))).toBeNull()
     expect(pathForEvent(eventWith('error'))).toBeNull()
+  })
+})
+
+describe('pipelineBaseline(由 /api/metrics.by_level 派生)', () => {
+  it('按 level 1/2/3 取 total,总数为三级之和', () => {
+    const metrics: Metrics = {
+      intervention_rate: null,
+      audit_total: 0,
+      audit_manual: 0,
+      by_level: [
+        { level: 1, total: 291, llm_called: 0, outcomes: {} },
+        { level: 2, total: 96, llm_called: 0, outcomes: {} },
+        { level: 3, total: 44, llm_called: 31, outcomes: {} },
+      ],
+      llm_call_curve_weekly: [],
+      pending_trend_daily: [],
+      pending_open: 0,
+      episode_states: {},
+      memory_sources: [],
+    }
+    expect(pipelineBaseline(metrics)).toEqual({
+      total: 431,
+      l1_high: 291,
+      l2_hit: 96,
+      l3_entered: 44,
+    })
+  })
+
+  it('缺失级别按 0 计', () => {
+    const metrics: Metrics = {
+      intervention_rate: null,
+      audit_total: 0,
+      audit_manual: 0,
+      by_level: [{ level: 1, total: 10, llm_called: 0, outcomes: {} }],
+      llm_call_curve_weekly: [],
+      pending_trend_daily: [],
+      pending_open: 0,
+      episode_states: {},
+      memory_sources: [],
+    }
+    expect(pipelineBaseline(metrics)).toEqual({
+      total: 10,
+      l1_high: 10,
+      l2_hit: 0,
+      l3_entered: 0,
+    })
   })
 })
 
@@ -91,10 +144,10 @@ describe('flowReducer', () => {
     },
   }
 
-  it('seed 用 metrics.levels 建立基线', () => {
+  it('seed 用 metrics 派生基线建立计数', () => {
     const state = flowReducer(initialFlowState, {
       type: 'seed',
-      levels: { total: 431, l1_high: 291, l2_hit: 96, l3_entered: 44, llm_calls: 31 },
+      baseline: { total: 431, l1_high: 291, l2_hit: 96, l3_entered: 44 },
     })
     expect(state.counters.l1).toBe(431)
     expect(state.counters.l2).toBe(431 - 291)
@@ -107,6 +160,15 @@ describe('flowReducer', () => {
   it('SSE parse 事件生成 token 并记入最近事件', () => {
     const state = flowReducer(base, { type: 'event', event: parseEvent({ level: 1 }) })
     expect(state.tokens).toHaveLength(1)
+    expect(state.recent[0]?.message).toBe('解析')
+  })
+
+  it('降级 parse 事件只进最近列表,不生成 token', () => {
+    const state = flowReducer(base, {
+      type: 'event',
+      event: parseEvent({ pending_id: 7, title: '药屋少女的呢喃' }),
+    })
+    expect(state.tokens).toHaveLength(0)
     expect(state.recent[0]?.message).toBe('解析')
   })
 

@@ -2,7 +2,7 @@
  * Pipeline 流量模型(纯 reducer,与 UI 解耦,可单测):
  * SSE 事件 → 路径 → token 沿节点推进 → 命中计数累加。
  */
-import type { LevelHits, SseEvent } from '../api/types'
+import type { Metrics, SseEvent } from '../api/types'
 import { strings } from '../strings'
 
 export type PipelineNodeId = 'input' | 'l1' | 'l2' | 'l3' | 'arbiter' | 'organize' | 'pending'
@@ -28,6 +28,14 @@ export interface PipelineNodeData extends Record<string, unknown> {
   passed: number
   entered: number
   passing: number
+}
+
+/** 管线基线:由 /api/metrics.by_level 派生(对齐后端 MetricsOut) */
+export interface FlowBaseline {
+  total: number
+  l1_high: number
+  l2_hit: number
+  l3_entered: number
 }
 
 export interface FlowState {
@@ -57,15 +65,36 @@ export const initialFlowState: FlowState = {
   tokenSeq: 0,
 }
 
-/** 事件 payload → 管线路径(契约假设:parse 事件带 level/outcome) */
+/** /api/metrics → 管线基线:level N 的 total = 在该级得出结论的解析数 */
+export function pipelineBaseline(metrics: Metrics): FlowBaseline {
+  const byLevel = new Map(metrics.by_level.map((item) => [item.level, item]))
+  const l1 = byLevel.get(1)?.total ?? 0
+  const l2 = byLevel.get(2)?.total ?? 0
+  const l3 = byLevel.get(3)?.total ?? 0
+  return { total: l1 + l2 + l3, l1_high: l1, l2_hit: l2, l3_entered: l3 }
+}
+
+/**
+ * 事件 payload → 管线路径。
+ * 后端 web/sse 透传的 parse 事件不保证携带 level/outcome/confidence
+ * (web 层自产的 pending 事件 payload 只有 pending_id/title/audit_id,
+ * 回放通道是审计行信封):信息缺失时无法判定路径 → 返回 null,事件仍进
+ * 最近事件列表,但不做 token 动画——不编造路径。
+ */
 export function pathForEvent(event: SseEvent): PipelineNodeId[] | null {
   if (event.category === 'parse') {
-    const level = Number(event.payload.level ?? 0)
-    const outcome = String(event.payload.outcome ?? '')
+    const hasLevel = event.payload.level !== undefined && event.payload.level !== null
+    const outcome = typeof event.payload.outcome === 'string' ? event.payload.outcome : ''
+    const confidence = event.payload.confidence
+    // 优雅降级:三类判定字段全缺 → 不走动画
+    if (!hasLevel && outcome === '' && confidence === undefined) {
+      return null
+    }
     // 低置信判定必须先于 level 判定:低置信事件可能带任意 level
-    if (outcome === 'low_confidence' || event.payload.confidence === 'low') {
+    if (outcome === 'low_confidence' || confidence === 'low') {
       return ['input', 'l1', 'l2', 'arbiter', 'pending']
     }
+    const level = Number(event.payload.level ?? 0)
     if (level === 1 || outcome === 'l1_high') {
       return ['input', 'l1', 'arbiter', 'organize']
     }
@@ -84,24 +113,22 @@ export function pathForEvent(event: SseEvent): PipelineNodeId[] | null {
 }
 
 export type FlowAction =
-  | { type: 'seed'; levels: LevelHits }
+  | { type: 'seed'; baseline: FlowBaseline }
   | { type: 'event'; event: SseEvent }
   | { type: 'tick' }
   | { type: 'clear' }
 
-function baseCounts(levels: LevelHits): {
+function baseCounts(baseline: FlowBaseline): {
   counters: Record<PipelineNodeId, number>
   entered: Record<PipelineNodeId, number>
 } {
-  const l2Enter = levels.total - levels.l1_high
-  const arbiterEnter = levels.l1_high + levels.l2_hit + levels.l3_entered
   const counters: Record<PipelineNodeId, number> = {
-    input: levels.total,
-    l1: levels.total,
-    l2: l2Enter,
-    l3: levels.l3_entered,
-    arbiter: arbiterEnter,
-    organize: levels.l1_high + levels.l2_hit,
+    input: baseline.total,
+    l1: baseline.total,
+    l2: baseline.total - baseline.l1_high,
+    l3: baseline.l3_entered,
+    arbiter: baseline.l1_high + baseline.l2_hit + baseline.l3_entered,
+    organize: baseline.l1_high + baseline.l2_hit,
     pending: 0,
   }
   return { counters, entered: { ...counters } }
@@ -110,7 +137,7 @@ function baseCounts(levels: LevelHits): {
 export function flowReducer(state: FlowState, action: FlowAction): FlowState {
   switch (action.type) {
     case 'seed': {
-      return { ...state, ...baseCounts(action.levels) }
+      return { ...state, ...baseCounts(action.baseline) }
     }
     case 'event': {
       const path = pathForEvent(action.event)

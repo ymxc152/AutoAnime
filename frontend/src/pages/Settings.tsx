@@ -1,78 +1,37 @@
 /*
- * Settings —— 下载器 / LLM 开关 / 自主权限三档 / 质量阈值表单,PUT /api/settings。
- * 编辑态 = 远端数据 + 局部 patch(无 effect 派生,脏态 = patch 非空);
- * 保存成功后清空 patch。
+ * Settings —— 运行时开关 + 只读环境信息(对齐后端 SettingsOut/SettingsUpdateIn)。
+ * 可覆写白名单(进程内,重启回 env/toml):dry_run/l2_enabled/llm_enabled/
+ * llm_model/reference_enabled/reference_order;密钥只回 has_* 布尔。
+ * quality/naming 段 v1 暂缺(无持久化 settings 表,依赖 E4),只给说明不造假数据。
  */
 import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings } from '../strings'
 import {
+  Badge,
   Button,
   Card,
   ErrorState,
   Input,
   PageTitle,
   SettingRow,
-  Select,
   Skeleton,
   Switch,
 } from '../components'
-import type { AutonomyLevel, DownloadClient, SettingsDto } from '../api/types'
-
-/** 自主权限三档选择(Soft Ink:选中态用 primary-light,拒绝浮动拇指分段控件) */
-function AutonomyPicker({
-  value,
-  onChange,
-}: {
-  value: AutonomyLevel
-  onChange: (v: AutonomyLevel) => void
-}) {
-  const options: Array<{ value: AutonomyLevel; label: string }> = [
-    { value: 'low', label: strings.settings.autonomy.low },
-    { value: 'medium', label: strings.settings.autonomy.medium },
-    { value: 'high', label: strings.settings.autonomy.high },
-  ]
-  return (
-    <div role="radiogroup" aria-label={strings.settings.autonomySection} className="flex flex-col gap-1">
-      {options.map((option) => {
-        const active = option.value === value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(option.value)}
-            className={`rounded-sm border px-2.5 py-1.5 text-left text-sm transition-colors ${
-              active
-                ? 'border-primary bg-primary-light font-medium text-ink'
-                : 'border-line text-ink-secondary hover:bg-surface-2 hover:text-ink'
-            }`}
-          >
-            {option.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function parseNumericInput(value: string): number {
-  return Number(value.replace(/[^\d]/g, '') || 0)
-}
+import type { SettingsDto, SettingsUpdateBody } from '../api/types'
 
 export function SettingsPage() {
   const fetcher = useCallback(() => api.settings.get(), [])
   const { data, loading, error, reload } = useApi(fetcher)
-  const [edit, setEdit] = useState<Partial<SettingsDto>>({})
+  const [edit, setEdit] = useState<SettingsUpdateBody>({})
   // 保存成功后立即以服务端返回值为展示基线(useApi 的 data 要等 reload 才更新)
   const [savedSnapshot, setSavedSnapshot] = useState<SettingsDto | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const patch = (partial: Partial<SettingsDto>): void => {
+  const patch = (partial: SettingsUpdateBody): void => {
     setEdit((prev) => ({ ...prev, ...partial }))
   }
 
@@ -99,16 +58,18 @@ export function SettingsPage() {
 
   const base: SettingsDto = savedSnapshot ?? data
   const dirty = Object.keys(edit).length > 0
-  const downloader = edit.downloader ?? base.downloader
-  const llm = edit.llm ?? base.llm
-  const quality = edit.quality ?? base.quality
-  const autonomy = edit.autonomy ?? base.autonomy
+  const dryRun = edit.dry_run ?? base.dry_run
+  const l2Enabled = edit.l2_enabled ?? base.l2_enabled
+  const llmEnabled = edit.llm_enabled ?? base.llm_enabled
+  const llmModel = edit.llm_model ?? base.llm_model ?? ''
+  const referenceEnabled = edit.reference_enabled ?? base.reference_enabled
+  const referenceOrder = (edit.reference_order ?? base.reference_order).join(',')
 
   const save = async (): Promise<void> => {
     setSaving(true)
     setSaveError(null)
     try {
-      const savedSettings = await api.settings.update({ ...base, ...edit })
+      const savedSettings = await api.settings.update(edit)
       setSavedSnapshot(savedSettings)
       setEdit({})
       setSaved(true)
@@ -124,6 +85,7 @@ export function SettingsPage() {
     <>
       <PageTitle
         title={strings.settings.title}
+        description={strings.settings.runtimeHint}
         actions={
           <>
             {dirty && <span className="text-xs text-ink-secondary">未保存更改</span>}
@@ -142,120 +104,103 @@ export function SettingsPage() {
         </div>
       )}
 
-      <Card title={strings.settings.downloaderSection}>
+      <Card title={strings.settings.runtimeSection}>
         <div className="divide-y divide-line">
-          <SettingRow label={strings.settings.client}>
-            <Select
-              value={downloader.client}
-              onChange={(e) =>
-                patch({ downloader: { ...downloader, client: e.target.value as DownloadClient } })
-              }
-              aria-label={strings.settings.client}
-            >
-              <option value="qbittorrent">{strings.settings.clientQbittorrent}</option>
-              <option value="aria2">{strings.settings.clientAria2}</option>
-            </Select>
-          </SettingRow>
-          <SettingRow label={strings.settings.downloaderUrl} htmlFor="settings-downloader-url">
-            <Input
-              id="settings-downloader-url"
-              value={downloader.url}
-              onChange={(e) => patch({ downloader: { ...downloader, url: e.target.value } })}
-              className="data-text"
+          <SettingRow label={strings.settings.dryRun} description={strings.settings.dryRunHint}>
+            <Switch
+              checked={dryRun}
+              onChange={(checked) => patch({ dry_run: checked })}
+              aria-label={strings.settings.dryRun}
             />
           </SettingRow>
-        </div>
-      </Card>
-
-      <Card title={strings.settings.llmSection}>
-        <div className="divide-y divide-line">
+          <SettingRow label={strings.settings.l2Enabled} description={strings.settings.l2EnabledHint}>
+            <Switch
+              checked={l2Enabled}
+              onChange={(checked) => patch({ l2_enabled: checked })}
+              aria-label={strings.settings.l2Enabled}
+            />
+          </SettingRow>
           <SettingRow label={strings.settings.llmEnabled} description={strings.settings.llmEnabledHint}>
             <Switch
-              checked={llm.enabled}
-              onChange={(enabled) => patch({ llm: { ...llm, enabled } })}
+              checked={llmEnabled}
+              onChange={(checked) => patch({ llm_enabled: checked })}
               aria-label={strings.settings.llmEnabled}
             />
           </SettingRow>
           <SettingRow label={strings.settings.llmModel} htmlFor="settings-llm-model">
             <Input
               id="settings-llm-model"
-              value={llm.model}
-              onChange={(e) => patch({ llm: { ...llm, model: e.target.value } })}
+              value={llmModel}
+              onChange={(e) => patch({ llm_model: e.target.value })}
+              className="data-text"
+            />
+          </SettingRow>
+          <SettingRow
+            label={strings.settings.referenceEnabled}
+            description={strings.settings.referenceEnabledHint}
+          >
+            <Switch
+              checked={referenceEnabled}
+              onChange={(checked) => patch({ reference_enabled: checked })}
+              aria-label={strings.settings.referenceEnabled}
+            />
+          </SettingRow>
+          <SettingRow
+            label={strings.settings.referenceOrder}
+            description={strings.settings.referenceOrderHint}
+            htmlFor="settings-reference-order"
+          >
+            <Input
+              id="settings-reference-order"
+              value={referenceOrder}
+              onChange={(e) =>
+                patch({
+                  reference_order: e.target.value
+                    .split(',')
+                    .map((item) => item.trim())
+                    .filter((item) => item !== ''),
+                })
+              }
               className="data-text"
             />
           </SettingRow>
         </div>
       </Card>
 
-      <Card title={strings.settings.autonomySection} description={strings.settings.autonomyHint}>
-        <AutonomyPicker value={autonomy} onChange={(v) => patch({ autonomy: v })} />
-      </Card>
-
-      <Card title={strings.settings.qualitySection}>
+      <Card title={strings.settings.environmentSection}>
         <div className="divide-y divide-line">
-          <SettingRow label={strings.settings.upgradeThreshold} htmlFor="settings-upgrade-threshold">
-            <Input
-              id="settings-upgrade-threshold"
-              inputMode="numeric"
-              value={String(quality.upgrade_threshold)}
-              onChange={(e) =>
-                patch({
-                  quality: {
-                    ...quality,
-                    upgrade_threshold: parseNumericInput(e.target.value),
-                  },
-                })
-              }
-            />
+          <SettingRow label={strings.settings.libraryPath}>
+            <span className="data-text text-sm text-ink">{base.library_path}</span>
           </SettingRow>
-          <SettingRow label={strings.settings.maxUpgrades} htmlFor="settings-max-upgrades">
-            <Input
-              id="settings-max-upgrades"
-              inputMode="numeric"
-              value={String(quality.max_upgrades_per_episode)}
-              onChange={(e) =>
-                patch({
-                  quality: {
-                    ...quality,
-                    max_upgrades_per_episode: parseNumericInput(e.target.value),
-                  },
-                })
-              }
-            />
+          <SettingRow label={strings.settings.downloadPath}>
+            <span className="data-text text-sm text-ink">{base.download_path}</span>
           </SettingRow>
-          <SettingRow label={strings.settings.copyPolicy}>
-            <Select
-              value={quality.copy_policy}
-              onChange={(e) =>
-                patch({
-                  quality: {
-                    ...quality,
-                    copy_policy: e.target.value === 'strict' ? 'strict' : 'copy',
-                  },
-                })
-              }
-              aria-label={strings.settings.copyPolicy}
-            >
-              <option value="copy">{strings.settings.copyPolicyCopy}</option>
-              <option value="strict">{strings.settings.copyPolicyStrict}</option>
-            </Select>
+          <SettingRow label={strings.settings.apiEndpoint}>
+            <span className="data-text text-sm text-ink">
+              {base.api_host}:{base.api_port}
+            </span>
           </SettingRow>
-          <SettingRow label={strings.settings.skipSizeGb} htmlFor="settings-skip-size">
-            <Input
-              id="settings-skip-size"
-              inputMode="numeric"
-              value={String(quality.skip_size_gb)}
-              onChange={(e) =>
-                patch({
-                  quality: {
-                    ...quality,
-                    skip_size_gb: parseNumericInput(e.target.value),
-                  },
-                })
-              }
-            />
+          <SettingRow label={strings.settings.sseHeartbeat}>
+            <span className="data-text text-sm text-ink">{base.api_sse_heartbeat_s}s</span>
+          </SettingRow>
+          <SettingRow label={strings.settings.sseReplay}>
+            <span className="data-text text-sm text-ink">{base.api_sse_replay_limit}</span>
+          </SettingRow>
+          <SettingRow label={strings.settings.apiToken} description={strings.settings.secretHint}>
+            <Badge tone={base.has_api_token ? 'success' : 'neutral'} mark>
+              {base.has_api_token ? strings.settings.configured : strings.settings.notConfigured}
+            </Badge>
+          </SettingRow>
+          <SettingRow label={strings.settings.llmApiKey} description={strings.settings.secretHint}>
+            <Badge tone={base.has_llm_api_key ? 'success' : 'neutral'} mark>
+              {base.has_llm_api_key ? strings.settings.configured : strings.settings.notConfigured}
+            </Badge>
           </SettingRow>
         </div>
+      </Card>
+
+      <Card title={strings.settings.qualitySection} description={strings.settings.e4Hint}>
+        <p className="px-4 py-3 text-sm text-ink-secondary">{strings.settings.e4Unavailable}</p>
       </Card>
     </>
   )

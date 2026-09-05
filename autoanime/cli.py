@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from collections import Counter
 from collections.abc import Sequence
 from typing import Any, cast
 
 from autoanime.config import Settings, load_settings
-from autoanime.core.enums import Confidence, MemorySource, MemoryStatus, Segment
+from autoanime.core.enums import Actor, Confidence, MemorySource, MemoryStatus, Segment
 from autoanime.core.interfaces import LlmTransport, ParseResult, RawName, Registry
+from autoanime.core.models import AuditLog, ParseEvents
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
@@ -16,7 +18,7 @@ from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.pipeline.l3_llm import LlmFallbackRecognizer
-from autoanime.pipeline.orchestrator import Orchestrator
+from autoanime.pipeline.orchestrator import ROUTE_ARCHIVE, Orchestrator
 from autoanime.providers import (
     LLM_TRANSPORT_NAME,
     register_providers,
@@ -60,7 +62,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default=MemorySource.MANUAL.value,
         help="Provenance of the confirmation",
     )
-    subparsers.add_parser("report", help="Emit pipeline metrics (placeholder)")
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Summarize stored parse_events + audit_log metrics",
+    )
+    report_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the full summary as JSON (default: human-readable lines)",
+    )
     subparsers.add_parser("init-db", help="Create the v2 SQLite schema")
     parse_parser = subparsers.add_parser(
         "parse",
@@ -243,6 +253,118 @@ async def _confirm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _aggregate_report(
+    events: Sequence[Any], audits: Sequence[Any]
+) -> dict[str, Any]:
+    """Summarize stored ``parse_events`` + ``audit_log`` rows (pure aggregation).
+
+    口径（Plan E1 第 3 项）：**人工介入率** = (audit 中 manual 纠正事件数)
+    / (总归档事件数)。
+
+    - manual 纠正事件 = ``audit_log`` 中 ``actor == manual`` 的行（E2 的
+      /correct 端点落地后即写入该口径；actor 明细在 ``audit.by_actor``）；
+    - 归档事件 = ``parse_events`` 中 ``outcome == "archive"`` 的行（E4 的
+      整理器落地后开始写入）；分母为 0 时 rate 返回 ``None`` 并注明；
+    - v2 schema 的按日指标表是 ``parse_events``（event_date/level/
+      llm_called/outcome/latency_ms）——Plan 文本的 "daily_metrics" 在库内
+      以该表承载，此处如实按其聚合。
+    """
+    total_events = len(events)
+    by_day: dict[Any, list[Any]] = {}
+    outcome_counts: Counter[str] = Counter()
+    llm_called = 0
+    for event in events:
+        by_day.setdefault(event.event_date, []).append(event)
+        outcome_counts[str(event.outcome)] += 1
+        if event.llm_called:
+            llm_called += 1
+    days = []
+    for day in sorted(by_day):
+        day_events = by_day[day]
+        day_llm = sum(1 for event in day_events if event.llm_called)
+        latencies = [event.latency_ms for event in day_events if event.latency_ms is not None]
+        days.append(
+            {
+                "date": day.isoformat() if hasattr(day, "isoformat") else str(day),
+                "events": len(day_events),
+                "llm_called": day_llm,
+                "llm_call_rate": round(day_llm / len(day_events), 4) if day_events else 0.0,
+                "by_level": dict(
+                    sorted(Counter(str(event.level) for event in day_events).items())
+                ),
+                "avg_latency_ms": round(sum(latencies) / len(latencies), 3)
+                if latencies
+                else None,
+            }
+        )
+    audit_by_action = dict(sorted(Counter(str(row.action) for row in audits).items()))
+    audit_by_actor = dict(sorted(Counter(str(row.actor) for row in audits).items()))
+    manual_corrections = sum(1 for row in audits if row.actor == Actor.MANUAL)
+    archived = outcome_counts.get(ROUTE_ARCHIVE, 0)
+    return {
+        "generated_from": {"parse_events": total_events, "audit_log": len(audits)},
+        "parse_events": {
+            "total": total_events,
+            "days": days,
+            "llm_called_total": llm_called,
+            "llm_call_rate": round(llm_called / total_events, 4) if total_events else 0.0,
+            "by_outcome": dict(sorted(outcome_counts.items())),
+        },
+        "audit": {
+            "total": len(audits),
+            "by_action": audit_by_action,
+            "by_actor": audit_by_actor,
+        },
+        "manual_intervention_rate": {
+            "manual_correction_events": manual_corrections,
+            "archived_events": archived,
+            "rate": round(manual_corrections / archived, 4) if archived else None,
+            "note": (
+                "manual_correction_events = audit_log.actor == manual 的行数；"
+                "archived_events = parse_events.outcome == archive 的行数"
+                "（整理器在 M4 落地后写入）；分母为 0 时 rate 为 null。"
+            ),
+        },
+    }
+
+
+def _render_report_text(report: dict[str, Any]) -> str:
+    """Human-readable rendering of the aggregated report."""
+    rate = report["manual_intervention_rate"]
+    lines = [
+        f"parse_events: {report['parse_events']['total']} events, "
+        f"llm_call_rate {report['parse_events']['llm_call_rate']}",
+        f"audit_log: {report['audit']['total']} rows "
+        f"(by_actor {report['audit']['by_actor'] or '{}'})",
+        (
+            f"manual intervention rate: {rate['rate']} "
+            f"({rate['manual_correction_events']} manual / {rate['archived_events']} archived)"
+        ),
+    ]
+    return "\n".join(lines)
+
+
+async def _report(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    # 只读报表：不走 ``async with``（其 __aenter__ 会 create_all 建库），
+    # 未初始化的库按错误路径给出 init-db 提示而非静默建库。
+    storage = SqliteStorage(settings.database_url)
+    try:
+        events = await storage.list(ParseEvents)
+        audits = await storage.list(AuditLog)
+    except Exception as exc:  # noqa: BLE001 -- 未初始化/旧 schema 给出可操作提示
+        print(f"report: storage unavailable ({type(exc).__name__}); run 'autoanime init-db'")
+        return 1
+    finally:
+        await storage.close()
+    payload = _aggregate_report(events, audits)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
+    else:
+        print(_render_report_text(payload))
+    return 0
+
+
 async def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "init-db":
         settings = load_settings()
@@ -253,6 +375,8 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return 0
     if args.command == "confirm":
         return await _confirm(args)
+    if args.command == "report":
+        return await _report(args)
     if args.command == "parse":
         settings = load_settings()
         orchestrator, storage, transport_obj = await _build_orchestrator(settings)

@@ -38,9 +38,16 @@ from autoanime.pipeline.l3.budget import (
 )
 from autoanime.pipeline.l3.cache_key import LlmCache, llm_cache_key, llm_pattern
 from autoanime.pipeline.l3.draft import apply_l3_draft, l3_parse_result
-from autoanime.pipeline.l3.prompt import build_correction_prompt, build_prompt
+from autoanime.pipeline.l3.prompt import (
+    batch_release_names_from_prompt,
+    build_batch_prompt,
+    build_correction_prompt,
+    build_prompt,
+)
 from autoanime.pipeline.l3.reference import ReferenceChain, ReferenceFacts
 from autoanime.pipeline.l3.schema import (
+    BATCH_FIELDS,
+    BATCH_INDEX_FIELD,
     L3_EVIDENCE,
     L3_FIELDS,
     REASON_MISSING_FIELD,
@@ -49,10 +56,14 @@ from autoanime.pipeline.l3.schema import (
     REASON_UNKNOWN_FIELD,
     L3Draft,
     LlmResponseError,
+    parse_batch_response,
+    parse_llm_payload,
     parse_llm_response,
 )
 
 __all__ = [
+    "BATCH_FIELDS",
+    "BATCH_INDEX_FIELD",
     "L3_EVIDENCE",
     "L3_FIELDS",
     "LLM_MAX_RETRIES",
@@ -74,7 +85,9 @@ __all__ = [
     "ReferenceFacts",
     "apply_l3_draft",
     "arbitrate",
+    "batch_release_names_from_prompt",
     "budget_exceeded",
+    "build_batch_prompt",
     "build_correction_prompt",
     "build_prompt",
     "disambiguate_season",
@@ -82,6 +95,8 @@ __all__ = [
     "l3_parse_result",
     "llm_cache_key",
     "llm_pattern",
+    "parse_batch_response",
+    "parse_llm_payload",
     "parse_llm_response",
     "resolve_field",
     "schema_correction_allowed",

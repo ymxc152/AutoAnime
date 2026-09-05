@@ -1,8 +1,11 @@
 /*
- * Logs —— audit 时间线 + operation_id 分组展开 + 撤销整理按钮。
- * 数据:GET /api/audit(前端按 operation_id 分组);POST /api/organize/{id}/rollback。
+ * Logs —— 审计时间线 + 撤销整理(对齐后端契约):
+ * 组列表来自 GET /api/audit/operations(后端已按 operation_id 分组,最新组在前);
+ * 展开时按 operation_id 拉取明细行(GET /api/audit?operation_id=…);
+ * 撤销 POST /api/organize/{id}/rollback 的 {id} 是数值 audit 行 id,
+ * 组级撤销取该组最新一条 audit 行 id(last_audit_id)。404/409 语义由后端给。
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings } from '../strings'
@@ -16,37 +19,7 @@ import {
   PageTitle,
   StatusMark,
 } from '../components'
-import { formatDateTime } from '../lib/views'
-import type { AuditDto } from '../api/types'
-
-interface AuditGroup {
-  operationId: string
-  entries: AuditDto[]
-  latestAt: string
-  rollbackable: boolean
-}
-
-function groupByOperation(entries: AuditDto[]): AuditGroup[] {
-  const map = new Map<string, AuditDto[]>()
-  for (const entry of entries) {
-    const list = map.get(entry.operation_id) ?? []
-    list.push(entry)
-    map.set(entry.operation_id, list)
-  }
-  return [...map.entries()]
-    .map(([operationId, list]) => {
-      const sorted = [...list].sort((a, b) => b.created_at.localeCompare(a.created_at))
-      return {
-        operationId,
-        entries: sorted,
-        latestAt: sorted[0]?.created_at ?? '',
-        rollbackable: sorted.some(
-          (e) => e.action.startsWith('organize.') && Object.keys(e.reverse).length > 0,
-        ),
-      }
-    })
-    .sort((a, b) => b.latestAt.localeCompare(a.latestAt))
-}
+import type { AuditDto, OperationGroupDto } from '../api/types'
 
 function JsonBlock({ label, value }: { label: string; value: Record<string, unknown> }) {
   if (Object.keys(value).length === 0) return null
@@ -60,6 +33,46 @@ function JsonBlock({ label, value }: { label: string; value: Record<string, unkn
   )
 }
 
+/** 单组展开后的审计明细行(懒加载) */
+function GroupEntries({ operationId }: { operationId: string }) {
+  const fetcher = useCallback(
+    () => api.audit.list({ operation_id: operationId, limit: 50 }),
+    [operationId],
+  )
+  const { data, loading, error } = useApi(fetcher)
+
+  if (error !== null) {
+    return <p className="text-xs text-danger">{error}</p>
+  }
+  if (loading) {
+    return <p className="text-xs text-ink-secondary">{strings.common.loading}</p>
+  }
+  const entries: AuditDto[] = data?.items ?? []
+  return (
+    <ul className="flex flex-col gap-3">
+      {entries.map((entry) => (
+        <li key={entry.id} className="flex flex-col gap-1.5 border-l border-line pl-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-ink">{entry.action}</span>
+            <Badge>
+              {strings.logs.entity}: {entry.entity}
+              {entry.entity_id !== null ? `#${entry.entity_id}` : ''}
+            </Badge>
+            <Badge tone={entry.actor === 'manual' ? 'warning' : 'neutral'} mark>
+              {entry.actor === 'manual' ? strings.logs.actorManual : strings.logs.actorAuto}
+            </Badge>
+            <span className="data-text text-xs text-ink-secondary">#{entry.id}</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <JsonBlock label={strings.logs.instruction} value={entry.instruction} />
+            <JsonBlock label={strings.logs.reverse} value={entry.reverse} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function GroupRow({
   group,
   expanded,
@@ -68,11 +81,11 @@ function GroupRow({
   onRollback,
   rollbackMessage,
 }: {
-  group: AuditGroup
+  group: OperationGroupDto
   expanded: boolean
   onToggle: () => void
   rollingBack: boolean
-  onRollback: (operationId: string) => void
+  onRollback: (auditId: number) => void
   rollbackMessage: string | null
 }) {
   return (
@@ -85,66 +98,50 @@ function GroupRow({
           className="flex min-w-0 items-center gap-2 text-left"
         >
           <StatusMark tone={expanded ? 'primary' : 'neutral'} size={7} />
-          <span className="data-text truncate text-sm text-ink" title={group.operationId}>
-            {group.operationId}
+          <span className="data-text truncate text-sm text-ink" title={group.operation_id}>
+            {group.operation_id}
           </span>
-          <Badge>{group.entries.length}</Badge>
+          <Badge>{group.rows}</Badge>
           {expanded ? (
             <span className="text-xs text-ink-secondary">{strings.logs.collapseGroup}</span>
           ) : (
             <span className="text-xs text-ink-secondary">
-              {strings.logs.expandGroup.replace('{n}', String(group.entries.length))}
+              {strings.logs.expandGroup.replace('{n}', String(group.rows))}
             </span>
           )}
         </button>
-        <span className="data-text ml-auto text-xs text-ink-secondary">
-          {formatDateTime(group.latestAt)}
+        <span className="flex flex-wrap gap-1">
+          {group.actions.map((action) => (
+            <Badge key={action} tone="neutral">
+              {action}
+            </Badge>
+          ))}
         </span>
         {rollbackMessage !== null && (
           <span className="text-xs text-success">{rollbackMessage}</span>
         )}
+        {/* 撤销以该组最新 audit 行(last_audit_id)为准;无可回滚 reverse 时后端回 409 */}
         <Button
           size="sm"
-          variant={group.rollbackable ? 'secondary' : 'ghost'}
-          disabled={!group.rollbackable}
-          title={group.rollbackable ? undefined : strings.logs.rollbackOnlyOrganize}
+          variant="secondary"
           loading={rollingBack}
-          onClick={() => onRollback(group.operationId)}
+          title={strings.logs.rollbackHint}
+          onClick={() => onRollback(group.last_audit_id)}
         >
           {strings.common.rollback}
         </Button>
       </div>
       {expanded && (
-        <ul className="flex flex-col gap-3 bg-surface-2/60 px-4 py-3 md:pl-10">
-          {group.entries.map((entry) => (
-            <li key={entry.id} className="flex flex-col gap-1.5 border-l border-line pl-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-ink">{entry.action}</span>
-                <Badge>
-                  {strings.logs.entity}: {entry.entity}
-                  {entry.entity_id !== null ? `#${entry.entity_id}` : ''}
-                </Badge>
-                <Badge tone={entry.actor === 'manual' ? 'warning' : 'neutral'} mark>
-                  {entry.actor === 'manual' ? strings.logs.actorManual : strings.logs.actorAuto}
-                </Badge>
-                <span className="data-text text-xs text-ink-secondary">
-                  {formatDateTime(entry.created_at)}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <JsonBlock label={strings.logs.instruction} value={entry.instruction} />
-                <JsonBlock label={strings.logs.reverse} value={entry.reverse} />
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div className="flex flex-col gap-3 bg-surface-2/60 px-4 py-3 md:pl-10">
+          <GroupEntries operationId={group.operation_id} />
+        </div>
       )}
     </li>
   )
 }
 
 export function LogsPage() {
-  const fetcher = useCallback(() => api.audit.list({ limit: 100 }), [])
+  const fetcher = useCallback(() => api.auditOperations.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
   const [filter, setFilter] = useState('')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -152,19 +149,17 @@ export function LogsPage() {
   const [rolledBack, setRolledBack] = useState<string | null>(null)
   const [rollbackError, setRollbackError] = useState<string | null>(null)
 
-  const groups = useMemo(() => {
-    const all = groupByOperation(data?.items ?? [])
-    if (filter === '') return all
-    const needle = filter.toLowerCase()
-    return all.filter(
-      (g) =>
-        g.operationId.toLowerCase().includes(needle) ||
-        g.entries.some(
-          (e) =>
-            e.entity.toLowerCase().includes(needle) || e.action.toLowerCase().includes(needle),
-        ),
-    )
-  }, [data, filter])
+  const groups = data?.items ?? []
+  const visible = filter === ''
+    ? groups
+    : groups.filter((g) => {
+        const needle = filter.toLowerCase()
+        return (
+          g.operation_id.toLowerCase().includes(needle) ||
+          g.entities.some((e) => e.toLowerCase().includes(needle)) ||
+          g.actions.some((a) => a.toLowerCase().includes(needle))
+        )
+      })
 
   const toggle = (operationId: string): void => {
     setExpandedIds((prev) => {
@@ -178,13 +173,15 @@ export function LogsPage() {
     })
   }
 
-  const rollback = async (operationId: string): Promise<void> => {
-    setRollingBackId(operationId)
+  const rollback = async (group: OperationGroupDto): Promise<void> => {
+    setRollingBackId(group.operation_id)
     setRollbackError(null)
     setRolledBack(null)
     try {
-      await api.organize.rollback(operationId)
-      setRolledBack(operationId)
+      await api.organize.rollback(group.last_audit_id)
+      setRolledBack(group.operation_id)
+      // 撤销本身落一条新审计行:刷新组列表
+      reload()
     } catch (cause) {
       setRollbackError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
     } finally {
@@ -224,21 +221,23 @@ export function LogsPage() {
             <div className="h-10 animate-pulse rounded-sm bg-surface-2" />
             <div className="h-10 animate-pulse rounded-sm bg-surface-2" />
           </div>
-        ) : groups.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="p-4">
             <EmptyState title={strings.logs.empty} />
           </div>
         ) : (
           <ul className="flex flex-col">
-            {groups.map((group) => (
+            {visible.map((group) => (
               <GroupRow
-                key={group.operationId}
+                key={group.operation_id}
                 group={group}
-                expanded={expandedIds.has(group.operationId)}
-                onToggle={() => toggle(group.operationId)}
-                rollingBack={rollingBackId === group.operationId}
-                onRollback={(id) => void rollback(id)}
-                rollbackMessage={rolledBack === group.operationId ? strings.common.rolledBack : null}
+                expanded={expandedIds.has(group.operation_id)}
+                onToggle={() => toggle(group.operation_id)}
+                rollingBack={rollingBackId === group.operation_id}
+                onRollback={() => void rollback(group)}
+                rollbackMessage={
+                  rolledBack === group.operation_id ? strings.common.rolledBack : null
+                }
               />
             ))}
           </ul>
