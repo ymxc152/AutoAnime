@@ -27,6 +27,7 @@ def test_l3_fields_defaults() -> None:
     assert settings.llm_budget is None
     assert settings.reference_enabled is True
     assert settings.reference_order == ["bangumi", "tmdb"]
+    assert settings.reference_qps is None
 
 
 def test_l3_fields_read_toml(tmp_path: Path) -> None:
@@ -39,7 +40,8 @@ def test_l3_fields_read_toml(tmp_path: Path) -> None:
         "llm_max_retries = 1\n"
         "llm_budget = 100\n"
         "reference_enabled = false\n"
-        'reference_order = ["tmdb", "bangumi"]\n',
+        'reference_order = ["tmdb", "bangumi"]\n'
+        "reference_qps = 0.5\n",
         encoding="utf-8",
     )
 
@@ -53,6 +55,7 @@ def test_l3_fields_read_toml(tmp_path: Path) -> None:
     assert settings.llm_budget == 100
     assert settings.reference_enabled is False
     assert settings.reference_order == ["tmdb", "bangumi"]
+    assert settings.reference_qps == 0.5
 
 
 def test_llm_api_key_stays_out_of_toml(tmp_path: Path) -> None:

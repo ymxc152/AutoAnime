@@ -6,7 +6,8 @@
   注册名 ``"openai"``；仅在 ``llm_enabled`` 且 ``llm_base_url`` 配置齐全时
   注册。
 - 参考源：Bangumi / TMDB 两个 ``MetadataReference`` 插件（PR6），注册名
-  与 ``reference_order`` 默认链序一致。
+  与 ``reference_order`` 默认链序一致；装配时可选包一层 ``CachedReference``
+  （PR6 P2，剧目级缓存 + token bucket 频控）。
 
 prompt/解析/预算等纯函数组件在 ``autoanime.pipeline.l3``，不进 registry；
 LlmCacheStore（DB 版）属 store 层（T2），不在本包注册。
@@ -22,6 +23,11 @@ import logging
 
 from autoanime.config import Settings
 from autoanime.core.interfaces import LlmTransport, MetadataReference, Registry
+from autoanime.memory.reference_cache import (
+    CachedReference,
+    ReferenceCacheStore,
+    TokenBucketLimiter,
+)
 from autoanime.providers.bangumi import (
     ANIME_SUBJECT_TYPE,
     BANGUMI_BASE_URL,
@@ -45,12 +51,15 @@ __all__ = [
     "BANGUMI_BASE_URL",
     "BangumiReference",
     "DEFAULT_LANGUAGE",
+    "CachedReference",
     "LLM_TRANSPORT_NAME",
     "HttpxLlmTransport",
     "LlmTransportError",
+    "ReferenceCacheStore",
     "TMDB_API_KEY_ENV",
     "TMDB_BASE_URL",
     "TmdbReference",
+    "TokenBucketLimiter",
     "USER_AGENT",
     "safe_origin",
     "register_providers",
@@ -80,13 +89,41 @@ def register_providers(registry: Registry, settings: Settings) -> bool:
     return True
 
 
-def register_reference_providers(registry: Registry) -> None:
+def register_reference_providers(
+    registry: Registry,
+    *,
+    cache_store: ReferenceCacheStore | None = None,
+    reference_qps: float | None = None,
+) -> None:
     """把 Bangumi/TMDB 参考源实例注册进显式 Registry。
 
     注册名与 ``reference_order`` 默认链序（``["bangumi", "tmdb"]``）一致。
     每次调用创建新实例（频控状态等实例状态随装配边界重置）；重复注册
     同名插件按 Registry 语义覆盖。TMDB 未配置 ``AUTOANIME_TMDB_API_KEY``
     时仍注册其实例（``lookup`` 直接 miss，链继续问下一个 provider）。
+
+    ``cache_store`` 提供时（PR6 P2），每个实例包一层 ``CachedReference``：
+    chain（PR5 定稿契约）无需改动即拿到带剧目级缓存 + 频控的实例；缺省
+    ``None`` 时注册裸 adapter（保持 P1 行为）。``reference_qps`` 为包装层
+    token bucket 速率（``Settings.reference_qps``），未配置或非正时不启用
+    包装层频控（adapter 内部 HTTP 层节流兜底）。
     """
-    registry.register(MetadataReference, "bangumi")(BangumiReference())
-    registry.register(MetadataReference, "tmdb")(TmdbReference())
+    providers: list[tuple[str, MetadataReference]] = [
+        ("bangumi", BangumiReference()),
+        ("tmdb", TmdbReference()),
+    ]
+    for name, instance in providers:
+        wrapped: MetadataReference = instance
+        if cache_store is not None:
+            limiter = (
+                TokenBucketLimiter(qps=reference_qps)
+                if reference_qps is not None and reference_qps > 0
+                else None
+            )
+            wrapped = CachedReference(
+                provider=name,
+                upstream=instance,
+                store=cache_store,
+                limiter=limiter,
+            )
+        registry.register(MetadataReference, name)(wrapped)

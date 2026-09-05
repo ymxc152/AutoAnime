@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     llm_budget: int | None = None
     reference_enabled: bool = True
     reference_order: list[str] = ["bangumi", "tmdb"]
+    # 缓存包装层的每 provider token bucket 速率（QPS）；None = 不启用包装层
+    # 频控（P1 adapter 内部 HTTP 层已有默认 1 QPS 节流兜底）。
+    reference_qps: float | None = None
 
     model_config = SettingsConfigDict(env_prefix="AUTOANIME_", extra="ignore")
 
