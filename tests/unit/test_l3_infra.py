@@ -30,27 +30,22 @@ from autoanime.pipeline.l3 import (
     REASON_NOT_JSON,
     REASON_TYPE_ERROR,
     REASON_UNKNOWN_FIELD,
-    ArbiterInput,
     L3Draft,
     LlmCache,
     LlmResponseError,
     ReferenceChain,
     ReferenceFacts,
     apply_l3_draft,
-    arbitrate,
     budget_exceeded,
     build_correction_prompt,
     build_prompt,
-    disambiguate_season,
     evidence_rank,
     l3_parse_result,
     llm_cache_key,
     parse_llm_response,
-    resolve_field,
     schema_correction_allowed,
     title_shape_matches,
     transport_retry_allowed,
-    upgrade_level,
 )
 
 FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "l3"
@@ -408,19 +403,7 @@ def test_title_shape_matches_normalized_titles() -> None:
     assert not title_shape_matches("Sousou no Frieren", "Spy x Family")
 
 
-def test_arbiter_bodies_are_t4() -> None:
-    data = ArbiterInput(
-        raw=RawName(name="x.mkv"), l1_result=None, fused=None, l3_result=None
-    )
-
-    with pytest.raises(NotImplementedError):
-        arbitrate(data)
-    with pytest.raises(NotImplementedError):
-        resolve_field("title", l1=None, fused=None, l3=None)
-    with pytest.raises(NotImplementedError):
-        upgrade_level(l1=None, fused=_sample_result(), l3=None, reference=None)
-    with pytest.raises(NotImplementedError):
-        disambiguate_season(memory_seasons=(1, 2), l3=None, reference=None)
+# arbiter 决策表（R1-R8）的行为测试在 tests/unit/test_arbiter.py（T4）。
 
 
 # ---------------------------------------------------------------------------
