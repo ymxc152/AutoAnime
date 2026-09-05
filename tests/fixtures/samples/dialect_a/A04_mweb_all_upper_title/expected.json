@@ -1,0 +1,17 @@
+{
+  "title": "BLACK TORCH",
+  "season": 1,
+  "episode": null,
+  "segment": "season_pack",
+  "fansub": "MWeb",
+  "level": "medium",
+  "confidence": 0.6,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "none",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

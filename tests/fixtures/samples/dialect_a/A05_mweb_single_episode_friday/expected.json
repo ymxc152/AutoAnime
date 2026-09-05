@@ -1,0 +1,17 @@
+{
+  "title": "Please Excuse My Younger Brothers",
+  "season": 1,
+  "episode": 1,
+  "segment": "episode",
+  "fansub": "MWeb",
+  "level": "high",
+  "confidence": 1.0,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "name",
+    "segment": "name",
+    "fansub": "name"
+  }
+}

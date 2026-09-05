@@ -1,0 +1,17 @@
+{
+  "title": "Anime AzurLane Slow Ahead",
+  "season": 2,
+  "episode": null,
+  "segment": "season_pack",
+  "fansub": "MWeb",
+  "level": "high",
+  "confidence": 1.0,
+  "missing_fields": [],
+  "evidence": {
+    "title": "name",
+    "season": "name",
+    "episode": "none",
+    "segment": "name",
+    "fansub": "name"
+  }
+}
