@@ -1,0 +1,99 @@
+/*
+ * Soft Ink 设计 token —— 来源:AutoBangumi DESIGN.md(MIT,规范照搬、代码自写)。
+ * 策略:近单色墨色文字 + 中性底色;彩色永远不上正文,只出现在
+ * 小色标(7-10px)、错误边框/文字、主按钮、聚焦环、选中态等白名单位置。
+ * 明暗双主题:变量在 :root 定义浅色,.dark 覆盖;组件内禁止硬编码主题色。
+ *
+ * 命名说明:DESIGN.md 原文 token 名为 --color-*;为避免与 Tailwind 4
+ * @theme 命名空间(--color-*)循环引用,此处统一加 --ink- 前缀,
+ * 每个变量在 src/styles/index.css 的 @theme inline 中 1:1 映射为工具类。
+ */
+
+:root {
+  /* 品牌色 */
+  --ink-primary: #6c4ab6; /* DESIGN.md --color-primary */
+  --ink-primary-hover: #563a92; /* --color-primary-hover */
+  --ink-primary-light: #e8def8; /* --color-primary-light */
+  --ink-primary-alpha: rgba(108, 74, 182, 0.2); /* --color-primary-alpha */
+  --ink-accent: #f97316; /* --color-accent */
+
+  /* 语义色(仅小色标/错误/危险操作) */
+  --ink-success: #22c55e; /* --color-success */
+  --ink-danger: #ef4444; /* --color-danger */
+  --ink-warning: #f59e0b; /* --color-warning */
+
+  /* 中性面 */
+  --ink-bg: #fafafa; /* --color-bg */
+  --ink-surface: #ffffff; /* --color-surface */
+  --ink-surface-2: #f1f4f8; /* --color-surface-2 */
+  --ink-text: #1e293b; /* --color-text */
+  --ink-text-secondary: #64748b; /* --color-text-secondary */
+  --ink-text-muted: #94a3b8; /* --color-text-muted:仅装饰,不用于正文(对比度不足 4.5:1) */
+  --ink-border: #e2e8f0; /* --color-border */
+
+  /* 字体 */
+  --ink-font-family: Inter, -apple-system, 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --ink-font-mono:
+    ui-monospace, 'JetBrains Mono', 'Cascadia Mono', Consolas, Menlo, monospace;
+
+  /* 间距(移动优先,桌面断点放大) */
+  --ink-layout-padding: 12px;
+  --ink-layout-gap: 10px;
+
+  /* 圆角 */
+  --ink-radius-sm: 4px;
+  --ink-radius-md: 8px;
+  --ink-radius-lg: 12px;
+  --ink-radius-xl: 16px;
+
+  /* 阴影:软黑 ≤10%,无彩色辉光 */
+  --ink-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --ink-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --ink-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1);
+
+  /* 动效:仅表达状态 */
+  --ink-transition-fast: 150ms;
+  --ink-transition-normal: 200ms;
+  --ink-transition-slow: 300ms;
+
+  /* 层级 */
+  --ink-z-dropdown: 10;
+  --ink-z-sticky: 20;
+  --ink-z-fixed: 30;
+  --ink-z-drawer-backdrop: 40;
+  --ink-z-drawer: 50;
+  --ink-z-popover: 60;
+  --ink-z-tooltip: 70;
+}
+
+/* 桌面断点微调(移动优先) */
+@media (min-width: 768px) {
+  :root {
+    --ink-layout-padding: 16px;
+    --ink-layout-gap: 12px;
+  }
+}
+
+.dark {
+  --ink-primary: #9d7cd8;
+  --ink-primary-hover: #b094e4;
+  --ink-primary-light: #2c2440;
+  --ink-primary-alpha: rgba(157, 124, 216, 0.25);
+  --ink-accent: #fb923c;
+
+  --ink-success: #4ade80;
+  --ink-danger: #f87171;
+  --ink-warning: #fbbf24;
+
+  --ink-bg: #0f1117;
+  --ink-surface: #171a21;
+  --ink-surface-2: #1f232d;
+  --ink-text: #e2e8f0;
+  --ink-text-secondary: #94a3b8;
+  --ink-text-muted: #64748b;
+  --ink-border: #2a2f3a;
+
+  --ink-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ink-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --ink-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
