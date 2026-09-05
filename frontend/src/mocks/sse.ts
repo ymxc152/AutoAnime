@@ -1,24 +1,58 @@
 /*
  * Mock SSE 后端 —— 按剧本循环发事件,支持从 last_event_id 续号,
  * 供 Pipeline 页 SSE 驱动动画与单测使用。
+ *
+ * data 载荷对齐后端 web/sse.py:只含 {category, message, payload};
+ * id 走 SSE id: 行(lastEventId),ts 由前端接收侧本地生成。
+ * 剧本消息名对齐后端事件目录(pending.confirmed / organize.rolled_back /
+ * subscription.created / rss_source.created…);首条 parse 事件带
+ * level/outcome 字段,用于演示 E4 管线接入后的富事件路径动画
+ * (当前后端 parse 事件不携带这些字段,前端会优雅降级不画路径)。
  */
 import type { EventSourceHandle, EventSourceFactory, SseMessage } from '../api/sse'
-import type { SseEvent } from '../api/types'
 
 interface Script {
-  category: SseEvent['category']
+  category: string
   message: string
   payload: Record<string, unknown>
 }
 
 const SCRIPT: Script[] = [
-  { category: 'parse', message: 'L1 高置信命中', payload: { raw_name: '[Kamigakari] Kusuriya no Hitorigoto - 16 [1080p].mkv', level: 1, outcome: 'l1_high', confidence: 'high', title: '药屋少女的呢喃', season: 2, episode: 16 } },
-  { category: 'download', message: '下载完成,进入整理', payload: { torrent_hash: 'a1b2c3d4', file: '[Kamigakari] Kusuriya no Hitorigoto - 16 [1080p].mkv', state: 'completed' } },
-  { category: 'organize', message: '归档完成', payload: { src: '/downloads/Kusuriya 16.mkv', dst: '/library/药屋少女的呢喃/Season 2/药屋少女的呢喃 - S02E16.1080p.mkv', quality: '1080p' } },
-  { category: 'parse', message: 'L2 记忆命中修正', payload: { raw_name: 'Sousou no Frieren - 25 [B-Global][1080p].mkv', level: 2, outcome: 'memory_hit', confidence: 'high', title: '葬送的芙莉莲', season: 1, episode: 25 } },
-  { category: 'organize', message: '洗版替换完成', payload: { old: '/library/迷宫饭/Season 1/迷宫饭 - S01E15.720p.mkv', new: '/library/迷宫饭/Season 1/迷宫饭 - S01E15.1080p.mkv', upgrade: true } },
-  { category: 'parse', message: '低置信度,转入人工确认', payload: { raw_name: '[YoyoSubs] Spy x Family S02E06 [1080p][CHS].mkv', level: 1, outcome: 'low_confidence', confidence: 'low', title: 'Spy x Family', episode: 6 } },
-  { category: 'system', message: 'RSS 轮询完成:3 源,12 新条目', payload: { sources: 3, new_items: 12 } },
+  {
+    category: 'parse',
+    message: 'pending.confirmed',
+    payload: { raw_name: '[Kamigakari] Kusuriya no Hitorigoto - 16 [1080p].mkv', level: 1, outcome: 'l1_high', confidence: 'high', title: '药屋少女的呢喃', season: 2, episode: 16, audit_id: 41 },
+  },
+  {
+    category: 'download',
+    message: 'download.completed',
+    payload: { torrent_hash: 'a1b2c3d4', file: '[Kamigakari] Kusuriya no Hitorigoto - 16 [1080p].mkv', state: 'completed' },
+  },
+  {
+    category: 'organize',
+    message: 'organize.archived',
+    payload: { src: '/downloads/Kusuriya 16.mkv', dst: '/library/药屋少女的呢喃/Season 2/药屋少女的呢喃 - S02E16.1080p.mkv', quality: '1080p', audit_id: 42 },
+  },
+  {
+    category: 'parse',
+    message: 'pending.corrected',
+    payload: { pending_id: 103, title: '葬送的芙莉莲', audit_id: 43 },
+  },
+  {
+    category: 'organize',
+    message: 'organize.rolled_back',
+    payload: { audit_id: 44, rolled_back_audit_id: 17, learned: true },
+  },
+  {
+    category: 'parse',
+    message: 'pending.rejected',
+    payload: { pending_id: 104, audit_id: 45 },
+  },
+  {
+    category: 'system',
+    message: 'rss_source.polled',
+    payload: { sources: 3, new_items: 12 },
+  },
 ]
 
 export class MockEventSource implements EventSourceHandle {
@@ -52,15 +86,12 @@ export class MockEventSource implements EventSourceHandle {
   }
 
   private emit(script: Script): void {
-    const event: SseEvent = {
-      id: String(this.nextId),
-      category: script.category,
-      message: script.message,
-      payload: script.payload,
-      ts: new Date().toISOString(),
+    // 对齐真实帧:data 只含 {category,message,payload};id 走 lastEventId
+    const message: SseMessage = {
+      data: JSON.stringify({ category: script.category, message: script.message, payload: script.payload }),
+      lastEventId: String(this.nextId),
     }
     this.nextId += 1
-    const message: SseMessage = { data: JSON.stringify(event), lastEventId: event.id ?? '' }
     for (const cb of this.messageCallbacks) cb(message)
   }
 

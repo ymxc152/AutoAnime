@@ -1,6 +1,6 @@
 /*
  * Pending 冒烟 + 核心交互(人工介入主战场):
- * 队列列表 → 抽屉 diff 视图(逐字段证据来源标注)→ 纠正表单提交 → 行消失。
+ * 队列列表 → 抽屉(context 草稿字段视图)→ 纠正提交(始终带 title)→ 行消失。
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -42,24 +42,22 @@ describe('PendingPage', () => {
     expect(await screen.findByText('队列为空,没有需要人工确认的解析结果。')).toBeInTheDocument()
   })
 
-  it('diff 视图逐字段标注证据来源(name/folder/memory/llm)', async () => {
+  it('抽屉展示 context 草稿字段(后端无证据来源标注,不做来源徽标)', async () => {
     const user = userEvent.setup()
     renderPage(<PendingPage />)
-    // 第 2 条:Kusuriya(记忆/目录/文件名混合证据)
     await user.click(
       (await screen.findByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]'))
         .closest('tr')!
         .querySelector('button')!,
     )
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getAllByText('文件名').length).toBeGreaterThan(0)
-    expect(within(dialog).getAllByText('目录').length).toBeGreaterThan(0)
-    expect(within(dialog).getAllByText('记忆').length).toBeGreaterThan(0)
-    // 字段值以 mono 呈现
-    expect(within(dialog).getByText('药屋少女的呢喃')).toBeInTheDocument()
+    // context 草稿:title/season/episode/segment/fansub
+    expect(within(dialog).getAllByText('药屋少女的呢喃').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText('单集').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText('Kamigakari').length).toBeGreaterThan(0)
   })
 
-  it('纠正表单提交后触发学习并从队列移除', async () => {
+  it('纠正表单提交:未纠正也始终携带 title(mock 对齐后端 title 必填)', async () => {
     const user = userEvent.setup()
     renderPage(<PendingPage />)
     expect(await screen.findByText(/共 4 条/)).toBeInTheDocument()
@@ -70,18 +68,33 @@ describe('PendingPage', () => {
         .querySelector('button')!,
     )
     const dialog = await screen.findByRole('dialog')
-    // 修正集数
+    // 只改集数,标题保留原值 → 提交成功(mock 若缺 title 会回 422)
     const episodeInput = within(dialog).getByLabelText('集')
     await user.clear(episodeInput)
     await user.type(episodeInput, '13')
     await user.click(within(dialog).getByRole('button', { name: '提交纠正' }))
 
-    // 提交成功:抽屉关闭,队列 4 → 3
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
-    expect(
-      screen.queryByText('Sousou no Frieren S1 - 12v2 (B-Global 1920x1080 WebRip AAC).mkv'),
-    ).not.toBeInTheDocument()
+  })
+
+  it('清空标题提交时,后端 422 语义如实展示', async () => {
+    const user = userEvent.setup()
+    renderPage(<PendingPage />)
+    await screen.findByText(/共 4 条/)
+
+    await user.click(
+      (await screen.findByText('[YoyoSubs] Spy x Family S02E06 [1080p][CHS].mkv'))
+        .closest('tr')!
+        .querySelector('button')!,
+    )
+    const dialog = await screen.findByRole('dialog')
+    await user.clear(within(dialog).getByLabelText('标题'))
+    await user.click(within(dialog).getByRole('button', { name: '提交纠正' }))
+    expect(await screen.findByText(/non-empty 'title'/)).toBeInTheDocument()
+    // 抽屉保持打开,队列不变
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText(/共 4 条/)).toBeInTheDocument()
   })
 
   it('按当前结果确认', async () => {

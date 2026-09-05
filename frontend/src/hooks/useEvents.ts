@@ -33,18 +33,23 @@ export interface UseEventsOptions {
   factory?: EventSourceFactory
 }
 
-function parseEvent(raw: string): SseEvent | null {
+/**
+ * 解析 SSE data 载荷(后端只发 {category,message,payload}):
+ * id 取 SSE id: 行(= audit 行 id,经 lastEventId 传入);ts 由前端
+ * 接收时刻本地生成,仅用于最近事件列表的展示排序。
+ */
+function parseEvent(raw: string, lastEventId: string): SseEvent | null {
   try {
     const parsed = JSON.parse(raw) as Partial<SseEvent>
     if (typeof parsed.category !== 'string') {
       return null
     }
     return {
-      id: typeof parsed.id === 'string' ? parsed.id : null,
+      id: lastEventId !== '' ? lastEventId : null,
       category: parsed.category,
       message: typeof parsed.message === 'string' ? parsed.message : '',
       payload: typeof parsed.payload === 'object' && parsed.payload !== null ? parsed.payload : {},
-      ts: typeof parsed.ts === 'string' ? parsed.ts : '',
+      ts: new Date().toISOString(),
     }
   } catch {
     return null
@@ -93,7 +98,7 @@ export function useEvents(options: UseEventsOptions): UseEventsResult {
         if (message.lastEventId) {
           lastEventId = message.lastEventId
         }
-        const event = parseEvent(message.data)
+        const event = parseEvent(message.data, lastEventId)
         if (event) {
           setReceived((n) => n + 1)
           onEventRef.current(event)

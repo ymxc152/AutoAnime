@@ -1,16 +1,19 @@
 /*
- * 端点客户端 —— 与 Plan §4(E2 规格)一一对应。
- * 每个方法 = 一条契约假设;E2 合并后按此逐条对齐。
+ * 端点客户端 —— 与 E2 后端真实路由(autoanime/web/routers)一一对应。
+ * 对齐后的方法清单同时作为「前端声明的端点契约」真源,
+ * 供离线集成冒烟逐条核对(存在/方法/形状)。
  */
 import { request } from './client'
 import type {
   AuditDto,
   AuditQuery,
   Metrics,
+  OperationGroupDto,
   Page,
   PendingCorrectBody,
   PendingItemDto,
   PendingQuery,
+  PendingResolveOut,
   RollbackResult,
   RssSourceCreateBody,
   RssSourceDto,
@@ -18,45 +21,51 @@ import type {
   SeriesDto,
   SeriesQuery,
   SettingsDto,
+  SettingsUpdateBody,
   SubscriptionCreateBody,
   SubscriptionDto,
 } from './types'
 
 export const endpoints = {
-  /** GET /api/metrics —— Dashboard 指标 */
+  /** GET /api/metrics —— Dashboard 指标(MetricsOut) */
   metrics: {
     get: () => request<Metrics>('/api/metrics'),
   },
 
-  /** GET /api/series —— Library(series 列表,内嵌 season/episode 树) */
+  /** GET /api/series —— Library(series 列表,内嵌 season/episode 全树;无 q 过滤) */
   series: {
     list: (query: SeriesQuery = {}) => request<Page<SeriesDto>>('/api/series', { query }),
   },
 
-  /** /api/pending —— 待确认队列(确认/纠正/拒绝) */
+  /** /api/pending —— 待确认队列(确认/纠正/拒绝,响应 PendingResolveOut) */
   pending: {
     list: (query: PendingQuery = {}) => request<Page<PendingItemDto>>('/api/pending', { query }),
     confirm: (id: number) =>
-      request<PendingItemDto>(`/api/pending/${id}/confirm`, { method: 'POST' }),
+      request<PendingResolveOut>(`/api/pending/${id}/confirm`, { method: 'POST' }),
     correct: (id: number, body: PendingCorrectBody) =>
-      request<PendingItemDto>(`/api/pending/${id}/correct`, { method: 'POST', body }),
-    reject: (id: number) => request<PendingItemDto>(`/api/pending/${id}/reject`, { method: 'POST' }),
+      request<PendingResolveOut>(`/api/pending/${id}/correct`, { method: 'POST', body }),
+    reject: (id: number) =>
+      request<PendingResolveOut>(`/api/pending/${id}/reject`, { method: 'POST' }),
   },
 
-  /** GET /api/audit —— Logs(审计日志分页,按 operation_id 分组在前端做) */
+  /** GET /api/audit —— Logs 明细(可按 operation_id/entity/action 过滤) */
   audit: {
     list: (query: AuditQuery = {}) => request<Page<AuditDto>>('/api/audit', { query }),
   },
 
-  /** POST /api/organize/{operation_id}/rollback —— 撤销整理 */
-  organize: {
-    rollback: (operationId: string) =>
-      request<RollbackResult>(`/api/organize/${encodeURIComponent(operationId)}/rollback`, {
-        method: 'POST',
-      }),
+  /** GET /api/audit/operations —— 后端按 operation_id 分组视图(Logs 组列表) */
+  auditOperations: {
+    list: (query: { limit?: number; offset?: number } = {}) =>
+      request<Page<OperationGroupDto>>('/api/audit/operations', { query }),
   },
 
-  /** /api/subscriptions —— 订阅 CRUD */
+  /** POST /api/organize/{audit_id}/rollback —— {id} 是数值 audit 行 id */
+  organize: {
+    rollback: (auditId: number) =>
+      request<RollbackResult>(`/api/organize/${auditId}/rollback`, { method: 'POST' }),
+  },
+
+  /** /api/subscriptions —— 订阅(载体 series 行;POST 至少一个标题+预生成集表) */
   subscriptions: {
     list: (query: { limit?: number; offset?: number } = {}) =>
       request<Page<SubscriptionDto>>('/api/subscriptions', { query }),
@@ -65,7 +74,7 @@ export const endpoints = {
     remove: (id: number) => request<void>(`/api/subscriptions/${id}`, { method: 'DELETE' }),
   },
 
-  /** /api/rss_sources —— RSS 源 CRUD(启停 = PATCH enabled) */
+  /** /api/rss_sources —— RSS 源 CRUD(启停 = PATCH enabled;season_id 创建必填) */
   rssSources: {
     list: (query: { limit?: number; offset?: number } = {}) =>
       request<Page<RssSourceDto>>('/api/rss_sources', { query }),
@@ -76,9 +85,9 @@ export const endpoints = {
     remove: (id: number) => request<void>(`/api/rss_sources/${id}`, { method: 'DELETE' }),
   },
 
-  /** GET/PUT /api/settings —— 运行时设置 */
+  /** GET/PUT /api/settings —— 运行时设置(PUT 白名单覆写,进程内生效) */
   settings: {
     get: () => request<SettingsDto>('/api/settings'),
-    update: (body: SettingsDto) => request<SettingsDto>('/api/settings', { method: 'PUT', body }),
+    update: (body: SettingsUpdateBody) => request<SettingsDto>('/api/settings', { method: 'PUT', body }),
   },
 }

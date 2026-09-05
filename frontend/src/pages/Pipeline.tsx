@@ -25,6 +25,7 @@ import {
   flowReducer,
   initialFlowState,
   passingNodes,
+  pipelineBaseline,
   NODE_META,
   EDGE_DEFS,
   type PipelineNodeData,
@@ -93,7 +94,8 @@ export function PipelinePage() {
 
   useEffect(() => {
     if (metrics !== null) {
-      dispatch({ type: 'seed', levels: metrics.levels })
+      // 基线由 /api/metrics.by_level 派生(L1/L2/L3 各级解析数)
+      dispatch({ type: 'seed', baseline: pipelineBaseline(metrics) })
     }
   }, [metrics])
 

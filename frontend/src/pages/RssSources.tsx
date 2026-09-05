@@ -35,12 +35,17 @@ function AddSourceForm({ onDone }: { onDone: () => void }) {
       setError(strings.rssSources.urlRequired)
       return
     }
+    // 后端 RssSourceCreateIn:season_id 必填(外键指向 season.id)
+    if (seasonId === '') {
+      setError(strings.rssSources.seasonRequired)
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
       await api.rssSources.create({
         url: url.trim(),
-        season_id: seasonId === '' ? undefined : Number(seasonId),
+        season_id: Number(seasonId),
         token: token === '' ? undefined : token,
       })
       setUrl('')
@@ -72,7 +77,11 @@ function AddSourceForm({ onDone }: { onDone: () => void }) {
             className="data-text"
           />
         </Field>
-        <Field label={strings.rssSources.season} htmlFor="rss-season">
+        <Field
+          label={strings.rssSources.season}
+          description={strings.rssSources.seasonHint}
+          htmlFor="rss-season"
+        >
           <Input
             id="rss-season"
             value={seasonId}

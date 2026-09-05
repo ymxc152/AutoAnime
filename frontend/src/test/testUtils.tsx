@@ -63,6 +63,7 @@ export class FakeEventSource implements EventSourceHandle {
   }
 }
 
+/** 测试用 SSE 帧:data 载荷对齐后端(只含 category/message/payload,无 ts/id) */
 export function sseMessage(event: {
   id?: string
   category: string
@@ -70,7 +71,7 @@ export function sseMessage(event: {
   payload?: Record<string, unknown>
 }): SseMessage {
   return {
-    data: JSON.stringify({ id: event.id ?? '1', ts: new Date().toISOString(), ...event }),
+    data: JSON.stringify({ category: event.category, message: event.message, payload: event.payload ?? {} }),
     lastEventId: event.id ?? '1',
   }
 }

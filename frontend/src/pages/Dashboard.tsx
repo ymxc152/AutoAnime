@@ -1,6 +1,7 @@
 /*
- * Dashboard —— 指标卡(人工介入率/本周归档/LLM 调用率)+ 三级命中 + 近 7 日曲线。
- * 数据:GET /api/metrics。
+ * Dashboard —— 指标卡(人工介入率/待确认队列/LLM 调用率)+ 三级统计 + LLM 周曲线 + 库内集状态。
+ * 数据:GET /api/metrics(对齐后端 MetricsOut:intervention_rate/by_level/
+ * llm_call_curve_weekly/pending_open/episode_states)。
  */
 import { useCallback } from 'react'
 import { api } from '../api'
@@ -28,9 +29,9 @@ function MetricCard({
   )
 }
 
-/** 近 7 日柱状图(归档)+ 调用点(LLM),手绘 SVG,无图表依赖 */
-function WeeklyCurve({ points }: { points: Metrics['weekly_curve'] }) {
-  const max = Math.max(1, ...points.map((p) => p.archived))
+/** LLM 调用周曲线柱状图(8 个 ISO 周),手绘 SVG,无图表依赖 */
+function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
+  const max = Math.max(1, ...points.map((p) => p.llm_called))
   const barWidth = 24
   const gap = 10
   const height = 72
@@ -44,9 +45,9 @@ function WeeklyCurve({ points }: { points: Metrics['weekly_curve'] }) {
       >
         {points.map((p, i) => {
           const x = i * (barWidth + gap)
-          const barH = (p.archived / max) * height
+          const barH = (p.llm_called / max) * height
           return (
-            <g key={p.date}>
+            <g key={p.bucket}>
               <rect
                 x={x}
                 y={height - barH}
@@ -61,7 +62,7 @@ function WeeklyCurve({ points }: { points: Metrics['weekly_curve'] }) {
                 textAnchor="middle"
                 className="fill-[var(--ink-text-secondary)] text-[9px]"
               >
-                {p.date.slice(5)}
+                {p.bucket.slice(5)}
               </text>
               <text
                 x={x + barWidth / 2}
@@ -69,7 +70,7 @@ function WeeklyCurve({ points }: { points: Metrics['weekly_curve'] }) {
                 textAnchor="middle"
                 className="fill-[var(--ink-text-secondary)] text-[9px]"
               >
-                {p.archived > 0 ? p.archived : ''}
+                {p.llm_called > 0 ? p.llm_called : ''}
               </text>
             </g>
           )
@@ -79,18 +80,33 @@ function WeeklyCurve({ points }: { points: Metrics['weekly_curve'] }) {
   )
 }
 
-function LevelRow({ label, count, total }: { label: string; count: number; total: number }) {
+/** 单级统计行:解析数 + LLM 调用数 */
+function LevelRow({
+  label,
+  total,
+  llmCalled,
+}: {
+  label: string
+  total: number
+  llmCalled: number
+}) {
   return (
     <div className="flex items-center justify-between gap-2 border-b border-line py-1.5 last:border-b-0">
       <span className="text-sm text-ink">{label}</span>
       <span className="flex items-center gap-2">
         <span className="text-xs text-ink-secondary data-text">
-          {total > 0 ? formatPercent(count / total) : '—'}
+          {strings.dashboard.llmCallsShort} {llmCalled}
         </span>
-        <Badge>{count}</Badge>
+        <Badge>{total}</Badge>
       </span>
     </div>
   )
+}
+
+const LEVEL_LABELS: Record<number, string> = {
+  1: strings.dashboard.levelL1,
+  2: strings.dashboard.levelL2,
+  3: strings.dashboard.levelL3,
 }
 
 export function DashboardPage() {
@@ -119,41 +135,68 @@ export function DashboardPage() {
     )
   }
 
+  // LLM 调用率:全级别汇总(0 解析时按无数据显示)
+  const totalParsed = data.by_level.reduce((sum, item) => sum + item.total, 0)
+  const totalLlm = data.by_level.reduce((sum, item) => sum + item.llm_called, 0)
+  const llmRate = totalParsed > 0 ? totalLlm / totalParsed : null
+
   return (
     <>
       <PageTitle title={strings.dashboard.title} description={strings.app.tagline} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <MetricCard
           label={strings.dashboard.manualInterventionRate}
-          value={formatPercent(data.manual_intervention_rate)}
-          hint={`待确认 ${data.pending_count} 条`}
+          value={data.intervention_rate === null ? '—' : formatPercent(data.intervention_rate)}
+          hint={`${strings.dashboard.auditManual} ${data.audit_manual} / ${strings.dashboard.auditTotal} ${data.audit_total}`}
         />
         <MetricCard
-          label={strings.dashboard.weeklyArchived}
-          value={String(data.weekly_archived)}
-          hint={strings.dashboard.weeklyArchivedUnit}
+          label={strings.dashboard.pendingQueue}
+          value={String(data.pending_open)}
+          hint={strings.dashboard.pendingQueueUnit}
         />
         <MetricCard
           label={strings.dashboard.llmCallRate}
-          value={formatPercent(data.llm_call_rate)}
-          hint={`${data.levels.llm_calls} / ${data.levels.total}`}
+          value={llmRate === null ? '—' : formatPercent(llmRate)}
+          hint={`${totalLlm} / ${totalParsed}`}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Card title={strings.dashboard.levelHits} flush>
           <div className="px-4 pb-3">
-            <LevelRow label={strings.dashboard.totalParsed} count={data.levels.total} total={data.levels.total} />
-            <LevelRow label={strings.dashboard.l1High} count={data.levels.l1_high} total={data.levels.total} />
-            <LevelRow label={strings.dashboard.l2Hit} count={data.levels.l2_hit} total={data.levels.total} />
-            <LevelRow label={strings.dashboard.l3Entered} count={data.levels.l3_entered} total={data.levels.total} />
-            <LevelRow label={strings.dashboard.llmCalls} count={data.levels.llm_calls} total={data.levels.total} />
+            {[1, 2, 3].map((level) => {
+              const item = data.by_level.find((row) => row.level === level)
+              return (
+                <LevelRow
+                  key={level}
+                  label={LEVEL_LABELS[level] ?? `L${level}`}
+                  total={item?.total ?? 0}
+                  llmCalled={item?.llm_called ?? 0}
+                />
+              )
+            })}
           </div>
         </Card>
         <Card title={strings.dashboard.weeklyCurve}>
-          <WeeklyCurve points={data.weekly_curve} />
+          <WeeklyCurve points={data.llm_call_curve_weekly} />
         </Card>
       </div>
+
+      <Card title={strings.dashboard.episodeStates} flush>
+        <div className="flex flex-wrap gap-2 px-4 py-3">
+          {Object.entries(data.episode_states).length === 0 ? (
+            <p className="text-sm text-ink-secondary">{strings.dashboard.noData}</p>
+          ) : (
+            Object.entries(data.episode_states).map(([state, count]) => (
+              <Badge key={state} mark>
+                <span className="data-text">
+                  {state} {count}
+                </span>
+              </Badge>
+            ))
+          )}
+        </div>
+      </Card>
     </>
   )
 }

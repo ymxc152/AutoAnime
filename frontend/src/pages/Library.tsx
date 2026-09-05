@@ -87,7 +87,7 @@ function SeriesDrawer({ series, onClose }: { series: SeriesDto; onClose: () => v
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-1.5">
             {series.seasons.map((s) => {
-              const view = seasonStateView(s.state)
+              const view = seasonStateView(s.status)
               const active = s.id === season?.id
               return (
                 <button
@@ -137,11 +137,22 @@ function SeriesDrawer({ series, onClose }: { series: SeriesDto; onClose: () => v
 
 export function LibraryPage() {
   const [query, setQuery] = useState('')
-  const fetcher = useCallback(() => api.series.list({ limit: 100, q: query }), [query])
+  // 后端 GET /api/series 不支持标题过滤:一次拉全量,搜索在前端做
+  const fetcher = useCallback(() => api.series.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
   const [selected, setSelected] = useState<SeriesDto | null>(null)
 
-  const seriesList = useMemo(() => data?.items ?? [], [data])
+  const seriesList = useMemo(() => {
+    const all = data?.items ?? []
+    if (query === '') return all
+    const needle = query.toLowerCase()
+    return all.filter(
+      (series) =>
+        (series.title_cn ?? '').toLowerCase().includes(needle) ||
+        (series.title_jp ?? '').toLowerCase().includes(needle) ||
+        (series.title_romaji ?? '').toLowerCase().includes(needle),
+    )
+  }, [data, query])
 
   return (
     <>

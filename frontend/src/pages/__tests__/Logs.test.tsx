@@ -1,5 +1,7 @@
 /*
- * Logs 冒烟 + 核心交互:operation_id 分组展开、指令 JSON、撤销整理。
+ * Logs 冒烟 + 核心交互(对齐后端分组契约):
+ * 组列表来自 /api/audit/operations;展开懒加载 /api/audit?operation_id=;
+ * 撤销以组内最新 audit 行 id(last_audit_id)执行,404/409 语义如实展示。
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,51 +14,64 @@ describe('LogsPage', () => {
     resetMockState()
   })
 
-  it('按 operation_id 分组渲染', async () => {
+  it('按后端分组端点渲染操作组(最新组在前)', async () => {
     renderPage(<LogsPage />)
     expect(await screen.findByText('op-20260905-0003')).toBeInTheDocument()
     expect(screen.getByText('op-20260905-0002')).toBeInTheDocument()
     expect(screen.getByText('op-20260905-0001')).toBeInTheDocument()
+    // 组上的动作徽标
+    expect(screen.getByText('demote_pending')).toBeInTheDocument()
+    expect(screen.getByText('memory_hit')).toBeInTheDocument()
   })
 
-  it('点击分组展开记录与 instruction/reverse JSON', async () => {
+  it('展开分组懒加载明细行(instruction/reverse JSON)', async () => {
     const user = userEvent.setup()
     renderPage(<LogsPage />)
     await user.click(await screen.findByText('op-20260905-0002'))
-    // instruction 与 reverse 都含 S01E20(正向/逆向路径),各有 JSON 块
-    const pathMatches = await screen.findAllByText(/S01E20/)
-    expect(pathMatches.length).toBeGreaterThanOrEqual(2)
+    // 该组明细:memory_hit 行,含 raw_name instruction(组徽标 + 明细行 ≥2 处)
+    await waitFor(() => {
+      expect(screen.getAllByText('memory_hit').length).toBeGreaterThanOrEqual(2)
+    })
     expect(screen.getAllByText('instruction').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('reverse').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Kusuriya no Hitorigoto/)).toBeInTheDocument()
     // actor 徽标
     expect(screen.getByText('自动')).toBeInTheDocument()
   })
 
-  it('撤销整理:仅 organize 且有 reverse 的分组可用,成功显示已撤销', async () => {
+  it('撤销整理:以组内最新 audit 行 id 执行,成功显示已撤销', async () => {
+    const user = userEvent.setup()
+    renderPage(<LogsPage />)
+    const row = (await screen.findByText('op-20260905-0003')).closest('li')!
+    const rollbackButton = within(row).getByRole('button', { name: '撤销整理' })
+    await user.click(rollbackButton)
+    expect(await screen.findByText('已撤销')).toBeInTheDocument()
+    // 撤销落新审计组(mock 对齐后端行为)
+    expect(await screen.findByText('op-mock-0001')).toBeInTheDocument()
+  })
+
+  it('无 reverse 指令的组撤销时展示后端 409 语义', async () => {
     const user = userEvent.setup()
     renderPage(<LogsPage />)
     const row = (await screen.findByText('op-20260905-0002')).closest('li')!
-    const rollbackButton = within(row).getByRole('button', { name: '撤销整理' })
-    expect(rollbackButton).toBeEnabled()
-    await user.click(rollbackButton)
-    expect(await screen.findByText('已撤销')).toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: '撤销整理' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no reverse instruction/)
   })
 
-  it('系统类分组(无 reverse)撤销按钮禁用', async () => {
-    renderPage(<LogsPage />)
-    const row = (await screen.findByText('op-20260905-0003')).closest('li')!
-    // op-0003 的 action 是 organize.rollback 但 reverse 为空 → 不可再撤销
-    await waitFor(() => {
-      expect(within(row).getByRole('button', { name: '撤销整理' })).toBeDisabled()
-    })
-  })
-
-  it('搜索过滤 operation_id', async () => {
+  it('搜索过滤操作 ID', async () => {
     const user = userEvent.setup()
     renderPage(<LogsPage />)
     await screen.findByText('op-20260905-0003')
     await user.type(screen.getByRole('searchbox'), '0002')
     expect(screen.queryByText('op-20260905-0003')).not.toBeInTheDocument()
     expect(screen.getByText('op-20260905-0002')).toBeInTheDocument()
+  })
+
+  it('搜索可按动作过滤', async () => {
+    const user = userEvent.setup()
+    renderPage(<LogsPage />)
+    await screen.findByText('op-20260905-0003')
+    await user.type(screen.getByRole('searchbox'), 'pending_confirm')
+    expect(screen.queryByText('op-20260905-0003')).not.toBeInTheDocument()
+    expect(screen.getByText('op-20260905-0001')).toBeInTheDocument()
   })
 })

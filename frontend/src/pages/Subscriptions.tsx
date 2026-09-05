@@ -1,6 +1,8 @@
 /*
- * Subscriptions —— 追番管理:列表 + 放送进度条 + 降频状态标;
- * Mikan 选番入口(提示文案:每番只订一个字幕组)。
+ * Subscriptions —— 追番管理:列表 + 每季进度(对齐后端 SubscriptionOut)。
+ * 订阅载体 = series 行 + 预生成季/集表(ARCHITECTURE §2);POST 至少一个
+ * 标题,episode_count 非空时预生成 N 条 MISSING 集。RSS 地址关联走
+ * 「RSS 源」页(后端 /api/rss_sources,按季挂载)。放送调度与降频随 E4。
  * 数据:GET/POST/DELETE /api/subscriptions。
  */
 import { useCallback, useState } from 'react'
@@ -20,33 +22,41 @@ import {
   Skeleton,
   StatusDot,
 } from '../components'
-import { formatDate } from '../lib/views'
+import { seasonStateView } from '../lib/views'
 import type { SubscriptionDto } from '../api/types'
 
 const MIKAN_URL = 'https://mikanani.me'
 
-function seasonStateTone(state: SubscriptionDto['state']): 'success' | 'info' | 'neutral' {
-  if (state === 'collected') return 'success'
-  if (state === 'airing') return 'info'
-  return 'neutral'
+function subscriptionTitle(sub: SubscriptionDto): string {
+  return sub.title_cn ?? sub.title_romaji ?? sub.title_jp ?? `#${sub.id}`
 }
 
 function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
-  const [url, setUrl] = useState('')
+  const [title, setTitle] = useState('')
+  const [seasonNumber, setSeasonNumber] = useState('1')
+  const [episodeCount, setEpisodeCount] = useState('')
   const [fansub, setFansub] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const submit = async (): Promise<void> => {
-    if (url.trim() === '') {
-      setError(strings.subscriptions.urlRequired)
+    if (title.trim() === '') {
+      setError(strings.subscriptions.titleRequired)
       return
     }
     setSubmitting(true)
     setError(null)
     try {
-      await api.subscriptions.create({ rss_url: url.trim(), fansub: fansub.trim() || undefined })
-      setUrl('')
+      await api.subscriptions.create({
+        title_cn: title.trim(),
+        season_number: seasonNumber === '' ? undefined : Number(seasonNumber),
+        // episode_count 留空 = 只建 Series/Season,不预生成集表
+        ...(episodeCount !== '' ? { episode_count: Number(episodeCount) } : {}),
+        ...(fansub.trim() !== '' ? { fansub_pref: fansub.trim() } : {}),
+      })
+      setTitle('')
+      setSeasonNumber('1')
+      setEpisodeCount('')
       setFansub('')
       onDone()
     } catch (cause) {
@@ -59,7 +69,7 @@ function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
   return (
     <Card
       title={strings.subscriptions.addSubscription}
-      description={strings.subscriptions.mikanHint}
+      description={strings.subscriptions.rssHint}
       actions={
         <a
           href={MIKAN_URL}
@@ -78,22 +88,43 @@ function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
           void submit()
         }}
       >
-        <Field label={strings.subscriptions.rssUrl} error={error} htmlFor="sub-rss-url">
+        <Field label={strings.subscriptions.titleLabel} error={error} htmlFor="sub-title">
           <Input
-            id="sub-rss-url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder={strings.subscriptions.rssUrlPlaceholder}
+            id="sub-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={strings.subscriptions.titlePlaceholder}
             invalid={error !== null}
             className="data-text"
           />
         </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={strings.subscriptions.seasonNumber} htmlFor="sub-season">
+            <Input
+              id="sub-season"
+              inputMode="numeric"
+              value={seasonNumber}
+              onChange={(e) => setSeasonNumber(e.target.value.replace(/[^\d]/g, ''))}
+              className="data-text"
+            />
+          </Field>
+          <Field label={strings.subscriptions.episodeCount} htmlFor="sub-episodes">
+            <Input
+              id="sub-episodes"
+              inputMode="numeric"
+              value={episodeCount}
+              onChange={(e) => setEpisodeCount(e.target.value.replace(/[^\d]/g, ''))}
+              placeholder={strings.subscriptions.episodeCountPlaceholder}
+              className="data-text"
+            />
+          </Field>
+        </div>
         <Field label={strings.subscriptions.fansubPref} htmlFor="sub-fansub">
           <Input
             id="sub-fansub"
             value={fansub}
             onChange={(e) => setFansub(e.target.value)}
-            placeholder={strings.subscriptions.mikanHint}
+            placeholder={strings.subscriptions.fansubPlaceholder}
           />
         </Field>
         <div>
@@ -115,28 +146,13 @@ function SubscriptionRow({
   onRemove: (id: number) => void
   removing: boolean
 }) {
-  const tone = seasonStateTone(sub.state)
-  const progress =
-    sub.episodes_total > 0
-      ? sub.episodes_collected / sub.episodes_total
-      : 0
   return (
     <div className="flex flex-col gap-2 border-b border-line px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
-        <StatusDot tone={tone} />
-        <span className="font-medium text-ink">{sub.title}</span>
-        <span className="data-text text-xs text-ink-secondary">
-          S{String(sub.season_number).padStart(2, '0')}
-        </span>
-        <Badge>
-          {sub.fansub_pref ?? strings.subscriptions.noFansub}
-        </Badge>
-        {sub.reduced_frequency && (
-          <Badge tone="warning" mark title={strings.subscriptions.reducedFrequencyHint}>
-            {strings.subscriptions.reducedFrequency}
-          </Badge>
-        )}
-        {!sub.enabled && <Badge tone="neutral">{strings.common.disabled}</Badge>}
+        <span className="font-medium text-ink">{subscriptionTitle(sub)}</span>
+        <Badge>{sub.media_type}</Badge>
+        <Badge tone="neutral">{sub.status}</Badge>
+        <Badge>{sub.fansub_pref ?? strings.subscriptions.noFansub}</Badge>
         <span className="ml-auto">
           <Button
             size="sm"
@@ -148,21 +164,41 @@ function SubscriptionRow({
           </Button>
         </span>
       </div>
-      <ProgressBar value={progress} tone={sub.state === 'collected' ? 'success' : 'primary'} />
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-secondary">
-        <span className="data-text">
-          {t(strings.subscriptions.collectedOfAired, {
-            collected: sub.episodes_collected,
-            aired: sub.episodes_aired,
-            total: sub.episodes_total,
-          })}
-        </span>
-        {sub.next_air_date !== null && (
-          <span className="data-text">
-            {strings.subscriptions.nextAirDate}: {formatDate(sub.next_air_date)}
-          </span>
-        )}
-      </div>
+      {sub.seasons.length === 0 ? (
+        <p className="text-xs text-ink-secondary">{strings.subscriptions.noSeasons}</p>
+      ) : (
+        sub.seasons.map((season) => {
+          const view = seasonStateView(season.status)
+          const progress =
+            season.episodes_total > 0
+              ? season.episodes_organized / season.episodes_total
+              : 0
+          return (
+            <div key={season.season_id} className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
+                <StatusDot tone={view.tone} size={7} />
+                <span className="data-text text-ink">
+                  {t(strings.library.seasonN, { n: season.number })}
+                </span>
+                <span>{view.label}</span>
+                <span className="data-text">
+                  {t(strings.subscriptions.organizedOfTotal, {
+                    organized: season.episodes_organized,
+                    total: season.episodes_total,
+                  })}
+                </span>
+                <span className="data-text">
+                  {t(strings.subscriptions.missingCount, { count: season.episodes_missing })}
+                </span>
+                <span className="data-text">
+                  {t(strings.subscriptions.rssCount, { count: season.rss_sources })}
+                </span>
+              </div>
+              <ProgressBar value={progress} tone={view.tone === 'success' ? 'success' : 'primary'} />
+            </div>
+          )
+        })
+      )}
     </div>
   )
 }
@@ -224,7 +260,7 @@ export function SubscriptionsPage() {
             <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-2.5">
               <span className="text-xs text-ink-secondary">
                 {t(strings.subscriptions.removeConfirm, {
-                  title: subs.find((s) => s.id === confirmId)?.title ?? '',
+                  title: subscriptionTitle(subs.find((s) => s.id === confirmId)!),
                 })}
               </span>
               <span className="flex gap-2">

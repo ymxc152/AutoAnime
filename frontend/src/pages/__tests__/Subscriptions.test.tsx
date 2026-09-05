@@ -1,5 +1,6 @@
 /*
- * Subscriptions 冒烟 + 交互:进度条、降频标、订阅/取消订阅。
+ * Subscriptions 冒烟 + 交互(对齐后端 SubscriptionOut/SubscriptionCreateIn):
+ * series 载体 + 每季进度;POST 至少一个标题 + 预生成集表;RSS 关联走「RSS 源」页。
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,22 +13,26 @@ describe('SubscriptionsPage', () => {
     resetMockState()
   })
 
-  it('渲染订阅列表 + 放送进度', async () => {
+  it('渲染订阅列表 + 每季进度(已归档/缺集/RSS 源数)', async () => {
     renderPage(<SubscriptionsPage />)
     expect(await screen.findByText('药屋少女的呢喃')).toBeInTheDocument()
-    expect(screen.getByText('已收 15 / 已放 16 / 全 24 集')).toBeInTheDocument()
+    expect(screen.getByText('已归档 15/24 集')).toBeInTheDocument()
+    expect(screen.getByText('缺 8 集')).toBeInTheDocument()
+    // 药屋与迷宫饭各挂 1 条 RSS 源
+    expect(screen.getAllByText('RSS 源 1').length).toBe(2)
     expect(screen.getByText('迷宫饭')).toBeInTheDocument()
   })
 
-  it('完结收藏的订阅显示降频状态标', async () => {
+  it('完结收藏的订阅显示已收藏状态标', async () => {
     renderPage(<SubscriptionsPage />)
-    expect(await screen.findByText('葬送的芙莉莲')).toBeInTheDocument()
-    expect(screen.getByText('已降频')).toBeInTheDocument()
+    const row = (await screen.findByText('葬送的芙莉莲')).closest<HTMLElement>('div.border-b')!
+    expect(within(row).getAllByText('已收藏').length).toBeGreaterThan(0)
+    expect(within(row).getByText('已归档 28/28 集')).toBeInTheDocument()
   })
 
-  it('Mikan 选番入口与提示文案存在', async () => {
+  it('Mikan 选番入口与 RSS 关联提示存在', async () => {
     renderPage(<SubscriptionsPage />)
-    expect(await screen.findByText('每番只订一个字幕组')).toBeInTheDocument()
+    expect(await screen.findByText(/先在这里建订阅,再在「RSS 源」页/)).toBeInTheDocument()
     const link = screen.getByRole('link', { name: /去 Mikan 选番/ })
     expect(link).toHaveAttribute('href', 'https://mikanani.me')
   })
@@ -42,21 +47,22 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(screen.queryByText('迷宫饭')).not.toBeInTheDocument())
   })
 
-  it('添加订阅:填写 RSS 地址提交后列表刷新', async () => {
+  it('添加订阅:标题 + 季号 + 集数(预生成 MISSING 集表)', async () => {
     const user = userEvent.setup()
     renderPage(<SubscriptionsPage />)
-    await user.type(await screen.findByLabelText('Mikan RSS 地址'), 'https://mikanani.me/RSS/MyBangumi?token=x')
+    await user.type(await screen.findByLabelText('标题(至少填一个语言的标题)'), '测试番')
+    await user.type(screen.getByLabelText('当季集数(可选)'), '12')
     await user.click(screen.getByRole('button', { name: '订阅' }))
-    // mock 会新增一条订阅(标题取第一个 series),与既有同名条目共存
-    const matches = await screen.findAllByText('葬送的芙莉莲')
-    expect(matches.length).toBeGreaterThan(0)
+    expect(await screen.findByText('测试番')).toBeInTheDocument()
+    // 预生成集表:全 MISSING → 已归档 0/12
+    expect(await screen.findByText('已归档 0/12 集')).toBeInTheDocument()
   })
 
-  it('空地址提交显示校验错误', async () => {
+  it('空标题提交显示校验错误(对齐后端至少一个标题)', async () => {
     const user = userEvent.setup()
     renderPage(<SubscriptionsPage />)
     await screen.findByText('药屋少女的呢喃')
     await user.click(screen.getByRole('button', { name: '订阅' }))
-    expect(await screen.findByText('请填写 RSS 地址')).toBeInTheDocument()
+    expect(await screen.findByText('请填写标题')).toBeInTheDocument()
   })
 })

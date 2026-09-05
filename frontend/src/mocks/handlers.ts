@@ -1,6 +1,7 @@
 /*
- * Mock API 处理器 —— 与真实端点客户端(src/api/endpoints.ts)同形状、同语义。
- * E2 合并后:VITE_USE_MOCK=0(或生产构建)即整体关闭,本模块零参与打包路径。
+ * Mock API 处理器 —— 与真实端点客户端(src/api/endpoints.ts)同形状、同语义,
+ * 并对齐 E2 后端行为(Page 信封/PendingResolveOut/rollback 404+409/订阅标题校验)。
+ * VITE_USE_MOCK=0(或生产构建)即整体关闭,本模块零参与打包路径。
  * 有意做成内存态:增删改在会话内可见,便于演示与测试交互闭环。
  */
 import type * as RealEndpoints from '../api/endpoints'
@@ -17,10 +18,16 @@ import {
 import type {
   AuditDto,
   Metrics,
+  OperationGroupDto,
+  Page,
   PendingItemDto,
+  PendingResolveOut,
   RssSourceDto,
+  RollbackResult,
   SeriesDto,
   SettingsDto,
+  SettingsUpdateBody,
+  SubscriptionCreateBody,
   SubscriptionDto,
 } from '../api/types'
 
@@ -36,6 +43,7 @@ interface MockState {
   rssSources: RssSourceDto[]
   settings: SettingsDto
   nextId: number
+  nextOpSeq: number
 }
 
 let state: MockState = freshState()
@@ -49,6 +57,7 @@ function freshState(): MockState {
     rssSources: clone(mockRssSources),
     settings: clone(mockSettings),
     nextId: 1000,
+    nextOpSeq: 1,
   }
 }
 
@@ -57,45 +66,45 @@ export function resetMockState(): void {
   state = freshState()
 }
 
-function paginate<T>(items: T[], limit?: number, offset?: number): { items: T[]; total: number } {
+/** Page 信封:与后端 schemas.Page 一致(total/limit/offset/items) */
+function paginate<T>(items: T[], limit?: number, offset?: number): Page<T> {
+  const lim = limit ?? 50
   const start = offset ?? 0
-  const end = limit !== undefined ? start + limit : undefined
-  return { items: items.slice(start, end), total: items.length }
+  return {
+    total: items.length,
+    limit: lim,
+    offset: start,
+    items: items.slice(start, start + lim),
+  }
 }
 
-function matchTitle(series: SeriesDto, q: string): boolean {
-  const needle = q.toLowerCase()
-  return (
-    (series.title_cn ?? '').toLowerCase().includes(needle) ||
-    (series.title_jp ?? '').toLowerCase().includes(needle) ||
-    (series.title_romaji ?? '').toLowerCase().includes(needle)
-  )
+function delayVoid(): Promise<void> {
+  return new Promise((resolve) => setTimeout(() => resolve(undefined), 120))
 }
 
-export function createMockApi(delayMs = 120): (typeof RealEndpoints)['endpoints'] {
-  const delay = <T>(value: T): Promise<T> =>
-    new Promise((resolve) => setTimeout(() => resolve(value), delayMs))
+function delayed<T>(value: T): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), 120))
+}
 
-  const delayVoid = (): Promise<void> =>
-    new Promise((resolve) => setTimeout(() => resolve(undefined), delayMs))
+function nextOperationId(): string {
+  const id = `op-mock-${String(state.nextOpSeq++).padStart(4, '0')}`
+  return id
+}
 
+export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
   return {
     metrics: {
       get: () => {
         const metrics: Metrics = {
           ...clone(mockMetrics),
-          pending_count: state.pending.filter((p) => p.status === 'pending').length,
+          pending_open: state.pending.filter((p) => p.status === 'pending').length,
         }
-        return delay(metrics)
+        return delayed(metrics)
       },
     },
 
     series: {
-      list: (query = {}) => {
-        const q = query.q ?? ''
-        const filtered = q ? state.series.filter((s) => matchTitle(s, q)) : state.series
-        return delay(paginate(filtered, query.limit, query.offset))
-      },
+      list: (query = {}) => delayed(paginate(state.series, query.limit, query.offset)),
     },
 
     pending: {
@@ -105,47 +114,80 @@ export function createMockApi(delayMs = 120): (typeof RealEndpoints)['endpoints'
           status === 'pending' || status === 'resolved' || status === 'skipped'
             ? state.pending.filter((p) => p.status === status)
             : state.pending
-        return delay(paginate(filtered, query.limit, query.offset))
+        return delayed(paginate(filtered, query.limit, query.offset))
       },
       confirm: (id) => {
         const item = state.pending.find((p) => p.id === id)
         if (!item) {
           return delayVoid().then(() => {
-            throw new ApiError(404, `待确认项 ${id} 不存在`)
+            throw new ApiError(404, `pending ${id} not found`)
           })
         }
         item.status = 'resolved'
         item.resolved_at = new Date().toISOString()
-        return delay(clone(item))
+        item.resolved_by = 'manual'
+        item.resolution = { action: 'confirm', confirmed_title: String(item.context.title ?? item.raw_name) }
+        return delayed({
+          id: item.id,
+          status: item.status,
+          resolution: item.resolution,
+          resolved_by: 'manual',
+          learned_entries: 2,
+          bypassed: false,
+        } satisfies PendingResolveOut)
       },
       correct: (id, body) => {
         const item = state.pending.find((p) => p.id === id)
         if (!item) {
           return delayVoid().then(() => {
-            throw new ApiError(404, `待确认项 ${id} 不存在`)
+            throw new ApiError(404, `pending ${id} not found`)
           })
         }
-        // 契约假设:纠正触发学习三件套(parse_memory + alias + bypass),此处仅模拟结果
-        if (body.title !== undefined) item.parsed.title = { value: body.title, source: 'memory', confidence: 'high' }
-        if (body.season !== undefined) item.parsed.season = { value: body.season, source: 'memory', confidence: 'high' }
-        if (body.episode !== undefined) item.parsed.episode = { value: body.episode, source: 'memory', confidence: 'high' }
-        if (body.fansub !== undefined) item.parsed.fansub = { value: body.fansub, source: 'memory', confidence: 'high' }
-        if (body.resolution !== undefined) item.parsed.resolution = { value: body.resolution, source: 'memory', confidence: 'high' }
+        // 对齐后端 PendingCorrectIn:title 必填
+        if (body.title === undefined || body.title.trim() === '') {
+          return delayVoid().then(() => {
+            throw new ApiError(422, "correct requires a non-empty 'title'")
+          })
+        }
+        // 对齐学习三件套语义:纠正即覆盖草稿字段 + 负记忆
+        item.context.title = body.title
+        if (body.season !== undefined) item.context.season = body.season
+        if (body.episode !== undefined) item.context.episode = body.episode
+        if (body.segment !== undefined) item.context.segment = body.segment
+        if (body.fansub !== undefined) item.context.fansub = body.fansub
         item.status = 'resolved'
         item.resolved_at = new Date().toISOString()
+        item.resolved_by = 'manual'
         item.reason = '人工纠正,已沉淀进解析记忆'
-        return delay(clone(item))
+        item.resolution = { action: 'correct', confirmed_title: body.title }
+        return delayed({
+          id: item.id,
+          status: item.status,
+          resolution: item.resolution,
+          resolved_by: 'manual',
+          learned_entries: 2,
+          bypassed: true,
+        } satisfies PendingResolveOut)
       },
       reject: (id) => {
         const item = state.pending.find((p) => p.id === id)
         if (!item) {
           return delayVoid().then(() => {
-            throw new ApiError(404, `待确认项 ${id} 不存在`)
+            throw new ApiError(404, `pending ${id} not found`)
           })
         }
         item.status = 'skipped'
         item.resolved_at = new Date().toISOString()
-        return delay(clone(item))
+        item.resolved_by = 'manual'
+        item.resolution = { action: 'reject', confirmed_title: String(item.context.title ?? item.raw_name) }
+        return delayed({
+          id: item.id,
+          status: item.status,
+          resolution: item.resolution,
+          resolved_by: 'manual',
+          learned_entries: 0,
+          bypassed: false,
+        } satisfies PendingResolveOut)
       },
     },
 
@@ -155,52 +197,115 @@ export function createMockApi(delayMs = 120): (typeof RealEndpoints)['endpoints'
         if (query.operation_id) {
           items = items.filter((a) => a.operation_id === query.operation_id)
         }
-        const sorted = [...items].sort((a, b) => b.created_at.localeCompare(a.created_at))
-        return delay(paginate(sorted, query.limit, query.offset))
+        if (query.entity) {
+          items = items.filter((a) => a.entity === query.entity)
+        }
+        if (query.action) {
+          items = items.filter((a) => a.action === query.action)
+        }
+        const sorted = [...items].sort((a, b) => b.id - a.id)
+        return delayed(paginate(sorted, query.limit, query.offset))
+      },
+    },
+
+    auditOperations: {
+      list: (query = {}) => {
+        const groups = new Map<string, AuditDto[]>()
+        for (const row of state.audit) {
+          const list = groups.get(row.operation_id) ?? []
+          list.push(row)
+          groups.set(row.operation_id, list)
+        }
+        const items: OperationGroupDto[] = [...groups.entries()]
+          .map(([operationId, rows]) => {
+            const sorted = [...rows].sort((a, b) => a.id - b.id)
+            return {
+              operation_id: operationId,
+              rows: sorted.length,
+              entities: [...new Set(sorted.map((r) => r.entity))].sort(),
+              actions: [...new Set(sorted.map((r) => r.action))].sort(),
+              first_audit_id: sorted[0]!.id,
+              last_audit_id: sorted[sorted.length - 1]!.id,
+            }
+          })
+          .sort((a, b) => b.last_audit_id - a.last_audit_id)
+        return delayed(paginate(items, query.limit, query.offset))
       },
     },
 
     organize: {
-      rollback: (operationId) => {
-        const op = state.audit.find(
-          (a) => a.operation_id === operationId && Object.keys(a.reverse).length > 0,
-        )
-        if (!op) {
+      rollback: (auditId) => {
+        const row = state.audit.find((a) => a.id === auditId)
+        if (!row) {
           return delayVoid().then(() => {
-            throw new ApiError(404, `操作 ${operationId} 不存在或没有可撤销的 reverse 指令`)
+            throw new ApiError(404, `audit row ${auditId} not found`)
           })
         }
-        return delay({ ok: true, operation_id: operationId })
+        if (Object.keys(row.reverse).length === 0) {
+          return delayVoid().then(() => {
+            throw new ApiError(
+              409,
+              `audit row ${auditId} carries no reverse instruction; nothing to roll back`,
+            )
+          })
+        }
+        const operationId = nextOperationId()
+        // 对齐后端:撤销本身落一条新审计行(置顶下一组)
+        state.audit.unshift({
+          id: state.nextId++,
+          operation_id: operationId,
+          entity: row.entity,
+          entity_id: row.entity_id,
+          action: 'rollback',
+          instruction: { rolled_back_audit_id: auditId, applied: {}, skipped: {} },
+          reverse: { rollback_of: auditId },
+          actor: 'manual',
+        })
+        const result: RollbackResult = {
+          audit_id: auditId,
+          operation_id: operationId,
+          applied: { applied: {}, skipped: {} },
+          learned: false,
+        }
+        return delayed(result)
       },
     },
 
     subscriptions: {
-      list: (query = {}) => delay(paginate(state.subscriptions, query.limit, query.offset)),
-      create: (body) => {
-        if (!body.rss_url) {
+      list: (query = {}) => delayed(paginate(state.subscriptions, query.limit, query.offset)),
+      create: (body: SubscriptionCreateBody) => {
+        // 对齐后端 SubscriptionCreateIn:至少一个标题
+        if (!body.title_cn && !body.title_jp && !body.title_romaji) {
           return delayVoid().then(() => {
-            throw new ApiError(422, 'RSS 地址不能为空')
+            throw new ApiError(422, 'at least one of title_cn/title_jp/title_romaji is required')
           })
         }
-        const id = state.nextId++
-        const series = state.series[0]
+        const episodeCount = body.episode_count ?? 0
+        const seasonNumber = body.season_number ?? 1
         const sub: SubscriptionDto = {
-          id,
-          series_id: series?.id ?? 0,
-          title: series?.title_cn ?? '新订阅',
-          season_id: series?.seasons[0]?.id ?? 0,
-          season_number: series?.seasons[0]?.number ?? 1,
-          state: 'airing',
-          fansub_pref: body.fansub ?? null,
-          episodes_total: 12,
-          episodes_aired: 0,
-          episodes_collected: 0,
-          next_air_date: null,
-          reduced_frequency: false,
-          enabled: true,
+          id: state.nextId++,
+          title_cn: body.title_cn ?? null,
+          title_jp: body.title_jp ?? null,
+          title_romaji: body.title_romaji ?? null,
+          media_type: body.media_type ?? 'tv',
+          status: 'active',
+          fansub_pref: body.fansub_pref ?? null,
+          quality_pref: body.quality_pref ?? null,
+          seasons: [
+            {
+              season_id: state.nextId++,
+              number: seasonNumber,
+              status: 'upcoming',
+              episodes_total: episodeCount,
+              // 预生成集表 = 全部 MISSING
+              episodes_missing: episodeCount,
+              episodes_organized: 0,
+              rss_sources: 0,
+            },
+          ],
         }
         state.subscriptions.unshift(sub)
-        return delay(clone(sub))
+        return delayed(clone(sub))
       },
       remove: (id) => {
         state.subscriptions = state.subscriptions.filter((s) => s.id !== id)
@@ -209,34 +314,41 @@ export function createMockApi(delayMs = 120): (typeof RealEndpoints)['endpoints'
     },
 
     rssSources: {
-      list: (query = {}) => delay(paginate(state.rssSources, query.limit, query.offset)),
+      list: (query = {}) => delayed(paginate(state.rssSources, query.limit, query.offset)),
       create: (body) => {
         if (!body.url) {
           return delayVoid().then(() => {
-            throw new ApiError(422, '源地址不能为空')
+            throw new ApiError(422, 'url must be a non-empty string')
+          })
+        }
+        // 对齐后端 RssSourceCreateIn:season_id 必填(外键)
+        if (body.season_id === undefined) {
+          return delayVoid().then(() => {
+            throw new ApiError(422, 'season_id is required')
           })
         }
         const source: RssSourceDto = {
           id: state.nextId++,
           url: body.url,
           has_token: Boolean(body.token),
-          season_id: body.season_id ?? null,
-          enabled: true,
+          season_id: body.season_id,
+          enabled: body.enabled ?? true,
           last_polled_at: null,
         }
         state.rssSources.unshift(source)
-        return delay(clone(source))
+        return delayed(clone(source))
       },
       update: (id, body) => {
         const source = state.rssSources.find((s) => s.id === id)
         if (!source) {
           return delayVoid().then(() => {
-            throw new ApiError(404, `RSS 源 ${id} 不存在`)
+            throw new ApiError(404, `rss source ${id} not found`)
           })
         }
         if (body.enabled !== undefined) source.enabled = body.enabled
         if (body.url !== undefined) source.url = body.url
-        return delay(clone(source))
+        if (body.token !== undefined) source.has_token = body.token !== null
+        return delayed(clone(source))
       },
       remove: (id) => {
         state.rssSources = state.rssSources.filter((s) => s.id !== id)
@@ -245,10 +357,16 @@ export function createMockApi(delayMs = 120): (typeof RealEndpoints)['endpoints'
     },
 
     settings: {
-      get: () => delay(clone(state.settings)),
-      update: (body) => {
-        state.settings = clone(body)
-        return delay(clone(state.settings))
+      get: () => delayed(clone(state.settings)),
+      update: (body: SettingsUpdateBody) => {
+        // 对齐后端白名单覆写(进程内):dry_run/l2/llm/reference
+        if (body.dry_run !== undefined) state.settings.dry_run = body.dry_run
+        if (body.l2_enabled !== undefined) state.settings.l2_enabled = body.l2_enabled
+        if (body.llm_enabled !== undefined) state.settings.llm_enabled = body.llm_enabled
+        if (body.llm_model !== undefined) state.settings.llm_model = body.llm_model
+        if (body.reference_enabled !== undefined) state.settings.reference_enabled = body.reference_enabled
+        if (body.reference_order !== undefined) state.settings.reference_order = [...body.reference_order]
+        return delayed(clone(state.settings))
       },
     },
   }

@@ -46,6 +46,37 @@ describe('useEvents', () => {
     })
     expect(result.current.received).toBe(1)
     expect(received[0]?.category).toBe('parse')
+    // 对齐后端契约:id 取 SSE id: 行(lastEventId),ts 为前端本地生成
+    expect(received[0]?.id).toBe('7')
+    expect(received[0]?.ts).not.toBe('')
+    expect(received[0]?.payload).toEqual({})
+  })
+
+  it('data 载荷解析 {category,message,payload}(后端无 ts/id 字段)', async () => {
+    const registry: FakeEventSource[] = []
+    const received: SseEvent[] = []
+    const { result } = renderHook(() =>
+      useEvents({ onEvent: (e) => received.push(e), factory: makeFactory(registry) }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const source = registry[0]!
+    act(() => source!.open())
+    act(() => {
+      source!.emit(
+        sseMessage({
+          id: '42',
+          category: 'organize',
+          message: 'organize.archived',
+          payload: { audit_id: 42, dst: '/library/a.mkv' },
+        }),
+      )
+    })
+    expect(result.current.received).toBe(1)
+    expect(received[0]?.id).toBe('42')
+    expect(received[0]?.message).toBe('organize.archived')
+    expect(received[0]?.payload).toEqual({ audit_id: 42, dst: '/library/a.mkv' })
   })
 
   it('断线后指数退避重连,重连 URL 携带 last_event_id', async () => {
