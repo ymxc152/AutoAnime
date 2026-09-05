@@ -11,7 +11,9 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -111,6 +113,7 @@ class ParseMemory(Base):
     __table_args__ = (
         CheckConstraint("key_level IN (1, 2)", name="ck_parse_memory_key_level"),
         UniqueConstraint("key_level", "key_hash", name="uq_parse_memory_key"),
+        Index("ix_parse_memory_key_level_hash", "key_level", "key_hash"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -137,6 +140,7 @@ class Alias(Base):
 
 class BypassList(Base):
     __tablename__ = "bypass_list"
+    __table_args__ = (Index("ix_bypass_list_pattern_hash", "pattern_hash"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     pattern_hash: Mapped[str]
@@ -183,3 +187,24 @@ class ParseEvents(Base):
     latency_ms: Mapped[int | None] = mapped_column(nullable=True)
     outcome: Mapped[str]
     confidence: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class LlmCacheRow(Base):
+    """``llm_cache`` 表：L3 录制的真实 LLM 响应（PR5）。
+
+    命名为 ``LlmCacheRow`` 以区别于 ``pipeline.l3.cache_key.LlmCache``
+    （store 层 Protocol 数据类）；键与 bypass 同源（``pattern_hash``），
+    每 pattern 至多一行。``response_text`` 存录制的模型输出原文，回放时
+    走与真实调用相同的严格 schema 解析。``request_fingerprint`` 为可选
+    审计列，当前写入路径（Protocol ``put``）不填充。
+    """
+
+    __tablename__ = "llm_cache"
+    __table_args__ = (UniqueConstraint("pattern_hash", name="uq_llm_cache_pattern_hash"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pattern_hash: Mapped[str]
+    request_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True)
+    response_text: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
