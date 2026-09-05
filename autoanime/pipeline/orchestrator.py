@@ -38,7 +38,7 @@ Arbiter audit rows (R8) are persisted through the narrow
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, cast
 from uuid import uuid4
@@ -54,6 +54,12 @@ from autoanime.core.interfaces import (
     Recognizer,
 )
 from autoanime.memory.lookup import lookup_memory
+from autoanime.pipeline.batch import (
+    DEFAULT_MAX_BATCH_SIZE,
+    DEFAULT_MIN_BATCH_SIZE,
+    BatchItem,
+    organize_batches,
+)
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l2 import eligible_for_memory, pattern_hash
 from autoanime.pipeline.l2.draft import apply_memory_hit
@@ -119,6 +125,13 @@ class RouteOutcome:
     arbiter's R8 rows for the pass. ``degraded`` marks a pass where a
     configured-on capability (L2 store or L3) was unavailable, so the
     pre-existing L1/L2 fallback produced the outcome.
+
+    ``batch_applied`` (E1) marks a pass whose L3 segment ran through the
+    opportunistic batch entry (``process_batch(batching=True)``): the
+    release shared one batch LLM call with same-folder same-fansub peers.
+    An item that failed inside the batch and fell back to the single-file
+    retry still counts as ``batch_applied`` (it went through the batch
+    entry); the flag is entry-level bookkeeping, not a success marker.
     """
 
     result: ParseResult | None
@@ -127,6 +140,26 @@ class RouteOutcome:
     degraded: bool = False
     l3_applied: bool = False
     audit: tuple[ArbiterAudit, ...] = ()
+    batch_applied: bool = False
+
+
+@dataclass(frozen=True)
+class _L2Stage:
+    """One item's state after the L1+L2 segments, before the L3 segment.
+
+    The shared intermediate between the single-file path (``process``)
+    and the batch entry (``process_batch``): both run the identical L2
+    stage logic (bypass gate, memory fusion, pre-L3 disambiguation) and
+    only differ in how the L3 segment is executed (per item vs per batch).
+    """
+
+    base: ParseResult | None
+    l1: ParseResult | None
+    l2_applied: bool
+    l2_degraded: bool
+    memory_seasons: tuple[int, ...]
+    context: ParseContext | None
+    operation_id: str
 
 
 class Orchestrator:
@@ -187,41 +220,59 @@ class Orchestrator:
         self, raw: RawName, result: ParseResult, context: ParseContext | None,
         operation_id: str,
     ) -> RouteOutcome:
-        """The L2 segment for one MEDIUM result, with graceful degradation."""
+        """The L2 segment for one MEDIUM result, then the single-file L3 segment."""
+        stage = await self._l2_stage(raw, result, context, operation_id)
+        return await self._finish_stage_single(raw, stage)
+
+    def _l3_wiring(
+        self,
+    ) -> tuple[LlmFallbackRecognizer, LlmTransport, LlmCacheStore] | None:
+        """The fully wired L3 segment (recognizer, transport, cache), or ``None``.
+
+        Single source of truth for both L3 entries: a configured-on L3 whose
+        recognizer/transport/cache are all present returns the trio to use;
+        L3 off or any component missing returns ``None`` (PR5 degradation
+        semantics stay with the callers).
+        """
+        if (
+            self._l3_enabled
+            and self._l3_recognizer is not None
+            and self._llm_transport is not None
+            and self._llm_cache_store is not None
+        ):
+            return (self._l3_recognizer, self._llm_transport, self._llm_cache_store)
+        return None
+
+    async def _l2_stage(
+        self, raw: RawName, result: ParseResult, context: ParseContext | None,
+        operation_id: str,
+    ) -> _L2Stage:
+        """The L2 segment for one MEDIUM result, with graceful degradation.
+
+        Shared verbatim by the single-file path and the batch entry: the
+        authoritative raw-name bypass gate, the memory fusion, and the
+        pre-L3 canonical disambiguation (PR7 M2/M2b). A degradation here
+        never reaches L3: the L1 result is kept as the stage base.
+        """
         if not self._l2_enabled:
-            return await self._finish(
-                raw, result, result, context, operation_id,
-                l2_applied=False, l2_degraded=False, memory_seasons=(),
-            )
+            return _L2Stage(result, result, False, False, (), context, operation_id)
         store = self._memory_store
         if store is None:
-            return await self._finish(
-                raw, result, result, context, operation_id,
-                l2_applied=False, l2_degraded=True, memory_seasons=(),
-            )
+            return _L2Stage(result, result, False, True, (), context, operation_id)
         try:
             # Authoritative raw-name bypass gate (PR4 T3 design point): a
             # bypassed release neither fuses nor records a hit. The raw name is
             # available here, not inside the L2 ParseResult contract.
             if await store.has_bypass(pattern_hash(raw.name)):
-                return await self._finish(
-                    raw, result, result, context, operation_id,
-                    l2_applied=False, l2_degraded=False, memory_seasons=(),
-                )
+                return _L2Stage(result, result, False, False, (), context, operation_id)
         except Exception:
-            return await self._finish(
-                raw, result, result, context, operation_id,
-                l2_applied=False, l2_degraded=True, memory_seasons=(),
-            )
+            return _L2Stage(result, result, False, True, (), context, operation_id)
         try:
             enhanced = await self._enhancer.enhance(
                 result, context, store, operation_id=operation_id
             )
         except Exception:
-            return await self._finish(
-                raw, result, result, context, operation_id,
-                l2_applied=False, l2_degraded=True, memory_seasons=(),
-            )
+            return _L2Stage(result, result, False, True, (), context, operation_id)
         if enhanced is None:
             # Miss: best-effort canonical re-query (PR7 M2), then keep the L1
             # result as-is and continue through L3.
@@ -230,14 +281,10 @@ class Orchestrator:
             )
             if canonical is not None:
                 return canonical
-            return await self._finish(
-                raw, result, result, context, operation_id,
-                l2_applied=False, l2_degraded=False, memory_seasons=(),
-            )
-        return await self._finish(
-            raw, enhanced, result, context, operation_id,
-            l2_applied=True, l2_degraded=False,
-            memory_seasons=await self._memory_seasons(result, store),
+            return _L2Stage(result, result, False, False, (), context, operation_id)
+        return _L2Stage(
+            enhanced, result, True, False,
+            await self._memory_seasons(result, store), context, operation_id,
         )
 
     async def _try_canonical_memory(
@@ -246,7 +293,7 @@ class Orchestrator:
         result: ParseResult,
         context: ParseContext | None,
         operation_id: str,
-    ) -> RouteOutcome | None:
+    ) -> _L2Stage | None:
         """Pre-L3 disambiguation (PR7 M2/M2b): re-query L2 under a canonical title.
 
         On an L2 miss, the L1 draft's title shape is resolved to a canonical
@@ -266,9 +313,11 @@ class Orchestrator:
         the level-2 key the canonical shape plus the season/episode/fansub
         the L1 draft parsed out. A hit adopts the exact memory-hit semantics
         of a direct L2 hit (``apply_memory_hit`` + hit recording +
-        ``route=memory``); every degradation (no store, alias miss, no chain,
-        chain miss, empty canonical title, canonical L2 miss, any failure)
-        silently falls through to the next link or the original path.
+        ``l2_applied`` stage); every degradation (no store, alias miss, no
+        chain, chain miss, empty canonical title, canonical L2 miss, any
+        failure) silently falls through to the next link or the original
+        path. E1: returns the fused stage instead of finishing the pass so
+        the batch entry can share the L2 stage verbatim.
         """
         store = self._memory_store
         if store is None:
@@ -331,13 +380,15 @@ class Orchestrator:
         context: ParseContext | None,
         operation_id: str,
         store: MemoryStore,
-    ) -> RouteOutcome | None:
+    ) -> _L2Stage | None:
         """Re-query L2 under a canonical title and adopt a hit (PR7 M2 semantics).
 
         Key derivation reuses lookup_memory's pure helpers, so the canonical
         shape comes from the single source of truth (build_title_shape) and
         the two-level order mirrors the direct L2 search exactly. A miss (or
-        any failure) returns ``None`` so the caller falls through.
+        any failure) returns ``None`` so the caller falls through. E1: the
+        fused outcome is returned as an ``_L2Stage`` (l2_applied), with the
+        L3 segment left to the caller -- the batch entry needs the stage.
         """
         try:
             canonical_draft = replace(result, title=canonical_title)
@@ -351,10 +402,9 @@ class Orchestrator:
             await store.record_hit(match.memory, operation_id=operation_id)
         except Exception:
             return None
-        return await self._finish(
-            raw, enhanced, result, context, operation_id,
-            l2_applied=True, l2_degraded=False,
-            memory_seasons=await self._memory_seasons(canonical_draft, store),
+        return _L2Stage(
+            enhanced, result, True, False,
+            await self._memory_seasons(canonical_draft, store), context, operation_id,
         )
 
     async def _finish(
@@ -373,21 +423,21 @@ class Orchestrator:
 
         ``base`` is the pre-L3 effective result (the L1+L2 fusion on a
         memory hit, else the L1 result or ``None``); ``l1`` is the original
-        L1 draft for the arbiter's three-way input.
+        L1 draft for the arbiter's three-way input. The L3 segment runs the
+        single-file path (one ``enhance`` per candidate).
         """
-        degraded = l2_degraded
+        stage = _L2Stage(
+            base, l1, l2_applied, l2_degraded, memory_seasons, context, operation_id
+        )
         l3_result: ParseResult | None = None
         l3_attempted = False
-        if (
-            self._l3_enabled
-            and self._l3_recognizer is not None
-            and self._llm_transport is not None
-            and self._llm_cache_store is not None
-        ):
+        wiring = self._l3_wiring()
+        if wiring is not None:
             l3_attempted = True
+            recognizer, transport, cache_store = wiring
             try:
-                l3_result = await self._l3_recognizer.enhance(
-                    raw, base, context, self._llm_transport, self._llm_cache_store,
+                l3_result = await recognizer.enhance(
+                    raw, stage.base, context, transport, cache_store,
                     operation_id=operation_id,
                 )
             except Exception:
@@ -395,35 +445,217 @@ class Orchestrator:
                     "l3 segment failed unexpectedly, op=%s", operation_id, exc_info=True
                 )
                 l3_result = None
-            if l3_result is None:
-                degraded = True
-        elif self._l3_enabled:
-            # Configured on but not fully wired: recognizer/transport/cache
-            # missing, so L3 cannot run this pass.
-            degraded = True
+        return await self._complete_stage(
+            raw, stage, l3_result,
+            l3_attempted=l3_attempted,
+            l3_degraded=(l3_result is None) if l3_attempted else self._l3_enabled,
+        )
 
-        route = ROUTE_MEMORY if l2_applied else ROUTE_L3
-        if l3_result is None and not l2_applied and not l3_attempted:
+    async def _finish_stage_single(
+        self, raw: RawName, stage: _L2Stage
+    ) -> RouteOutcome:
+        """Complete a stage through the single-file L3 segment (per-item call)."""
+        return await self._finish(
+            raw, stage.base, stage.l1, stage.context, stage.operation_id,
+            l2_applied=stage.l2_applied, l2_degraded=stage.l2_degraded,
+            memory_seasons=stage.memory_seasons,
+        )
+
+    async def _complete_stage(
+        self,
+        raw: RawName,
+        stage: _L2Stage,
+        l3_result: ParseResult | None,
+        *,
+        l3_attempted: bool,
+        l3_degraded: bool,
+        batch_applied: bool = False,
+    ) -> RouteOutcome:
+        """Arbitration and route assembly for one stage with a decided L3 result.
+
+        Shared tail of the single-file path and the batch entry: the caller
+        has produced (or declined to produce) the L3 draft; this method only
+        routes, arbitrates and persists audit rows. ``l3_degraded`` follows
+        the PR5 semantics: a configured-but-unwired L3 degrades the pass, a
+        disabled L3 does not.
+        """
+        degraded = stage.l2_degraded or l3_degraded
+        route = ROUTE_MEMORY if stage.l2_applied else ROUTE_L3
+        if l3_result is None and not stage.l2_applied and not l3_attempted:
             # Nothing beyond the bare L1 result: keep it, no arbitration.
-            return RouteOutcome(base, route, degraded=degraded)
+            return RouteOutcome(
+                stage.base, route, degraded=degraded, batch_applied=batch_applied
+            )
 
         verdict = await self._arbitrate(
             raw,
-            l1_result=l1,
-            fused=base if l2_applied else None,
+            l1_result=stage.l1,
+            fused=stage.base if stage.l2_applied else None,
             l3_result=l3_result,
-            context=context,
-            memory_seasons=memory_seasons,
-            operation_id=operation_id,
+            context=stage.context,
+            memory_seasons=stage.memory_seasons,
+            operation_id=stage.operation_id,
         )
-        result = verdict.result if verdict.result is not None else base
+        result = verdict.result if verdict.result is not None else stage.base
         return RouteOutcome(
             result,
             route,
-            l2_applied=l2_applied,
+            l2_applied=stage.l2_applied,
             degraded=degraded,
             l3_applied=l3_result is not None,
             audit=verdict.audit,
+            batch_applied=batch_applied,
+        )
+
+    async def process_batch(
+        self,
+        raws: Sequence[RawName],
+        *,
+        contexts: Sequence[ParseContext | None] | None = None,
+        batching: bool = False,
+        batch_min_size: int = DEFAULT_MIN_BATCH_SIZE,
+        batch_max_size: int = DEFAULT_MAX_BATCH_SIZE,
+    ) -> list[RouteOutcome]:
+        """The two shared entries (9.3b): subscription quick path vs opportunistic
+        batching for library imports.
+
+        ``batching=False`` (subscription entry): every item runs the fixed
+        single-file pipeline (``process``) -- one release in, one pass out,
+        never waiting for a batch to form.
+
+        ``batching=True`` (library import entry): the L1/L2 segments still
+        run per item with identical semantics (bypass gate, memory fusion,
+        pre-L3 disambiguation); L1 HIGH items archive directly. Only the
+        candidates that reach the L3 segment are grouped by
+        "same folder + same fansub" via ``organize_batches``: a group that
+        naturally piled up to ``batch_min_size`` shares one batch LLM call
+        (capped at ``batch_max_size`` per batch, item-level failures retried
+        singly inside the L3 recognizer); the rest keep the single-file
+        quick path. Output is aligned 1:1 with ``raws`` in input order.
+        """
+        if not raws:
+            return []
+        if contexts is not None and len(contexts) != len(raws):
+            raise ValueError("contexts must align with raws")
+        if not batching:
+            ctx_list = list(contexts) if contexts is not None else [None] * len(raws)
+            return [
+                await self.process(raw, context)
+                for raw, context in zip(raws, ctx_list, strict=True)
+            ]
+
+        total = len(raws)
+        outcomes: list[RouteOutcome | None] = [None] * total
+        stages: dict[int, _L2Stage] = {}
+        candidates: list[int] = []
+        for position, raw in enumerate(raws):
+            context = contexts[position] if contexts is not None else None
+            operation_id = uuid4().hex
+            result = await self._recognizer.parse(raw, context)
+            if result is None:
+                stages[position] = _L2Stage(
+                    None, None, False, False, (), context, operation_id
+                )
+                candidates.append(position)
+                continue
+            if result.level is Confidence.HIGH:
+                outcomes[position] = RouteOutcome(result, ROUTE_ARCHIVE)
+                continue
+            if not eligible_for_memory(result.level):
+                # LOW: memory never participates; straight to the L3 segment.
+                stages[position] = _L2Stage(
+                    result, result, False, False, (), context, operation_id
+                )
+                candidates.append(position)
+                continue
+            stages[position] = await self._l2_stage(raw, result, context, operation_id)
+            candidates.append(position)
+
+        wiring = self._l3_wiring()
+        if wiring is not None:
+            items: list[BatchItem] = []
+            for position in candidates:
+                stage = stages[position]
+                candidate = raws[position]
+                items.append(
+                    BatchItem(
+                        name=candidate.name,
+                        folder=candidate.folder or candidate.parent_path,
+                        fansub=stage.base.fansub if stage.base else None,
+                    )
+                )
+            # BatchItem instances are frozen dataclasses; equal fields hash
+            # equal, so the reverse mapping uses object identity -- every
+            # item here is a distinct object tied to one candidate position.
+            position_of_item = {
+                id(item): position
+                for item, position in zip(items, candidates, strict=True)
+            }
+            plan = organize_batches(
+                items, min_batch_size=batch_min_size, max_batch_size=batch_max_size
+            )
+            for group in plan.groups:
+                positions = [position_of_item[id(item)] for item in group.items]
+                l3_results = await self._run_l3_batch(
+                    wiring,
+                    [raws[p] for p in positions],
+                    [stages[p] for p in positions],
+                    group.key[1] if group.key is not None else None,
+                )
+                for position, l3_result in zip(positions, l3_results, strict=True):
+                    outcomes[position] = await self._complete_stage(
+                        raws[position],
+                        stages[position],
+                        l3_result,
+                        l3_attempted=True,
+                        l3_degraded=l3_result is None,
+                        batch_applied=True,
+                    )
+            for item in plan.singles:
+                position = position_of_item[id(item)]
+                outcomes[position] = await self._finish_stage_single(
+                    raws[position], stages[position]
+                )
+        else:
+            # L3 off or not wired: every candidate completes through the
+            # single-file tail (which carries the PR5 degradation semantics).
+            for position in candidates:
+                outcomes[position] = await self._finish_stage_single(
+                    raws[position], stages[position]
+                )
+
+        filled: list[RouteOutcome] = []
+        for outcome in outcomes:
+            assert outcome is not None, "every input item must produce an outcome"
+            filled.append(outcome)
+        return filled
+
+    async def _run_l3_batch(
+        self,
+        wiring: tuple[LlmFallbackRecognizer, LlmTransport, LlmCacheStore],
+        group_raws: Sequence[RawName], group_stages: Sequence[_L2Stage],
+        fansub: str | None,
+    ) -> list[ParseResult | None]:
+        """One batch LLM call for a same-folder same-fansub group.
+
+        The batch prompt shares one context: the first non-None item context
+        (library imports pass a uniform context; per-item contexts inside a
+        batch are a backlog refinement). ``operation_id`` is the first item's
+        pass id, for log correlation only -- one batch call spans several
+        passes.
+        """
+        recognizer, transport, cache_store = wiring
+        shared_context = next(
+            (stage.context for stage in group_stages if stage.context is not None), None
+        )
+        return await recognizer.enhance_batch(
+            group_raws,
+            [stage.base for stage in group_stages],
+            shared_context,
+            transport,
+            cache_store,
+            fansub=fansub,
+            operation_id=group_stages[0].operation_id,
         )
 
     async def _arbitrate(
