@@ -44,6 +44,30 @@ function seriesStats(series: SeriesDto): {
   }
 }
 
+/** 海报:本地库 poster 优先(后端代理);缺失/401 时降级为首字占位块 */
+function SeriesPoster({ seriesId, title }: { seriesId: number; title: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div
+        aria-hidden
+        className="flex h-24 w-16 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-lg font-medium text-ink-secondary"
+      >
+        {title.slice(0, 1)}
+      </div>
+    )
+  }
+  return (
+    <img
+      src={api.series.posterUrl(seriesId)}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="h-24 w-16 shrink-0 rounded-sm border border-line object-cover"
+    />
+  )
+}
+
 function QualityBadge({ score }: { score: number | null }) {
   if (score === null) {
     return <span className="text-xs text-ink-muted">—</span>
@@ -137,8 +161,8 @@ function SeriesDrawer({ series, onClose }: { series: SeriesDto; onClose: () => v
 
 export function LibraryPage() {
   const [query, setQuery] = useState('')
-  // 后端 GET /api/series 不支持标题过滤:一次拉全量(上限 300),搜索在前端做
-  const fetcher = useCallback(() => api.series.list({ limit: 300 }), [])
+  // 后端 GET /api/series 不支持标题过滤:一次拉全量(后端统一分页上限 200),搜索在前端做
+  const fetcher = useCallback(() => api.series.list({ limit: 200 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
   const [selected, setSelected] = useState<SeriesDto | null>(null)
 
@@ -194,8 +218,10 @@ export function LibraryPage() {
                 key={series.id}
                 type="button"
                 onClick={() => setSelected(series)}
-                className="rounded-md border border-line bg-surface p-3 text-left shadow-soft-sm transition-shadow hover:shadow-soft-md"
+                className="flex gap-3 rounded-md border border-line bg-surface p-3 text-left shadow-soft-sm transition-shadow hover:shadow-soft-md"
               >
+                <SeriesPoster seriesId={series.id} title={seriesTitle(series)} />
+                <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <p className="font-medium text-ink">{seriesTitle(series)}</p>
                   <Badge>{mediaTypeLabel(series.media_type)}</Badge>
@@ -219,6 +245,7 @@ export function LibraryPage() {
                   </span>
                   <QualityBadge score={stats.avgQuality === null ? null : Math.round(stats.avgQuality * 10) / 10} />
                 </div>
+                </div>
               </button>
             )
           })}
@@ -235,3 +262,5 @@ export function LibraryPage() {
     </>
   )
 }
+
+

@@ -1,7 +1,7 @@
 /*
  * Library 冒烟 + 交互:卡片网格、搜索过滤、明细抽屉(季切换)。
  */
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LibraryPage } from '../Library'
 import { renderPage } from '../../test/testUtils'
@@ -17,6 +17,25 @@ describe('LibraryPage', () => {
     expect(await screen.findByText('葬送的芙莉莲')).toBeInTheDocument()
     expect(screen.getByText('药屋少女的呢喃')).toBeInTheDocument()
     expect(screen.getByText('剧场版 声之形')).toBeInTheDocument()
+  })
+
+  it('卡片渲染海报 <img>(指向后端本地库代理端点)', async () => {
+    renderPage(<LibraryPage />)
+    await screen.findByText('葬送的芙莉莲')
+    const imgs = screen.getAllByAltText('') as HTMLImageElement[]
+    expect(imgs.length).toBeGreaterThan(0)
+    expect(imgs[0].getAttribute('src')).toBe('/api/series/1/poster')
+    expect(imgs[0].getAttribute('loading')).toBe('lazy')
+  })
+
+  it('海报加载失败时降级为首字占位块', async () => {
+    renderPage(<LibraryPage />)
+    await screen.findByText('葬送的芙莉莲')
+    const img = screen.getAllByAltText('')[0] as HTMLImageElement
+    fireEvent.error(img)
+    // 失败的那张 img 被占位块替换(标题首字),其余卡片海报不受影响
+    expect(screen.getByText('葬')).toBeInTheDocument()
+    expect(screen.getAllByAltText('').length).toBeLessThan(6)
   })
 
   it('搜索过滤标题', async () => {

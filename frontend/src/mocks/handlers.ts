@@ -112,6 +112,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
 
     series: {
       list: (query = {}) => delayed(paginate(state.series, query.limit, query.offset)),
+      // 海报 URL 构造与真实端点一致(mock 不拦截 <img>,由 vite proxy/MSW 之外处理)
+      posterUrl: (id: number) => `/api/series/${id}/poster`,
     },
 
     pending: {

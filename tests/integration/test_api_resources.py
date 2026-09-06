@@ -95,6 +95,44 @@ async def test_subscription_create_and_series_tree(client) -> None:
     assert resp.status_code == 404
 
 
+async def test_series_poster_serves_local_library_file(client) -> None:
+    """海报解析:本地库 {library}/{标题目录}/poster.jpg 优先直读。"""
+    c, settings = client
+    resp = await c.post(
+        "/api/subscriptions",
+        json={"title_cn": "葬送的芙莉莲", "season_number": 1, "episode_count": 1},
+    )
+    assert resp.status_code == 201, resp.text
+    series_id = resp.json()["id"]
+
+    poster_bytes = b"\xff\xd8\xff\xe0fake-jpeg-bytes"
+    poster_path = settings.library_path / "葬送的芙莉莲" / "poster.jpg"
+    poster_path.parent.mkdir(parents=True, exist_ok=True)
+    poster_path.write_bytes(poster_bytes)
+
+    resp = await c.get(f"/api/series/{series_id}/poster")
+    assert resp.status_code == 200, resp.text
+    assert resp.content == poster_bytes
+    assert resp.headers["content-type"].startswith("image/")
+
+
+async def test_series_poster_404_when_missing_file_or_series(client) -> None:
+    c, _ = client
+    # 存在的 series 但本地无 poster 文件 → 404(前端降级文字卡片)
+    resp = await c.post(
+        "/api/subscriptions",
+        json={"title_cn": "迷宫饭", "season_number": 1, "episode_count": 1},
+    )
+    assert resp.status_code == 201, resp.text
+    series_id = resp.json()["id"]
+    resp = await c.get(f"/api/series/{series_id}/poster")
+    assert resp.status_code == 404
+
+    # 不存在的 series → 404
+    resp = await c.get("/api/series/9999/poster")
+    assert resp.status_code == 404
+
+
 async def test_subscription_create_requires_title_and_delete_cascades(client) -> None:
     c, _ = client
     resp = await c.post("/api/subscriptions", json={"season_number": 1})
