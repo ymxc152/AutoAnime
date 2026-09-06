@@ -66,6 +66,11 @@ async def rollback_organize(
 
     learned = False
     raw_name = row.instruction.get("raw_name") if row.instruction else None
+    if not isinstance(raw_name, str) or not raw_name:
+        # episode.organized 行只带 "file"（E4 archive 与 CLI import 同口径）：
+        # 回退取文件名，让 5.4 的「回滚即登记错误模式」对最常见的文件级
+        # 回滚也真实生效（修复前 learned 恒为 False 的死代码路径）。
+        raw_name = row.instruction.get("file") if row.instruction else None
     if isinstance(raw_name, str) and raw_name:
         # 学习流程（5.4）：回滚即登记错误模式，防同类 L1/L2 结论再次放行。
         await governance.add_bypass(raw_name, reason=f"rollback of audit #{audit_id}")

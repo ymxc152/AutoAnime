@@ -112,7 +112,15 @@ class QbittorrentGateway:
         except Exception as exc:
             raise GatewayError(f"qbittorrent client init failed: {type(exc).__name__}") from None
         # qbittorrent-api 无完整类型标注：局部 Any 化后正常属性访问。
-        await self._call("auth_logon", client.auth_logon)
+        # 登录方法名是 auth_log_in（auth_logon 在 qbittorrent-api 2026.x
+        # 不存在；旧名会让 ping() 在参数求值时抛 AttributeError 而非
+        # GatewayError——R1 验收实测修复）。
+        logon = getattr(client, "auth_log_in", None) or getattr(
+            client, "auth_logon", None
+        )
+        if logon is None:
+            raise GatewayError("qbittorrent auth_log_in failed: AttributeError")
+        await self._call("auth_log_in", logon)
         return True
 
     # --- submission ---------------------------------------------------------

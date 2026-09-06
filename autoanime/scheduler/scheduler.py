@@ -99,6 +99,7 @@ def build_orchestrator_for_loop(
         llm_cache_store=StorageLlmCacheStore(storage),
         reference_chain=reference_chain,
         audit_sink=governance,
+        metrics_sink=governance,
     )
 
 

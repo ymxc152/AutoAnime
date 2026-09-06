@@ -194,3 +194,30 @@ async def test_reconcile_notes_untracked_completed_hashes() -> None:
     rig.gateway.statuses[other] = {"state": "uploading", "progress": 1.0}
     report = await rig.poller.reconcile_startup(now=NOW)
     assert any(other in note for note in report.notes)
+
+
+async def test_completed_on_first_poll_from_picked() -> None:
+    """回归（R1 验收）：网关在首次采样前已完成（release 仍 picked）。
+
+    状态机不允许 picked → completed 直达；修复前该转移抛 TransitionError
+    被轮询器吞成 note，任务永远卡死在 picked、episode 永不 DOWNLOADED。
+    修复：完成路径先补 picked → downloading 一跳。
+    """
+    seen: list[str] = []
+
+    async def on_completed(release: ReleaseRecord, files: list[dict[str, object]]) -> None:
+        seen.append(release.torrent_hash)
+
+    rig = await make_rig(
+        status={"state": "pausedUP", "progress": 1.0, "name": "Show - 01"},
+        release_status=ReleaseStatus.PICKED,
+        on_completed=on_completed,
+    )
+    report = await rig.poller.poll_once(now=NOW)
+    assert report.completed == 1
+    assert report.notes == ()
+    assert seen == [rig.release.torrent_hash]
+    refreshed = await rig.store.get_episode(rig.episode.id)
+    assert refreshed is not None and refreshed.state == EpisodeState.DOWNLOADED
+    done = await rig.store.list_releases_by_status([ReleaseStatus.COMPLETED])
+    assert [row.torrent_hash for row in done] == [rig.release.torrent_hash]

@@ -24,14 +24,15 @@ path is T5's job via :meth:`MemoryGovernance.record_memory_hit_audit`.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import uuid4
 
 from autoanime.core.enums import Actor, MemoryStatus
-from autoanime.core.models import AuditLog, BypassList, ParseMemory
+from autoanime.core.models import AuditLog, BypassList, ParseEvents, ParseMemory
 from autoanime.memory.store import SqliteStorage
 from autoanime.pipeline.l2 import (
     is_bypassed,
@@ -49,6 +50,8 @@ ACTION_DEPRECATE = "deprecate"
 ACTION_BYPASS_ADD = "bypass_add"
 
 DEFAULT_NO_HIT_DAYS_FOR_DEPRECATION = 30
+
+logger = logging.getLogger(__name__)
 
 
 def memory_hit_audit_row(
@@ -222,6 +225,40 @@ class MemoryGovernance:
             entity_id=entity_id,
             instruction=instruction or {},
         )
+
+    async def record_parse_event(
+        self,
+        *,
+        raw_name_hash: str,
+        level: int,
+        llm_called: bool,
+        outcome: str,
+        latency_ms: int | None = None,
+        confidence: str | None = None,
+    ) -> ParseEvents:
+        """Record one per-pass parse metric row（``parse_events`` 写侧）。
+
+        E1 报表口径的落地：orchestrator 每轮 parse 落一行——``level`` 用
+        置信档位整数（HIGH=3 / MEDIUM=2 / LOW=1 / 无法解析=0），``outcome``
+        即路由（``archive`` / ``memory`` / ``l3``），``llm_called`` = L3 段
+        参与并产出 draft（缓存回放计入 L3 参与；真实外呼明细以
+        ``llm_cache`` 为准）。写失败只记日志，绝不影响识别主流程（与
+        audit 同口径）。
+        """
+        row = ParseEvents(
+            event_date=date.today(),
+            raw_name_hash=raw_name_hash,
+            level=level,
+            llm_called=llm_called,
+            latency_ms=latency_ms,
+            outcome=outcome,
+            confidence=confidence,
+        )
+        try:
+            await self._store.add(row)
+        except Exception:  # noqa: BLE001 — 指标写入失败不阻塞主流程
+            logger.warning("parse event write failed", exc_info=True)
+        return row
 
     # --- status sweep ---------------------------------------------------------
 

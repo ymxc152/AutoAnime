@@ -491,3 +491,41 @@ async def test_metrics_aggregates(client) -> None:
     assert len(trend) == 28
     assert trend[-1]["created"] == 1
     assert body["memory_sources"] == []
+
+
+async def test_rollback_of_episode_row_learns_from_file_field(client) -> None:
+    """回归（R1 验收）：episode.organized 行只带 "file" 无 "raw_name"。
+
+    修复前 learned 恒为 False——「回滚即登记错误模式」（5.4）对最常见的
+    文件级回滚是死代码；修复后回退取 instruction["file"] 登记 bypass。
+    """
+    c, _ = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    row = AuditLog(
+        operation_id="op-import",
+        entity="episode",
+        entity_id=None,
+        action="episode.organized",
+        instruction={
+            "file": "Bleach.S04E02.1080p.DSNP.WEB-DL.AAC2.0.H.264-MWeb.mkv",
+            "dst": "library/Bleach/Season 04/Bleach - S04E02.1080p.mkv",
+            "strategy": "hardlink",
+            "source": "import",
+        },
+        reverse={"moves": [{"src": "downloads/x.mkv", "dst": "library/y.mkv",
+                            "kind": "hardlink", "role": "video"}]},
+        actor=Actor.AUTO,
+    )
+    await app_state.storage.add(row)
+
+    resp = await c.post(f"/api/organize/{row.id}/rollback")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"]["applied"] == {}  # moves 归 organize 域，v1 端点如实 skipped
+    assert body["applied"]["skipped"]["moves"]
+    assert body["learned"] is True  # 修复点：从 file 字段学习 bypass
+
+    governance = MemoryGovernance(app_state.storage)
+    assert await governance.is_bypassed(
+        "Bleach.S04E02.1080p.DSNP.WEB-DL.AAC2.0.H.264-MWeb.mkv"
+    ) is True

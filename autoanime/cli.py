@@ -193,6 +193,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 async def _build_orchestrator(
     settings: Settings,
+    *,
+    metrics: bool = True,
 ) -> tuple[Orchestrator, SqliteStorage | None, object | None]:
     """Wire the full L1 -> L2 -> L3 -> arbiter pipeline.
 
@@ -255,6 +257,8 @@ async def _build_orchestrator(
             llm_cache_store=StorageLlmCacheStore(storage),
             reference_chain=reference_chain,
             audit_sink=governance,
+            # --dry-run 的「不落库」契约也约束指标旁路：parse_events 不写。
+            metrics_sink=governance if metrics else None,
         ),
         storage,
         transport_obj,
@@ -494,8 +498,9 @@ def _aggregate_report(
 
     - manual 纠正事件 = ``audit_log`` 中 ``actor == manual`` 的行（E2 的
       /correct 端点落地后即写入该口径；actor 明细在 ``audit.by_actor``）；
-    - 归档事件 = ``parse_events`` 中 ``outcome == "archive"`` 的行（E4 的
-      整理器落地后开始写入）；分母为 0 时 rate 返回 ``None`` 并注明；
+    - 归档事件 = ``parse_events`` 中 ``outcome == "archive"`` 的行
+      （orchestrator 每轮 parse 经 metrics_sink 写入）；分母为 0 时
+      rate 返回 ``None`` 并注明；
     - v2 schema 的按日指标表是 ``parse_events``（event_date/level/
       llm_called/outcome/latency_ms）——Plan 文本的 "daily_metrics" 在库内
       以该表承载，此处如实按其聚合。
@@ -553,7 +558,7 @@ def _aggregate_report(
             "note": (
                 "manual_correction_events = audit_log.actor == manual 的行数；"
                 "archived_events = parse_events.outcome == archive 的行数"
-                "（整理器在 M4 落地后写入）；分母为 0 时 rate 为 null。"
+                "（orchestrator 每轮 parse 写入）；分母为 0 时 rate 为 null。"
             ),
         },
     }
@@ -890,7 +895,9 @@ async def _import(args: argparse.Namespace) -> int:
         return 2
     settings = load_settings()
     total_seen, videos = _scan_video_files(root)
-    orchestrator, storage, transport_obj = await _build_orchestrator(settings)
+    orchestrator, storage, transport_obj = await _build_orchestrator(
+        settings, metrics=not args.dry_run
+    )
     own_storage = False
     if storage is None:
         # L1-only 配置（L2/L3 全关）：管线不带库，pending 落库自开一个。
