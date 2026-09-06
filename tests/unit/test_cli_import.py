@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
@@ -363,3 +364,88 @@ def test_import_dry_run_creates_no_idempotence_barrier(env: dict[str, Path]) -> 
     real = json.loads(_run_cli("import", source.as_posix())[1])
     assert real["archived"] == 1
     assert real["skipped"] == 0
+
+
+# ------------------------------------------------- 单元：目标位冲突守卫（R2 验收）
+
+
+def _high_result() -> ParseResult:
+    return ParseResult(
+        title="Show", season=1, episode=1, segment=Segment.EPISODE,
+        fansub=None, level=Confidence.HIGH, confidence=1.0,
+    )
+
+
+def test_import_dst_conflict_does_not_overwrite(tmp_path: Path) -> None:
+    """R2 实测缺陷回归：不同文件映射同一库内目标位 → 跳过不覆盖。
+
+    修复前 friDay 版 import 会 hardlink 覆盖 LINETV 版（实测三源同集互踩，
+    最后导入者获胜）；库内替换只能走 E4 洗版评分闸门（D21）。
+    """
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object], Path]:
+        storage = _db(tmp_path)
+        await storage.create_all()
+        try:
+            lib = tmp_path / "library"
+            src = tmp_path / "dl"
+            src.mkdir()
+            first = src / "Show.S01E01.1080p.Baha.WEB-DL.x264.mkv"
+            first.write_bytes(b"first-content")
+            second = src / "Show.S01E01.1080p.LINETV.WEB-DL.x264.mkv"
+            second.write_bytes(b"second-content-different")
+            settings = Settings(library_path=lib)
+            store, gov = LoopStore(storage), MemoryGovernance(storage)
+            outcome = RouteOutcome(_high_result(), ROUTE_ARCHIVE)
+            item1 = await _handle_import_outcome(
+                first, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            item2 = await _handle_import_outcome(
+                second, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            return item1, item2, lib / "Show" / "Season 01" / "Show - S01E01.1080p.mkv"
+        finally:
+            await storage.close()
+
+    item1, item2, dst = asyncio.run(scenario())
+    assert item1["action"] == "archive"
+    assert dst.read_bytes() == b"first-content"
+    assert item2["action"] == "skip"
+    assert item2["reason"] == "dst-exists-upgrade-gated"
+    assert dst.read_bytes() == b"first-content"  # 未被第二个版本覆盖
+
+
+def test_import_same_content_dst_is_noop_skip(tmp_path: Path) -> None:
+    """同内容不同名的重放（已 hardlink 进库）→ noop 跳过，不重复链接。"""
+
+    async def scenario() -> tuple[dict[str, object], Path]:
+        storage = _db(tmp_path)
+        await storage.create_all()
+        try:
+            lib = tmp_path / "library"
+            # CLI 实跑会先建库根（D9 同盘判定需要 stat 到 library 根），保持一致
+            lib.mkdir(parents=True)
+            src = tmp_path / "dl"
+            src.mkdir()
+            first = src / "Show.S01E01.1080p.Baha.WEB-DL.x264.mkv"
+            first.write_bytes(b"same-content")
+            settings = Settings(library_path=lib)
+            store, gov = LoopStore(storage), MemoryGovernance(storage)
+            outcome = RouteOutcome(_high_result(), ROUTE_ARCHIVE)
+            item1 = await _handle_import_outcome(
+                first, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            # 同 inode 的另一个名字（重命名/硬链接副本），audit 幂等桶不认识它
+            renamed = src / "Show.S01E01.1080p.WEB-DL.renamed.mkv"
+            os.link(first, renamed)
+            item2 = await _handle_import_outcome(
+                renamed, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            return item1, item2
+        finally:
+            await storage.close()
+
+    item1, item2 = asyncio.run(scenario())
+    assert item1["action"] == "archive"
+    assert item2["action"] == "skip"
+    assert item2["reason"] == "dst-exists-same-content"

@@ -867,6 +867,20 @@ async def _handle_import_outcome(
         item["action"] = "skip"
         item["reason"] = plan.skip_reason
         return item
+    # D21 守卫（R2 验收实测缺陷）：目标位已有文件时 import 不得静默覆盖——
+    # 库内替换只能走 E4 洗版评分闸门（threshold/上限/audit upgrade.completed）。
+    # 同一文件的重放已在前置幂等桶（already-archived）跳过；走到这里的目标位
+    # 冲突如实跳过（同 inode = 内容已在库，不同 inode = 版本替换属洗版管辖）。
+    if plan.moves:
+        dst_path = plan.dst_dir / plan.moves[0].dst_name
+        if dst_path.exists():
+            try:
+                same_content = dst_path.samefile(file)
+            except OSError:
+                same_content = False
+            item["action"] = "skip"
+            item["reason"] = "dst-exists-same-content" if same_content else "dst-exists-upgrade-gated"
+            return item
     if dry_run:
         item["action"] = "archive"
         return item
