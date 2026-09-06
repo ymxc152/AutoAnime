@@ -403,9 +403,15 @@ async def _confirm(args: argparse.Namespace) -> int:
         # 确认归档通路（报告 §6.1 v2 首要补齐项）：确认结果直接 hardlink
         # 入库——不再需要「确认后删除重导」。文件路径从 resolved 行的
         # parent_path 还原；无 pending 行（纯 parse 场景）按现状只学习。
-        archive = await _archive_confirmed_file(
-            confirmed, raw_name=args.name, resolved_rows=resolved_rows,
-            settings=settings, governance=governance,
+        # bypass 命中（该名字进过负记忆）不归档：bypass 语义即既有结论
+        # 已被推翻，落库 L1 draft 名会复现错误结论。
+        archive = (
+            confirm_archive.ArchiveOutcome(archived=False, reason="bypassed")
+            if outcome.bypassed
+            else await _archive_confirmed_file(
+                confirmed, raw_name=args.name, resolved_rows=resolved_rows,
+                settings=settings, governance=governance,
+            )
         )
     if outcome.bypassed:
         print(json.dumps({"bypassed": True, "entries": []}, ensure_ascii=False))

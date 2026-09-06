@@ -129,7 +129,7 @@ def _parse_text(text: str) -> L1Draft | None:
             for index in range(span.start, min(span.end, len(masked))):
                 masked[index] = " "
         body = separators_to_spaces(normalize_whitespace("".join(masked)))
-        title = body.strip(" -") if body else None
+        title = body.strip(" -._") or None
     episode = next((int(inner) for inner in inners if inner.isdigit()), None)
 
     anitopy = parse_with_anitopy(text)
