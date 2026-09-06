@@ -7,6 +7,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SettingsPage } from '../Settings'
 import { renderPage } from '../../test/testUtils'
+import { api } from '../../api'
 import { resetMockState } from '../../mocks/handlers'
 
 describe('SettingsPage', () => {
@@ -52,6 +53,7 @@ describe('SettingsPage', () => {
 
   it('参考源顺序以逗号分隔编辑', async () => {
     const user = userEvent.setup()
+    const updateSpy = vi.spyOn(api.settings, 'update')
     renderPage(<SettingsPage />)
     const order = await screen.findByLabelText('参考源顺序')
     expect(order).toHaveValue('bangumi,tmdb')
@@ -59,6 +61,33 @@ describe('SettingsPage', () => {
     await user.type(order, 'tmdb,bangumi')
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('已保存')).toBeInTheDocument()
+    // 保存即提交:未 blur 的草稿也归一化写入请求
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ reference_order: ['tmdb', 'bangumi'] }),
+    )
+    updateSpy.mockRestore()
+  })
+
+  it('回归 A1:末尾敲逗号不再被回显抹掉,blur 后归一化写回', async () => {
+    const user = userEvent.setup()
+    const updateSpy = vi.spyOn(api.settings, 'update')
+    renderPage(<SettingsPage />)
+    const order = await screen.findByLabelText('参考源顺序')
+    await user.clear(order)
+    // 逐字输入含末尾逗号的串:草稿保真原文,不再立即 split/回写渲染
+    await user.type(order, 'tmdb,bangumi,')
+    expect(order).toHaveValue('tmdb,bangumi,')
+    // blur 提交:trim/去空后写回 edit,回显归一化
+    await user.tab()
+    expect(order).toHaveValue('tmdb,bangumi')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    // 保存后以服务端返回为基线,归一化列表保持展示
+    expect(screen.getByLabelText('参考源顺序')).toHaveValue('tmdb,bangumi')
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ reference_order: ['tmdb', 'bangumi'] }),
+    )
+    updateSpy.mockRestore()
   })
 
   it('只读环境信息与密钥状态徽标', async () => {
