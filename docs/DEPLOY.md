@@ -1,7 +1,7 @@
 # 部署草稿（docs/DEPLOY.md，E4 v1）
 
-> 状态：v1 草稿（E4 交付）。README 部署段落另行任务；本文件先承载一键部署
-> 事实与安全纪律。
+> 状态：v1 草稿（E4 交付）+ 转正包复核（补快速验证清单）。README 已有部署
+> 段落（快速开始/安全提示），本文件承载一键部署事实、部署纪律与验收清单。
 
 ## 1. 一键起（docker-compose）
 
@@ -57,3 +57,33 @@ JST（防日本凌晨放送番的假缺口），界面展示转本地时区（D2
 `tests/unit/test_compose.py` 做 compose 结构自检：YAML 可解析、服务齐备
 （backend/frontend）、挂载点同盘对应、`.env.example` 与 compose 的环境
 变量对得上、无真实密钥。真实 `docker compose up` 留在用户环境执行。
+
+## 6. 快速验证清单（部署后 5 分钟走完）
+
+不依赖 Mikan/下载器的最小闭环，按顺序执行：
+
+```bash
+uv run autoanime init-db                       # 1. 建库（幂等）
+uv run autoanime import <样例目录> --dry-run   # 2a. 预览：只打印计划动作，不落库不碰文件
+uv run autoanime import <样例目录>             # 2b. 真实导入：走 L1/L2/L3 → 归档/入待确认队列
+uv run autoanime report                        # 3. 看识别指标与审计汇总（确认识别置信分布）
+uv run python -m autoanime.api serve           # 4. 起 API（默认 http://127.0.0.1:8000）
+```
+
+5. **浏览器逐页过 8 页**（`http://127.0.0.1:3080`，本地 dev 则
+   `cd frontend && npm run dev` 连 `127.0.0.1:8000`）：
+
+   | 页面 | 验证点 |
+   | --- | --- |
+   | Dashboard | 概览数字与库/队列状态一致 |
+   | Subscriptions | 订阅列表可建可删（每番只订一个字幕组） |
+   | RSS Sources | RSS 源显示正常、轮询状态可见 |
+   | Pending | `import` 产生的待确认行可见，可确认/改判/拒绝（confirm/correct/reject） |
+   | Library | 刚归档的番剧/集出现在库视图 |
+   | Pipeline | 管线可视化正常渲染（xyflow） |
+   | Logs | audit_log 审计行随操作增长 |
+   | Settings | 只读项与 `.env` 一致；可改项重启后回落（无持久化表，v1 边界） |
+
+判定标准：`curl http://127.0.0.1:8000/api/health` 返回
+`{"status":"ok"}`；样例目录文件落到 `library/`（或待确认行入队）；
+Logs 页能看到对应的审计记录。
