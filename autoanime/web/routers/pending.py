@@ -103,9 +103,6 @@ async def _archive_after_resolution(
     return outcome
 
 
-router = APIRouter(prefix="/pending", tags=["pending"])
-
-
 async def _load_open_pending(store: ApiStore, pending_id: int) -> PendingQueue:
     row = await store.get_pending(pending_id)
     if row is None:

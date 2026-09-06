@@ -403,7 +403,9 @@ class LoopStore:
         resolved_by=manual + 同事务审计行），否则 CLI 确认后行永远挂着、
         重跑 import 又被 already-pending 幂等挡住。audit 行由调用方按行
         构造（``web.learning.pending_audit_row``），本方法只负责同一事务
-        落库。返回 resolve 的行快照（调用方据此还原源文件路径做确认归档）。
+        落库。返回 resolve 后的行（同一批 ORM 对象，status 已改写；
+        调用方只读 raw_name/context 还原源文件路径——expire_on_commit=False，
+        detach 后访问安全）。
         """
         async with self._storage.transaction() as session:
             rows = (
@@ -418,7 +420,7 @@ class LoopStore:
                 .scalars()
                 .all()
             )
-            snapshots = [row for row in rows]
+            snapshots = list(rows)
             for row in rows:
                 row.status = PendingStatus.RESOLVED
                 row.resolution = json.dumps(resolution, ensure_ascii=False)

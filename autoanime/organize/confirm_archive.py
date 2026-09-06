@@ -100,7 +100,13 @@ def archive_confirmed_release(
     except OSError:
         logger.warning("confirm archive: library root not preparable: %s", settings.library_path)
 
-    plan = _confirmed_archive_plan(file_path, result, settings)
+    try:
+        plan = _confirmed_archive_plan(file_path, result, settings)
+    except OSError as exc:
+        # plan_transfer 的 stat 在 exists/stat 竞态下可能抛 OSError：
+        # 如实降级为归档跳过（学习已生效，重导可自愈），不击穿调用方。
+        logger.warning("confirm archive plan failed: %s", exc)
+        return ArchiveOutcome(archived=False, reason=f"plan-failed:{type(exc).__name__}")
     if plan.strategy == "skip":
         return ArchiveOutcome(archived=False, reason=plan.skip_reason or "skipped")
     if plan.moves:
@@ -113,7 +119,11 @@ def archive_confirmed_release(
             # D21 守卫（与 import 同口径）：库内替换只能走洗版评分闸门。
             reason = "dst-exists-same-content" if same_content else "dst-exists-upgrade-gated"
             return ArchiveOutcome(archived=False, reason=reason)
-    executed = mover.execute_transfer(plan)
+    try:
+        executed = mover.execute_transfer(plan)
+    except OSError as exc:
+        logger.warning("confirm archive execute failed: %s", exc)
+        return ArchiveOutcome(archived=False, reason=f"transfer-error:{type(exc).__name__}")
     if executed.error is not None or not executed.dst_paths:
         return ArchiveOutcome(archived=False, reason=executed.error or "transfer failed")
     return ArchiveOutcome(
