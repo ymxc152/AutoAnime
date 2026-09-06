@@ -15,6 +15,8 @@ export interface Column<T> {
   /** 数字/等宽列提示(仅语义,样式由内容自行套 data-text) */
   align?: 'left' | 'right'
   width?: string
+  /** 移动端横向滚动时固定在左侧的 key 列 */
+  sticky?: boolean
 }
 
 export interface DataTableProps<T> {
@@ -44,7 +46,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, empty, on
                   style={col.width !== undefined ? { width: col.width } : undefined}
                   className={`border-b border-line px-3 py-2 text-xs font-medium text-ink-secondary ${
                     col.align === 'right' ? 'text-right' : 'text-left'
-                  }`}
+                  } ${col.sticky === true ? 'sticky left-0 z-10 bg-surface' : ''}`}
                 >
                   {col.header}
                 </th>
@@ -73,14 +75,18 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, empty, on
                 <tr
                   key={rowKey(row)}
                   onClick={onRowClick !== undefined ? () => onRowClick(row) : undefined}
-                  className={`border-b border-line last:border-b-0 ${
+                  className={`group border-b border-line last:border-b-0 ${
                     onRowClick !== undefined ? 'cursor-pointer hover:bg-surface-2' : ''
                   }`}
                 >
                   {columns.map((col) => (
                     <td
                       key={col.key}
-                      className={`px-3 py-2.5 align-middle ${col.align === 'right' ? 'text-right' : ''}`}
+                      className={`px-3 py-2.5 align-middle ${col.align === 'right' ? 'text-right' : ''} ${
+                        col.sticky === true
+                          ? 'sticky left-0 z-10 border-r border-line bg-surface group-hover:bg-surface-2'
+                          : ''
+                      }`}
                     >
                       {col.render(row)}
                     </td>

@@ -342,6 +342,7 @@ export function PendingPage() {
     {
       key: 'rawName',
       header: strings.pending.rawName,
+      sticky: true,
       render: (row) => (
         <span className="data-text block max-w-sm truncate text-sm text-ink" title={row.raw_name}>
           {row.raw_name}

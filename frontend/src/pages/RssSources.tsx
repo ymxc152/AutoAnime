@@ -144,6 +144,7 @@ export function RssSourcesPage() {
     {
       key: 'url',
       header: strings.rssSources.url,
+      sticky: true,
       render: (row) => (
         <span className="data-text block max-w-md truncate text-sm text-ink" title={row.url}>
           {row.url}
