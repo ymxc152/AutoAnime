@@ -521,10 +521,12 @@ class Orchestrator:
             if override_title:
                 confirmed_title = match.hit.title
                 if confirmed_title:
+                    # evidence=confirmed（A1'）：高于 name——arbiter 逐字段
+                    # 仲裁（L3 段参与时）不再把 title 打回 L1 草稿名。
                     enhanced = replace(
                         enhanced,
                         title=confirmed_title,
-                        evidence={**enhanced.evidence, "title": "memory"},
+                        evidence={**enhanced.evidence, "title": "confirmed"},
                     )
             await store.record_hit(match.memory, operation_id=operation_id)
         except Exception:

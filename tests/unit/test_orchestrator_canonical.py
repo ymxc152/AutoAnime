@@ -685,7 +685,8 @@ async def test_manual_alias_hit_overrides_title_with_confirmed_name() -> None:
     assert outcome.route == ROUTE_MEMORY
     assert outcome.result is not None
     assert outcome.result.title == CANONICAL
-    assert outcome.result.evidence["title"] == "memory"
+    # evidence=confirmed（高于 name）：L3 段参与的完整仲裁中 title 不被打回
+    assert outcome.result.evidence["title"] == "confirmed"
 
 
 async def test_reference_backfilled_alias_hit_keeps_l1_title() -> None:
@@ -720,3 +721,27 @@ async def test_narrow_alias_store_without_source_never_overrides() -> None:
     assert outcome.route == ROUTE_MEMORY
     assert outcome.result is not None
     assert outcome.result.title == _l1().title
+
+
+async def test_confirmed_title_survives_full_arbitration_with_l3() -> None:
+    """L3 段参与的完整流程中，confirmed 证据高于 L1 name——title 保持确认名。
+
+    回归（第 6 轮真实测试发现）：memory 命中后 L3 兜底增强，arbiter 逐字段
+    仲裁按 evidence_rank 重选——旧代码覆盖 evidence=memory（rank 低于 name）
+    被打回 L1 草稿名。
+    """
+    store = FakeMemoryStore(
+        _canonical_series_row(),
+        alias_rows={build_title_shape(ROMAJI): (build_title_shape(CANONICAL), "manual")},
+    )
+    # L3 有线且返回合法响应（title 与 L1 一致——LLM 认可 L1 名也不该翻案）
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(FakeReferenceProvider()),
+        transport=ScriptedTransport([VALID_RESPONSE]),
+        cache=MemoryCacheStore(),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.result is not None
+    assert outcome.result.title == CANONICAL
+    assert outcome.result.evidence["title"] == "confirmed"
