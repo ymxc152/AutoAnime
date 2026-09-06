@@ -147,6 +147,7 @@ async def make_rig(
     release_score: float | None = 11.0,
     file_path: str | None = None,
     content_dir: Path | None = None,
+    expected_number: int = 1,
 ) -> Rig:
     storage = SqliteStorage("sqlite+aiosqlite:///:memory:")
     await storage.create_all()
@@ -158,7 +159,7 @@ async def make_rig(
         [Episode(number=n, state=EpisodeState.MISSING) for n in range(1, 6)],
     )
     season = (await store.seasons_for_series(series.id))[0]
-    episode = await store.episode_for_number(season.id, 1)
+    episode = await store.episode_for_number(season.id, expected_number)
     assert episode is not None
     # 期望集走到 DOWNLOADED（首归档）或 ORGANIZED（洗版）
     if episode_state in (EpisodeState.DOWNLOADED, EpisodeState.ORGANIZED):
@@ -535,3 +536,134 @@ async def test_mismatch_budget_counts_expected_episode_releases_when_ids_offset(
     )
     episode = await rig.episode_row(1)
     assert episode.state == EpisodeState.DOWNLOADED  # 预算用尽不回缺
+
+
+# ----------------------------------------------- 多集种子死锁回归（P0）
+
+
+async def test_multi_episode_torrent_reattaches_and_still_archives_expected(
+    tmp_media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0 回归：多集种子（ep3+ep5，release 挂 ep5）——A 改挂后 ep5 仍要归档。
+
+    修复前：ep3 先走 A 改挂 → release 改挂 + 期望集 ep5 被立即打回 MISSING；
+    随后 ep5.mkv 快路径按 stale release.episode_id 路由读到 MISSING →
+    "nothing to organize"——ep5 永远 MISSING、文件滞留、同 hash 永不重下。
+    """
+    monkeypatch.chdir(tmp_media)
+    content = _make_content(tmp_media, "Show - S01E03.mkv")
+    (content / "Show - S01E05.mkv").write_bytes(b"v5")
+    mapping = {
+        "Show - S01E03.mkv": _parse("孤独摇滚", 3),
+        "Show - S01E05.mkv": _parse("孤独摇滚", 5),
+    }
+    rig = await make_rig(mapping, content_dir=content, expected_number=5)
+    report = await rig.service.handle_completed(rig.release, None)
+    # 两个文件各自归位
+    e3 = await rig.episode_row(3)
+    e5 = await rig.episode_row(5)
+    assert e3.state == EpisodeState.ORGANIZED
+    assert e5.state == EpisodeState.ORGANIZED  # 修复前：MISSING + 文件滞留
+    assert e5.file_path is not None and Path(e5.file_path).exists()
+    assert report.reattached == 1
+    assert report.archived == 2  # ep3 改挂归档 + ep5 快路径归档
+    refreshed = await rig.storage.get(ReleaseRecord, rig.release.id)
+    assert refreshed is not None and refreshed.episode_id == e3.id  # 改挂落库
+    # 不能出现"放弃整理"的 note（修复前的死锁症状）
+    assert not any("nothing to organize" in note for note in report.notes)
+
+
+async def test_multi_episode_torrent_c_backfill_deferred_and_fires_once(
+    tmp_media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0 回归：多集种子（ep3+ep9，release 挂 ep5）——回缺延后到全部文件处理完。
+
+    ep3 改挂归档、ep9（集外）C 隔离；ep5 内容确实不在种内 → 全部文件处理
+    完后一次性回缺（只回缺一次、只发一次缺口事件）。
+    """
+    monkeypatch.chdir(tmp_media)
+    content = _make_content(tmp_media, "Show - S01E03.mkv")
+    (content / "Show - S01E09.mkv").write_bytes(b"v9")
+    mapping = {
+        "Show - S01E03.mkv": _parse("孤独摇滚", 3),
+        "Show - S01E09.mkv": _parse("孤独摇滚", 9),  # 集外 → C
+    }
+    rig = await make_rig(mapping, content_dir=content, expected_number=5)
+    report = await rig.service.handle_completed(rig.release, None)
+    e3 = await rig.episode_row(3)
+    e5 = await rig.episode_row(5)
+    assert e3.state == EpisodeState.ORGANIZED  # 改挂照常
+    assert e5.state == EpisodeState.MISSING  # 内容不在种内 → 回缺等 RSS
+    assert report.reattached == 1
+    assert report.backfilled == 1
+    gap_events = [event for event in rig.bus.events if event.message == "episode.gap"]
+    assert len(gap_events) == 1  # 只回缺一次、只发一次缺口事件
+    assert gap_events[0].payload.get("gap") == [5]
+    refreshed = await rig.storage.get(ReleaseRecord, rig.release.id)
+    assert refreshed is not None and refreshed.episode_id == e3.id
+
+
+async def test_multi_episode_torrent_expected_file_covers_no_backfill(
+    tmp_media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0 回归：多集种子含期望集文件 + C 集外文件 → 期望集已归档绝不回缺。
+
+    修复前：ep9 的 C 分支会把已 ORGANIZED 的期望集再拉一次回缺（转移被拒
+    但缺口事件照发，谎报缺口）。
+    """
+    monkeypatch.chdir(tmp_media)
+    content = _make_content(tmp_media, "Show - S01E05.mkv")
+    (content / "Show - S01E09.mkv").write_bytes(b"v9")
+    mapping = {
+        "Show - S01E05.mkv": _parse("孤独摇滚", 5),
+        "Show - S01E09.mkv": _parse("孤独摇滚", 9),  # 集外 → C
+    }
+    rig = await make_rig(mapping, content_dir=content, expected_number=5)
+    report = await rig.service.handle_completed(rig.release, None)
+    e5 = await rig.episode_row(5)
+    assert e5.state == EpisodeState.ORGANIZED  # 期望集内容已归档
+    assert e5.file_path is not None and Path(e5.file_path).exists()
+    assert report.quarantined == 1  # ep9 照常隔离
+    assert report.backfilled == 0  # 有覆盖 → 不回缺
+    assert not [event for event in rig.bus.events if event.message == "episode.gap"]
+
+
+async def test_single_episode_torrent_behavior_unchanged(
+    tmp_media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P0 钉死：单集种子（快路径首归档 + A 改挂 + C 回补）行为逐字节不变。"""
+    monkeypatch.chdir(tmp_media)
+    # 快路径首归档
+    content = _make_content(tmp_media, "Show - S01E01.mkv")
+    mapping = {"Show - S01E01.mkv": _parse("孤独摇滚", 1)}
+    rig = await make_rig(mapping, content_dir=content)
+    report = await rig.service.handle_completed(rig.release, None)
+    assert report.fast_path_hits == 1 and report.archived == 1
+    episode = await rig.episode_row(1)
+    assert episode.state == EpisodeState.ORGANIZED
+    # A 改挂：期望集回缺 + 缺口事件 reason=mismatch_reattach（原语义）
+    content2 = _make_content(tmp_media, "Show - S01E02.mkv")
+    (content2 / "Show - S01E01.mkv").unlink(missing_ok=True)
+    (content2 / "Show - S01E01.zh.ass").unlink(missing_ok=True)
+    mapping2 = {"Show - S01E02.mkv": _parse("孤独摇滚", 2)}
+    rig2 = await make_rig(mapping2, content_dir=content2)
+    report2 = await rig2.service.handle_completed(rig2.release, None)
+    assert report2.reattached == 1
+    e1 = await rig2.episode_row(1)
+    assert e1.state == EpisodeState.MISSING
+    assert any(
+        event.message == "episode.gap"
+        and event.payload.get("reason") == "mismatch_reattach"
+        for event in rig2.bus.events
+    )
+    # C 回补：回缺 + 缺口事件（原语义）
+    content3 = _make_content(tmp_media, "Show - S01E09.mkv")
+    (content3 / "Show - S01E02.mkv").unlink()
+    (content3 / "Show - S01E02.zh.ass").unlink()
+    mapping3 = {"Show - S01E09.mkv": _parse("孤独摇滚", 9)}
+    rig3 = await make_rig(mapping3, content_dir=content3)
+    report3 = await rig3.service.handle_completed(rig3.release, None)
+    assert report3.backfilled == 1
+    e1b = await rig3.episode_row(1)
+    assert e1b.state == EpisodeState.MISSING
+    assert any(event.message == "episode.gap" for event in rig3.bus.events)
