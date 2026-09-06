@@ -50,6 +50,7 @@ from autoanime.providers import (
 from autoanime.scheduler.clock import SystemClock
 from autoanime.scheduler.scheduler import build_loop
 from autoanime.scheduler.store import LoopStore
+from autoanime.web.learning import ACTION_PENDING_CONFIRM, pending_audit_row
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -338,6 +339,16 @@ async def _confirm(args: argparse.Namespace) -> int:
             reference_lookup=_confirm_reference_lookup(settings, storage),
             draft_title=draft.title if draft else None,
         )
+        # 确认收尾（与 WebUI confirm 同语义）：raw_name 匹配的未决 pending 行
+        # 一并 resolve——否则 CLI 确认后队列不减，重跑 import 又被
+        # already-pending 幂等挡住（第 4 轮真实测试发现）。
+        resolved_count = await LoopStore(storage).resolve_open_pendings_by_raw_name(
+            args.name,
+            resolution={"action": "confirm", "confirmed_title": title},
+            audit_row_for=lambda row: pending_audit_row(
+                pending=row, action=ACTION_PENDING_CONFIRM, confirmed=confirmed
+            ),
+        )
     if outcome.bypassed:
         print(json.dumps({"bypassed": True, "entries": []}, ensure_ascii=False))
         return 0
@@ -345,6 +356,7 @@ async def _confirm(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "bypassed": False,
+                "resolved_pending": resolved_count,
                 "entries": [
                     {
                         "key_level": entry.key_level,
