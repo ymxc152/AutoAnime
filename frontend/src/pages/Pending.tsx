@@ -5,7 +5,7 @@
  * 纠正提交 POST /api/pending/{id}/correct:title 必填——未纠正也始终
  * 带上当前 title(触发学习三件套);confirm/reject 另有两键。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings, t } from '../strings'
@@ -208,13 +208,6 @@ export function PendingPage() {
   const items = data?.items ?? []
   const total = data?.total ?? 0
 
-  // 当前页被处理空后回第一页,避免停在空页
-  useEffect(() => {
-    if (!loading && data !== null && data.items.length === 0 && page > 1) {
-      setPage(1)
-    }
-  }, [loading, data, page])
-
   const changePage = (next: number): void => {
     setPage(next)
     setSelectedIds(new Set())
@@ -241,7 +234,12 @@ export function PendingPage() {
       }
       removeFromSelection(item.id)
       if (selected?.id === item.id) setSelected(null)
-      reload()
+      if (items.length === 1 && page > 1) {
+        // 处理空当前页:回第一页(fetcher 变化自动重拉),避免停在空页
+        setPage(1)
+      } else {
+        reload()
+      }
     } catch (cause) {
       setActionError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
     } finally {
@@ -278,7 +276,13 @@ export function PendingPage() {
       setActionError(t(strings.pending.batchPartialFailed, { n: failed.length }))
     }
     if (selected !== null && succeeded.includes(selected.id)) setSelected(null)
-    reload()
+    const pageEmptied = items.length > 0 && items.every((item) => succeeded.includes(item.id))
+    if (pageEmptied && page > 1) {
+      // 整页处理空:回第一页,避免停在空页
+      setPage(1)
+    } else {
+      reload()
+    }
     setBatchBusy(false)
   }
 

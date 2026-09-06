@@ -1,6 +1,7 @@
 /*
  * 路由表:createHashRouter(data router,支持 useBlocker 等 data API)。
- * 路由结构与 HashRouter 版本 1:1 对齐。
+ * 路由结构与原 HashRouter 版本 1:1 对齐;Layout 壳以元素内联,本文件
+ * 只导出 router,满足 react-refresh/only-export-components。
  */
 import { Navigate, Outlet, createHashRouter } from 'react-router-dom'
 import { EventStreamProvider } from './hooks/EventStreamProvider'
@@ -14,20 +15,15 @@ import { PendingPage } from './pages/Pending'
 import { LogsPage } from './pages/Logs'
 import { SettingsPage } from './pages/Settings'
 
-/** Layout 路由壳(Provider 由最外层 RouterProvider 包裹,Layout 在此挂载) */
-function LayoutShell() {
-  return (
-    <EventStreamProvider>
-      <Layout>
-        <Outlet />
-      </Layout>
-    </EventStreamProvider>
-  )
-}
-
 export const router = createHashRouter([
   {
-    element: <LayoutShell />,
+    element: (
+      <EventStreamProvider>
+        <Layout>
+          <Outlet />
+        </Layout>
+      </EventStreamProvider>
+    ),
     children: [
       { path: '/', element: <Navigate to="/dashboard" replace /> },
       { path: '/dashboard', element: <DashboardPage /> },
