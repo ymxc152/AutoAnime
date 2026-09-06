@@ -197,6 +197,7 @@ export function RssSourcesPage() {
     {
       key: 'url',
       header: strings.rssSources.url,
+      // 约定:URL 中内嵌的 token 随 URL 明文展示;独立 token 字段才按密钥处理。
       sticky: true,
       render: (row) => (
         <span className="data-text block max-w-md truncate text-sm text-ink" title={row.url}>

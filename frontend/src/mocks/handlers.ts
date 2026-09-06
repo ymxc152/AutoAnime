@@ -245,6 +245,7 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
               actions: [...new Set(sorted.map((r) => r.action))].sort(),
               first_audit_id: sorted[0]!.id,
               last_audit_id: sorted[sorted.length - 1]!.id,
+              rollbackable: Object.keys(sorted[sorted.length - 1]!.reverse).length > 0,
             }
           })
           .sort((a, b) => b.last_audit_id - a.last_audit_id)

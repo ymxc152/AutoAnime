@@ -65,13 +65,10 @@ describe('LogsPage', () => {
     expect(within(row).queryByRole('button', { name: '确认' })).not.toBeInTheDocument()
   })
 
-  it('无 reverse 指令的组撤销时展示后端 409 语义', async () => {
-    const user = userEvent.setup()
+  it('非可回滚组隐藏撤销入口,避免无意义 409', async () => {
     renderPage(<LogsPage />)
     const row = (await screen.findByText('op-20260905-0002')).closest('li')!
-    await user.click(within(row).getByRole('button', { name: '撤销整理' }))
-    await user.click(within(row).getByRole('button', { name: '确认' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/no reverse instruction/)
+    expect(within(row).queryByRole('button', { name: '撤销整理' })).not.toBeInTheDocument()
   })
 
   it('搜索过滤操作 ID', async () => {

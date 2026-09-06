@@ -213,6 +213,8 @@ export interface OperationGroupDto {
   actions: string[]
   first_audit_id: number
   last_audit_id: number
+  /** 后端按组内最新 audit 行是否带 reverse 判定;false 时 UI 隐藏撤销 */
+  rollbackable: boolean
 }
 
 /**
@@ -273,7 +275,7 @@ export interface SubscriptionCreateBody {
 
 // ---------- RSS Sources:GET/POST/PATCH/DELETE /api/rss_sources ----------
 
-/** RSS 源行(= 后端 RssSourceOut):token 永不回显,只回 has_token */
+/** RSS 源行(= 后端 RssSourceOut):独立 token 不回显,只回 has_token;URL 内嵌 token 按明文 URL 展示 */
 export interface RssSourceDto {
   id: number
   url: string
