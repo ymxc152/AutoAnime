@@ -30,7 +30,8 @@ class FakeQbClient:
         self.fail_next_call = False
         self.auth_logon_calls = 0
 
-    def auth_logon(self) -> None:
+    # 真实 qbittorrent-api 的登录方法名是 auth_log_in（R1 验收修复对齐）。
+    def auth_log_in(self) -> None:
         self.auth_logon_calls += 1
         if self.fail_next_call:
             raise RuntimeError("login down")
