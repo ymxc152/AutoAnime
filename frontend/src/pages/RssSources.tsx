@@ -2,7 +2,7 @@
  * RSSSources —— 源管理:增删启停。
  * 数据:GET/POST/PATCH/DELETE /api/rss_sources。
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings, t } from '../strings'
@@ -16,14 +16,45 @@ import {
   Field,
   Input,
   PageTitle,
+  Select,
   StatusDot,
   Switch,
   type Column,
 } from '../components'
 import { formatDateTime } from '../lib/views'
-import type { RssSourceDto } from '../api/types'
+import type { RssSourceDto, SubscriptionDto } from '../api/types'
 
-function AddSourceForm({ onDone }: { onDone: () => void }) {
+/** 下拉选项:番名 + 季号 + season id 拼显示文案(B2:手输主键全 UI 无处可查) */
+interface SeasonOption {
+  id: number
+  label: string
+}
+
+function subscriptionTitle(sub: SubscriptionDto): string {
+  return sub.title_cn ?? sub.title_romaji ?? sub.title_jp ?? `#${sub.id}`
+}
+
+/** 订阅列表 → 季下拉选项(按 series→seasons 展开,不新增后端端点) */
+function buildSeasonOptions(subs: SubscriptionDto[]): SeasonOption[] {
+  return subs.flatMap((sub) =>
+    sub.seasons.map((season) => ({
+      id: season.season_id,
+      label: t(strings.rssSources.seasonOption, {
+        title: subscriptionTitle(sub),
+        n: season.number,
+        id: season.season_id,
+      }),
+    })),
+  )
+}
+
+function AddSourceForm({
+  onDone,
+  seasonOptions,
+}: {
+  onDone: () => void
+  seasonOptions: SeasonOption[]
+}) {
   const [url, setUrl] = useState('')
   const [seasonId, setSeasonId] = useState('')
   const [token, setToken] = useState('')
@@ -82,12 +113,22 @@ function AddSourceForm({ onDone }: { onDone: () => void }) {
           description={strings.rssSources.seasonHint}
           htmlFor="rss-season"
         >
-          <Input
+          <Select
             id="rss-season"
             value={seasonId}
-            onChange={(e) => setSeasonId(e.target.value.replace(/\D/g, ''))}
-            inputMode="numeric"
-          />
+            onChange={(e) => setSeasonId(e.target.value)}
+          >
+            <option value="">
+              {seasonOptions.length === 0
+                ? strings.rssSources.seasonEmptyOption
+                : strings.rssSources.seasonPlaceholder}
+            </option>
+            {seasonOptions.map((option) => (
+              <option key={option.id} value={String(option.id)}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field label={strings.rssSources.token} description={strings.rssSources.tokenHint} htmlFor="rss-token">
           <Input
@@ -110,12 +151,16 @@ function AddSourceForm({ onDone }: { onDone: () => void }) {
 export function RssSourcesPage() {
   const fetcher = useCallback(() => api.rssSources.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
+  // 季下拉数据源:GET /api/subscriptions(后端 SubscriptionOut 内嵌 seasons)
+  const subsFetcher = useCallback(() => api.subscriptions.list({ limit: 200 }), [])
+  const { data: subsData } = useApi(subsFetcher)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   // 启停/移除失败不再静默(A2):复用页面级 role="alert" 错误条
   const [actionError, setActionError] = useState<string | null>(null)
 
   const rows = data?.items ?? []
+  const seasonOptions = useMemo(() => buildSeasonOptions(subsData?.items ?? []), [subsData])
 
   const toggle = async (source: RssSourceDto): Promise<void> => {
     setBusyId(source.id)
@@ -162,9 +207,15 @@ export function RssSourcesPage() {
     {
       key: 'season',
       header: strings.rssSources.season,
-      render: (row) => (
-        <span className="data-text text-sm text-ink">{row.season_id ?? '—'}</span>
-      ),
+      // 能解析到订阅季则显示番名+季号;解析不到的旧数据回显原 season id
+      render: (row) => {
+        const match = seasonOptions.find((option) => option.id === row.season_id)
+        return (
+          <span className="data-text text-sm text-ink">
+            {match !== undefined ? match.label : row.season_id}
+          </span>
+        )
+      },
     },
     {
       key: 'token',
@@ -231,7 +282,7 @@ export function RssSourcesPage() {
         </div>
       )}
 
-      <AddSourceForm onDone={reload} />
+      <AddSourceForm onDone={reload} seasonOptions={seasonOptions} />
       <Card flush>
         {error !== null ? (
           <div className="p-4">

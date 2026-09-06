@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event'
 import { RssSourcesPage } from '../RssSources'
 import { renderPage } from '../../test/testUtils'
 import { api, ApiError } from '../../api'
+import type { RssSourceDto } from '../../api/types'
 import { resetMockState } from '../../mocks/handlers'
 
 describe('RssSourcesPage', () => {
@@ -98,13 +99,16 @@ describe('RssSourcesPage', () => {
     expect(await screen.findByText('请填写源地址')).toBeInTheDocument()
   })
 
-  it('缺关联季 ID 提交显示校验错误(对齐后端 season_id 必填)', async () => {
+  it('缺关联季提交显示校验错误(对齐后端 season_id 必填)', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
     await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
     await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
     await user.click(screen.getByRole('button', { name: '添加' }))
-    expect(await screen.findByText('请填写关联季 ID')).toBeInTheDocument()
+    // 错误文案与下拉占位同串:限定 Field 的错误 <p>
+    expect(
+      await screen.findByText('请选择关联季', { selector: 'p.text-xs' }),
+    ).toBeInTheDocument()
   })
 
   it('填写地址与关联季后创建成功', async () => {
@@ -112,10 +116,47 @@ describe('RssSourcesPage', () => {
     renderPage(<RssSourcesPage />)
     await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
     await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
-    await user.type(screen.getByLabelText('关联季'), '2')
+    await user.selectOptions(screen.getByLabelText('关联季'), '2')
     await user.click(screen.getByRole('button', { name: '添加' }))
     expect(
       await screen.findByText('https://mikanani.me/RSS/Bangumi?subgroupid=583'),
     ).toBeInTheDocument()
+  })
+
+  it('回归 B2:关联季为下拉框,选项来自订阅季(番名+季号+ID 拼文案)', async () => {
+    const user = userEvent.setup()
+    renderPage(<RssSourcesPage />)
+    const select = (await screen.findByLabelText('关联季')) as HTMLSelectElement
+    expect(select.tagName).toBe('SELECT')
+    // 默认占位;等订阅数据落地后出现 3 个季选项(药屋 S2 / 迷宫饭 S1 / 芙莉莲 S1)
+    expect(select).toHaveValue('')
+    expect(
+      await screen.findByRole('option', { name: /药屋少女的呢喃 · 第 2 季\(ID 2\)/ }),
+    ).toBeInTheDocument()
+    expect(select.options.length).toBe(4)
+    expect(screen.getByRole('option', { name: /迷宫饭 · 第 1 季\(ID 6\)/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /葬送的芙莉莲 · 第 1 季\(ID 1\)/ })).toBeInTheDocument()
+    // 选择后以 season id 提交
+    await user.selectOptions(select, '6')
+    expect(select).toHaveValue('6')
+  })
+
+  it('回归 B2:表格季列显示番名+季号;解析不到的旧数据回显原 season id', async () => {
+    const source: RssSourceDto = {
+      id: 99,
+      url: 'https://example.com/rss/legacy',
+      has_token: false,
+      season_id: 999,
+      enabled: true,
+      last_polled_at: null,
+    }
+    const listSpy = vi
+      .spyOn(api.rssSources, 'list')
+      .mockResolvedValue({ total: 1, limit: 100, offset: 0, items: [source] })
+    renderPage(<RssSourcesPage />)
+    expect(await screen.findByText('https://example.com/rss/legacy')).toBeInTheDocument()
+    // season_id 999 不在订阅季列表 → 回显原 id(旧数据兼容),不伪装成季名
+    expect(screen.getByText('999')).toBeInTheDocument()
+    listSpy.mockRestore()
   })
 })
