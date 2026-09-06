@@ -14,6 +14,7 @@ from autoanime.core.enums import (
     ReleaseStatus,
 )
 from autoanime.core.models import Episode, ReleaseRecord, Season, Series
+from autoanime.gateway import GatewayError
 from autoanime.gateway.torrents import bencode, torrent_info_hash
 from autoanime.memory.store import SqliteStorage
 from autoanime.scheduler.download_poller import DownloadPoller
@@ -193,6 +194,54 @@ async def test_reconcile_notes_untracked_completed_hashes() -> None:
     other = torrent_info_hash(bencode({"info": {"name": "other", "length": 1}}))
     rig.gateway.statuses[other] = {"state": "uploading", "progress": 1.0}
     report = await rig.poller.reconcile_startup(now=NOW)
+    assert any(other in note for note in report.notes)
+
+
+class _PingingGateway(FakeGateway):
+    """带 ping 的 fake（R2 验收：ping() 接线进补扫路径的行为覆盖）。"""
+
+    def __init__(self, *, alive: bool) -> None:
+        super().__init__()
+        self.alive = alive
+        self.completed_hashes_calls = 0
+
+    async def ping(self) -> bool:
+        if not self.alive:
+            raise GatewayError("qbittorrent auth_log_in failed: ConnectError")
+        return True
+
+    async def completed_hashes(self) -> list[str]:
+        self.completed_hashes_calls += 1
+        return await super().completed_hashes()
+
+
+async def test_reconcile_startup_pings_gateway_unreachable_notes_not_crash() -> None:
+    """R2 落地 R1 验收遗留建议：补扫先 ping；网关不可达记 note 不 crash。
+
+    DB 侧悬挂恢复不依赖网关，照常完成；qB 侧对账（completed_hashes）被
+    跳过，note 如实记录不可达。
+    """
+    rig = await make_rig(status=None)
+    # DB 侧悬挂任务：COMPLETED 但 episode 仍 DOWNLOADING
+    await rig.store.transition_release(rig.release.id, ReleaseStatus.COMPLETED, now=NOW)
+    gateway = _PingingGateway(alive=False)
+    poller = DownloadPoller(rig.store, gateway)
+    report = await poller.reconcile_startup(now=NOW)
+    assert report.reconciled == 1  # DB 侧恢复照常
+    assert any("downloader unreachable" in note for note in report.notes)
+    assert gateway.completed_hashes_calls == 0  # qB 侧对账被跳过
+
+
+async def test_reconcile_startup_ping_success_keeps_qb_reconcile() -> None:
+    """ping 成功时补扫行为不变：qB 侧对账照跑（untracked note 照发）。"""
+    rig = await make_rig(status=None)
+    other = torrent_info_hash(bencode({"info": {"name": "other", "length": 1}}))
+    rig.gateway.statuses[other] = {"state": "uploading", "progress": 1.0}
+    gateway = _PingingGateway(alive=True)
+    gateway.statuses[other] = {"state": "uploading", "progress": 1.0}
+    poller = DownloadPoller(rig.store, gateway)
+    report = await poller.reconcile_startup(now=NOW)
+    assert gateway.completed_hashes_calls == 1
     assert any(other in note for note in report.notes)
 
 

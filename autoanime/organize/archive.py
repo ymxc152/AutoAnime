@@ -189,7 +189,14 @@ class ArchiveService:
             and season_match
             and result.episode is not None
         ):
-            context_row = await self._store.episode_context(expected.episode_number)
+            # season 上下文必须经 expected 集的 episode_id 取（R2/R3 验收修复：
+            # episode_context 的参数是 episode id；expected.episode_number 是
+            # 集号——多季订阅下 id≠number，传号会查到别的番的行）。
+            context_row = (
+                await self._store.episode_context(release.episode_id)
+                if release.episode_id is not None
+                else None
+            )
             if context_row is not None:
                 target = await self._store.episode_for_number(
                     context_row[1].id, result.episode
@@ -198,6 +205,7 @@ class ArchiveService:
             self._state(target) is EpisodeState.MISSING
         ):
             # A 语义（文件级改挂）：同番其他集仍缺 → 直接归档到该集，零重下
+            expected_episode_id = release.episode_id
             await self._archive_episode(
                 video, release=release,
                 episode=target, season=season, series=series,
@@ -217,11 +225,45 @@ class ArchiveService:
                     "to_episode": target.number,
                 },
             )
+            # 期望集解除占用（R3 验收实测缺陷）：其下载内容已改挂他集，
+            # 原集若停留在 DOWNLOADED 是无文件谎报，且该状态会挡住回补
+            # 重下——回 MISSING 等 RSS 自然命中（与 C 分支回缺同语义）。
+            await self._release_expected_episode(expected_episode_id, season)
             return
         await self._handle_mismatch(
             video, release=release, expected=expected, season=season,
             series=series, result=result, title_match=title_match,
             target=target, report=report,
+        )
+
+    async def _release_expected_episode(self, episode_id: int | None, season: Season) -> None:
+        """改挂后把原期望集回 MISSING（DOWNLOADED → MISSING 合法转移，D14）。
+
+        仅在原集确处 DOWNLOADED（下载完成但内容已改挂他集）时回缺并发
+        episode.gap；其余状态（MISSING/ORGANIZED 等）不动，转移被拒时记
+        note 不 crash。
+        """
+        if episode_id is None:
+            return
+        context_row = await self._store.episode_context(episode_id)
+        if context_row is None:
+            return
+        episode = context_row[0]
+        if self._state(episode) is not EpisodeState.DOWNLOADED:
+            return
+        try:
+            await self._store.transition_episode(episode.id, EpisodeState.MISSING)
+        except TransitionError as exc:
+            logger.warning("expected episode cannot return to MISSING: %s", exc)
+            return
+        await self._publish(
+            EventCategory.NOTIFY,
+            "episode.gap",
+            {
+                "season_id": season.id,
+                "gap": [episode.number],
+                "reason": "mismatch_reattach",
+            },
         )
 
     async def _route_by_episode_state(
@@ -235,8 +277,16 @@ class ArchiveService:
         result: ParseResult,
         report: ArchiveReport,
     ) -> None:
-        context_row = await self._store.episode_context(expected.episode_number)
-        assert context_row is not None
+        # 期望集状态经 release.episode_id 取行（episode_context 参数是 id，
+        # expected.episode_number 是集号——多季订阅下 id≠number）。
+        context_row = (
+            await self._store.episode_context(release.episode_id)
+            if release.episode_id is not None
+            else None
+        )
+        if context_row is None:
+            report.notes.append("expected episode context missing; nothing to organize")
+            return
         episode = context_row[0]
         state = self._state(episode)
         if state is EpisodeState.DOWNLOADED:
@@ -459,9 +509,17 @@ class ArchiveService:
         report: ArchiveReport,
     ) -> None:
         """错配恢复 A/B/C（先隔离 + rejected 落库，再按分支执行，D14）。"""
+        # 回补预算按 expected 集的 episode_id 统计（R3 验收修复：该参数是
+        # id；expected.episode_number 是集号——多季订阅下 id≠number，按号
+        # 统计会数到别的番的 release，预算恒 0 / 误转人工）。
+        expected_episode_id = release.episode_id
         rejected = [
             row
-            for row in await self._store.find_releases_by_episode(expected.episode_number)
+            for row in (
+                await self._store.find_releases_by_episode(expected_episode_id)
+                if expected_episode_id is not None
+                else []
+            )
             if self._decision(row) is Decision.REJECTED
         ]
         decision = decide_mismatch(
@@ -501,6 +559,7 @@ class ArchiveService:
                     "branch": decision.branch,
                 },
             )
+            await self._release_expected_episode(expected_episode_id, season)
             return
         # B / C：隔离
         quarantine_dir = Path(self._settings.quarantine_path) / release.torrent_hash[:12]
@@ -533,7 +592,11 @@ class ArchiveService:
                 )
         if decision.backfill:
             # C：期望集回 MISSING + 立即缺口通知（D15：回补等 RSS 自然命中）
-            context_row = await self._store.episode_context(expected.episode_number)
+            context_row = (
+                await self._store.episode_context(expected_episode_id)
+                if expected_episode_id is not None
+                else None
+            )
             if context_row is not None:
                 missing_episode = context_row[0]
                 try:
@@ -555,7 +618,7 @@ class ArchiveService:
         await self._audit(
             operation_id=uuid4().hex,
             entity="episode",
-            entity_id=expected.episode_number,
+            entity_id=expected_episode_id,
             action="mismatch.quarantined",
             instruction={
                 "branch": decision.branch,
@@ -568,7 +631,7 @@ class ArchiveService:
         await self._publish(
             EventCategory.ORGANIZE,
             "mismatch.quarantined",
-            {"branch": decision.branch, "episode_id": expected.episode_number},
+            {"branch": decision.branch, "episode_id": expected_episode_id},
         )
 
     # ------------------------------------------------------------ helpers

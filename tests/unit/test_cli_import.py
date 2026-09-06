@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
@@ -302,3 +303,149 @@ def test_dry_run_pending_item_writes_no_row(tmp_path: Path) -> None:
     assert item["reason"] == "l3:low"
     assert "pending_id" not in item
     assert total == 0
+
+
+# ------------------------------------------------- 单元：重跑幂等（R2 验收）
+
+
+def test_import_rerun_skips_already_archived_and_pending(env: dict[str, Path]) -> None:
+    """R2 验收：同一目录连跑两遍 import，第二遍 scanned 全部 skipped 零新增。
+
+    已归档（audit episode.organized 同源文件名）→ reason=already-archived；
+    已在等人工（未决 pending 行）→ reason=already-pending；两遍的 audit 与
+    pending 行数一致（零重复 hardlink/audit/pending）。
+    """
+    source = _make_tree(env["root"], {HIGH_NAME: b"high", "Frieren - 01.mkv": b"m1"})
+    first = json.loads(_run_cli("import", source.as_posix())[1])
+    assert first["archived"] == 1 and first["pending"] == 1
+    second = json.loads(_run_cli("import", source.as_posix())[1])
+    assert second["scanned"] == 2
+    assert second["archived"] == 0
+    assert second["pending"] == 0
+    assert second["failed"] == 0
+    assert second["skipped"] == 2
+    reasons = {Path(str(i["file"])).name: i["reason"] for i in second["items"]}
+    assert reasons == {HIGH_NAME: "already-archived", "Frieren - 01.mkv": "already-pending"}
+
+    # 簿记零新增：audit / pending 行数与第一遍一致
+    with sqlite3.connect(env["db"]) as conn:
+        audit_count = conn.execute(
+            "SELECT count(*) FROM audit_log WHERE action = 'episode.organized'"
+        ).fetchone()[0]
+        pending_count = conn.execute("SELECT count(*) FROM pending_queue").fetchone()[0]
+    assert audit_count == 1
+    assert pending_count == 1
+
+    # dry-run 的幂等预览同样如实（不写库，只标记）
+    preview = json.loads(_run_cli("import", source.as_posix(), "--dry-run")[1])
+    assert preview["skipped"] == 2 and preview["archived"] == 0 and preview["pending"] == 0
+
+
+def test_import_rerun_reprocesses_file_after_pending_resolved(env: dict[str, Path]) -> None:
+    """pending 行被人工解决（confirm/correct 置 resolved）后，重跑放行该文件。"""
+    source = _make_tree(env["root"], {HIGH_NAME: b"high", "Frieren - 01.mkv": b"m1"})
+    _run_cli("import", source.as_posix())
+    with sqlite3.connect(env["db"]) as conn:
+        conn.execute("UPDATE pending_queue SET status = 'resolved'")
+        conn.commit()
+    second = json.loads(_run_cli("import", source.as_posix())[1])
+    assert second["skipped"] == 1  # 只有已归档文件跳过
+    reasons = {Path(str(i["file"])).name: i["reason"] for i in second["items"]}
+    assert reasons[HIGH_NAME] == "already-archived"
+    # 放行文件重新识别 → 重新入队（L2 仍 miss，LLM 关闭走 l3 草稿）
+    assert reasons["Frieren - 01.mkv"] == "l3:medium"
+    assert second["pending"] == 1
+
+
+def test_import_dry_run_creates_no_idempotence_barrier(env: dict[str, Path]) -> None:
+    """dry-run 不落库：之后实跑同一目录不触发 already-* 跳过。"""
+    source = _make_tree(env["root"], {HIGH_NAME: b"high"})
+    _run_cli("import", source.as_posix(), "--dry-run")
+    real = json.loads(_run_cli("import", source.as_posix())[1])
+    assert real["archived"] == 1
+    assert real["skipped"] == 0
+
+
+# ------------------------------------------------- 单元：目标位冲突守卫（R2 验收）
+
+
+def _high_result() -> ParseResult:
+    return ParseResult(
+        title="Show", season=1, episode=1, segment=Segment.EPISODE,
+        fansub=None, level=Confidence.HIGH, confidence=1.0,
+    )
+
+
+def test_import_dst_conflict_does_not_overwrite(tmp_path: Path) -> None:
+    """R2 实测缺陷回归：不同文件映射同一库内目标位 → 跳过不覆盖。
+
+    修复前 friDay 版 import 会 hardlink 覆盖 LINETV 版（实测三源同集互踩，
+    最后导入者获胜）；库内替换只能走 E4 洗版评分闸门（D21）。
+    """
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object], Path]:
+        storage = _db(tmp_path)
+        await storage.create_all()
+        try:
+            lib = tmp_path / "library"
+            src = tmp_path / "dl"
+            src.mkdir()
+            first = src / "Show.S01E01.1080p.Baha.WEB-DL.x264.mkv"
+            first.write_bytes(b"first-content")
+            second = src / "Show.S01E01.1080p.LINETV.WEB-DL.x264.mkv"
+            second.write_bytes(b"second-content-different")
+            settings = Settings(library_path=lib)
+            store, gov = LoopStore(storage), MemoryGovernance(storage)
+            outcome = RouteOutcome(_high_result(), ROUTE_ARCHIVE)
+            item1 = await _handle_import_outcome(
+                first, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            item2 = await _handle_import_outcome(
+                second, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            return item1, item2, lib / "Show" / "Season 01" / "Show - S01E01.1080p.mkv"
+        finally:
+            await storage.close()
+
+    item1, item2, dst = asyncio.run(scenario())
+    assert item1["action"] == "archive"
+    assert dst.read_bytes() == b"first-content"
+    assert item2["action"] == "skip"
+    assert item2["reason"] == "dst-exists-upgrade-gated"
+    assert dst.read_bytes() == b"first-content"  # 未被第二个版本覆盖
+
+
+def test_import_same_content_dst_is_noop_skip(tmp_path: Path) -> None:
+    """同内容不同名的重放（已 hardlink 进库）→ noop 跳过，不重复链接。"""
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object]]:
+        storage = _db(tmp_path)
+        await storage.create_all()
+        try:
+            lib = tmp_path / "library"
+            # CLI 实跑会先建库根（D9 同盘判定需要 stat 到 library 根），保持一致
+            lib.mkdir(parents=True)
+            src = tmp_path / "dl"
+            src.mkdir()
+            first = src / "Show.S01E01.1080p.Baha.WEB-DL.x264.mkv"
+            first.write_bytes(b"same-content")
+            settings = Settings(library_path=lib)
+            store, gov = LoopStore(storage), MemoryGovernance(storage)
+            outcome = RouteOutcome(_high_result(), ROUTE_ARCHIVE)
+            item1 = await _handle_import_outcome(
+                first, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            # 同 inode 的另一个名字（重命名/硬链接副本），audit 幂等桶不认识它
+            renamed = src / "Show.S01E01.1080p.WEB-DL.renamed.mkv"
+            os.link(first, renamed)
+            item2 = await _handle_import_outcome(
+                renamed, outcome, settings=settings, store=store, governance=gov, dry_run=False
+            )
+            return item1, item2
+        finally:
+            await storage.close()
+
+    item1, item2 = asyncio.run(scenario())
+    assert item1["action"] == "archive"
+    assert item2["action"] == "skip"
+    assert item2["reason"] == "dst-exists-same-content"

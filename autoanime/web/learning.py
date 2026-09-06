@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from autoanime.core.enums import Confidence, Segment
+from autoanime.core.enums import Actor, Confidence, Segment
 from autoanime.core.events import Event, EventCategory, InMemoryEventBus
 from autoanime.core.interfaces import ParseResult
 from autoanime.core.models import AuditLog, PendingQueue
@@ -96,6 +96,10 @@ def pending_audit_row(
         action=action,
         instruction=instruction,
         reverse={},
+        # E1 报表口径（R2 验收实测修复）：confirm/correct/reject 都是人工
+        # 操作，audit 行必须记 actor=manual——否则 report 的
+        # manual_intervention_rate 恒 0（resolved_by=manual 与审计脱节）。
+        actor=Actor.MANUAL,
     )
 
 

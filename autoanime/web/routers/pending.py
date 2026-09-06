@@ -11,9 +11,11 @@ from fastapi import APIRouter, HTTPException
 
 from autoanime.core.enums import MemorySource, PendingStatus, ResolvedBy
 from autoanime.core.events import EventCategory
+from autoanime.core.interfaces import RawName
 from autoanime.core.models import PendingQueue
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.store import SqliteStorage
+from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.web.deps import (
     ApiStoreDep,
     BusDep,
@@ -55,6 +57,16 @@ async def _load_open_pending(store: ApiStore, pending_id: int) -> PendingQueue:
     return row
 
 
+async def _l1_draft_title(raw_name: str) -> str | None:
+    """重放 L1 草稿标题（纯函数解析，零外呼零落库）。
+
+    学习时把 L1 草稿标题形状映射到确认标题形状（learn.draft_title，
+    R3 验收跨集命中落地）——未来同风格兄弟集经 alias 读侧零外呼命中。
+    """
+    draft = await LocalRecognizer().parse(RawName(name=raw_name))
+    return draft.title if draft else None
+
+
 async def _learn(
     storage: SqliteStorage,
     reference_chain,
@@ -71,6 +83,7 @@ async def _learn(
         source=MemorySource.MANUAL,
         bypass_lookup=access,
         reference_lookup=reference_chain,
+        draft_title=await _l1_draft_title(row.raw_name),
     )
     return len(outcome.entries), outcome.bypassed
 

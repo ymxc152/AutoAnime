@@ -351,6 +351,7 @@ async def learn_confirmation(
     source: MemorySource = MemorySource.MANUAL,
     bypass_lookup: BypassLookup | None = None,
     reference_lookup: ReferenceLookup | None = None,
+    draft_title: str | None = None,
 ) -> LearnOutcome:
     """Learn one confirmed result: bypass gate, then upsert both key levels.
 
@@ -360,6 +361,10 @@ async def learn_confirmation(
     ``reference_lookup`` 非空时（PR7 M3），ParseMemory 两级写成功后做一次
     alias 回填（见 ``backfill_title_aliases``）：回填失败静默，不影响
     主流程结果。
+
+    ``draft_title`` 非空时（R3 验收落地），把 L1 草稿标题形状也映射到
+    确认标题形状（见 ``backfill_draft_alias``）——跨集命中契约：同风格
+    的兄弟集必然重放同一 L1 草稿形状，alias 读侧据此零外呼归一。
     """
     if bypass_lookup is not None and await bypass_lookup.has_bypass(pattern_hash(raw_name)):
         return LearnOutcome(entries=(), bypassed=True)
@@ -380,4 +385,38 @@ async def learn_confirmation(
             reference_lookup,
             confirmed=confirmed,
         )
+    if draft_title is not None:
+        await backfill_draft_alias(
+            cast(AliasBackfillStore, store),
+            draft_title=draft_title,
+            confirmed=confirmed,
+        )
     return LearnOutcome(entries=tuple(entries), bypassed=False)
+
+
+async def backfill_draft_alias(
+    store: AliasBackfillStore,
+    *,
+    draft_title: str,
+    confirmed: ParseResult,
+) -> None:
+    """把 L1 草稿标题形状映射到确认标题形状（R3 验收：跨集命中）。
+
+    现象（R3 真实验收实测）：confirm/correct 的学习只绑确认标题形状——
+    当 L1 草稿标题（如带 ``Anime.`` 前缀的发布名解析）与确认标题形状不
+    一致、且参考源不认识草稿形状时，同风格兄弟集的 L2 直接查找、alias
+    读侧、reference 缓存三条归一路径全部 miss，跨集命中永不发生（实测
+    E05 重导再次烧一次 LLM）。
+
+    用户确认本身就是「草稿标题 ≈ 确认标题」的证据：把该映射写入
+    ``title_aliases``，兄弟集经 PR7 M2b alias 读侧零外呼命中。self 映射
+    （草稿形状 == 确认形状）跳过；失败静默（与 reference 回填同口径）。
+    """
+    try:
+        draft_shape = build_title_shape(draft_title)
+        confirmed_shape = build_title_shape(confirmed.title)
+        if not draft_shape or not confirmed_shape or draft_shape == confirmed_shape:
+            return
+        await store.put_alias_map({draft_shape: confirmed_shape}, source="manual")
+    except Exception:
+        logger.warning("draft alias backfill failed; skipping", exc_info=True)

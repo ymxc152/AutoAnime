@@ -402,3 +402,136 @@ async def test_fast_path_audit_rows_carry_reverse(
     actions = {row.action for row in audits}
     assert "subscribed_fast_path" in actions  # D13 快路径审计
     assert "episode.organized" in actions
+
+
+# ------------------------------------------------- id≠number 回归（R3 验收）
+
+
+async def _make_offset_rig(
+    mapping: dict[str, ParseResult],
+    *,
+    content_dir: Path,
+    rejected_on_expected: int = 0,
+) -> Rig:
+    """期望集 id≠集号 的 rig：先建一个 5 集的占位番，再建目标番——
+    目标番的 episode.id 从 6 起，与集号 1-5 错开（多季订阅的真实形态）。
+    """
+    storage = SqliteStorage("sqlite+aiosqlite:///:memory:")
+    await storage.create_all()
+    _OPEN_STORAGES.append(storage)
+    store = LoopStore(storage)
+    # 占位番：占用 episode id 1-5
+    await store.create_subscription(
+        Series(title_cn="占位番", media_type=MediaType.TV, status="active"),
+        Season(number=1),
+        [Episode(number=n, state=EpisodeState.MISSING) for n in range(1, 6)],
+    )
+    series = await store.create_subscription(
+        Series(title_cn="错位番", media_type=MediaType.TV, status="active"),
+        Season(number=1),
+        [Episode(number=n, state=EpisodeState.MISSING) for n in range(1, 6)],
+    )
+    season = (await store.seasons_for_series(series.id))[0]
+    episode = await store.episode_for_number(season.id, 1)
+    assert episode is not None
+    assert episode.id != episode.number  # 前置：id 与集号确实错开
+    await store.transition_episode(episode.id, EpisodeState.DOWNLOADING)
+    await store.transition_episode(episode.id, EpisodeState.DOWNLOADED)
+    for _ in range(rejected_on_expected):
+        filler = ReleaseRecord(
+            episode_id=episode.id,
+            torrent_hash=_random_hash(),
+            decision=Decision.REJECTED,
+            reason="mismatch C_backfill: prior",
+            source_url=f"guid-{_random_hash()}",
+        )
+        saved = await store.create_release(filler)
+        assert saved is not None
+    record = ReleaseRecord(
+        episode_id=episode.id,
+        torrent_hash="a" * 40,
+        score=11.0,
+        source_url="guid-a",
+    )
+    saved = await store.create_release(record)
+    assert saved is not None
+    await store.transition_release(saved.id, ReleaseStatus.PICKED, now=NOW, decision=Decision.ACCEPTED)
+    await store.transition_release(saved.id, ReleaseStatus.DOWNLOADING, now=NOW)
+    await store.transition_release(saved.id, ReleaseStatus.COMPLETED, now=NOW)
+    settings = Settings(
+        database_url="sqlite+aiosqlite:///:memory:",
+        library_path=Path("library"),
+        download_path=Path("downloads"),
+        quarantine_path=Path("quarantine"),
+    )
+    governance = MemoryGovernance(storage)
+    bus = BusRecorder()
+    service = ArchiveService(
+        store,
+        Orchestrator(recognizer=ScriptedRecognizer(mapping), l2_enabled=False, audit_sink=governance),
+        FakeGateway(content_dir),
+        settings=settings,
+        governance=governance,
+        bus=bus,
+    )
+    return Rig(store, storage, service, bus, Path("."), season.id, saved, episode)
+
+
+def _random_hash() -> str:
+    import hashlib
+    import uuid as _uuid
+
+    return hashlib.sha1(_uuid.uuid4().bytes).hexdigest()
+
+
+async def test_mismatch_reattach_when_episode_ids_offset_from_numbers(
+    tmp_media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """回归（R3 验收）：episode.id≠集号时 A 改挂必须按 id 定位期望集。
+
+    修复前 _process_file 把 expected.episode_number 当 episode id 传给
+    episode_context——多季订阅下查到占位番的行，改挂目标取自已错位的季。
+    """
+    monkeypatch.chdir(tmp_media)
+    content = _make_content(tmp_media, "Show - S01E03.mkv")
+    mapping = {"Show - S01E03.mkv": _parse("错位番", 3)}
+    rig = await _make_offset_rig(mapping, content_dir=content)
+    report = await rig.service.handle_completed(rig.release, None)
+    assert report.reattached == 1
+    e3 = await rig.episode_row(3)  # 目标番的 E03（id≠3）
+    assert e3.state == EpisodeState.ORGANIZED
+    assert e3.file_path is not None and "错位番" in e3.file_path
+    refreshed = await rig.storage.get(ReleaseRecord, rig.release.id)
+    assert refreshed is not None and refreshed.episode_id == e3.id
+    # R3 实测缺陷回归：期望集（内容已改挂他集）回 MISSING + 缺口事件，
+    # 不停留在无文件的 DOWNLOADED（挡住回补）
+    e1 = await rig.episode_row(1)
+    assert e1.state == EpisodeState.MISSING
+    assert any(
+        event.message == "episode.gap" and event.payload.get("reason") == "mismatch_reattach"
+        for event in rig.bus.events
+    )
+
+
+async def test_mismatch_budget_counts_expected_episode_releases_when_ids_offset(
+    tmp_media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """回归（R3 验收）：回补预算按 expected 集的 id 统计 rejected release。
+
+    修复前 find_releases_by_episode(expected.episode_number) 按集号查——
+    id 错位时数到占位番的 release，预算恒 0，永不转人工。
+    """
+    monkeypatch.chdir(tmp_media)
+    content = _make_content(tmp_media, "Show - S01E09.mkv")
+    mapping = {"Show - S01E09.mkv": _parse("错位番", 9)}  # 目标番只有 5 集
+    rig = await _make_offset_rig(mapping, content_dir=content, rejected_on_expected=2)
+    report = await rig.service.handle_completed(rig.release, None)
+    assert report.quarantined == 1
+    # 预算 2 已被同集的两次 rejected 用尽 → 转人工（不再回补）
+    pendings = await rig.storage.list(PendingQueue)
+    assert any(
+        row.stage == "mismatch" and "C_budget_exhausted" in str(row.context.get("branch"))
+        for row in pendings
+    )
+    episode = await rig.episode_row(1)
+    assert episode.state == EpisodeState.DOWNLOADED  # 预算用尽不回缺
