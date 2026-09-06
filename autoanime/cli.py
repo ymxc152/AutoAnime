@@ -38,6 +38,7 @@ from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
 from autoanime.organize import confirm_archive, mover
 from autoanime.organize.naming import NamingInput, relative_path
+from autoanime.organize.poster import PosterService
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.pipeline.l3_llm import LlmFallbackRecognizer
@@ -380,13 +381,14 @@ async def _confirm(args: argparse.Namespace) -> int:
     settings = load_settings()
     async with SqliteStorage(settings.database_url) as storage:
         access = StorageMemoryAccess(storage)
+        reference_chain = _confirm_reference_lookup(settings, storage)
         outcome = await learn_confirmation(
             access,
             confirmed=confirmed,
             raw_name=args.name,
             source=MemorySource(args.source),
             bypass_lookup=access,
-            reference_lookup=_confirm_reference_lookup(settings, storage),
+            reference_lookup=reference_chain,
             draft_title=draft.title if draft else None,
         )
         # 确认收尾（与 WebUI confirm 同语义）：raw_name 匹配的未决 pending 行
@@ -413,6 +415,22 @@ async def _confirm(args: argparse.Namespace) -> int:
                 settings=settings, governance=governance,
             )
         )
+        if archive.archived:
+            # 海报兜底（PR3+ 触发点 A）：归档成功后 best-effort 拉取；
+            # CLI 直接 await（命令进程生命周期短，后台任务会被截断），
+            # 失败/冷却期内静默跳过，不影响归档结果。
+            poster_service = PosterService(
+                storage=storage,
+                settings=settings,
+                chain_provider=lambda: reference_chain,
+            )
+            try:
+                await poster_service.ensure_poster(
+                    titles=(confirmed.title, None, None),
+                    library_path=Path(settings.library_path),
+                )
+            finally:
+                await poster_service.aclose()
     if outcome.bypassed:
         print(json.dumps({"bypassed": True, "entries": []}, ensure_ascii=False))
         return 0

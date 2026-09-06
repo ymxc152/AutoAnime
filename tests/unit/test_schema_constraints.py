@@ -53,7 +53,7 @@ async def _add_episode(session, series: Series, season: Season | None = None) ->
     return episode
 
 
-async def test_exactly_fourteen_tables(session) -> None:
+async def test_exactly_fifteen_tables(session) -> None:
     result = await session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
     names = {row[0] for row in result}
     expected = {
@@ -71,6 +71,7 @@ async def test_exactly_fourteen_tables(session) -> None:
         "llm_cache",
         "reference_cache",
         "rss_sources",
+        "poster_fetch",
     }
     assert names == expected
 

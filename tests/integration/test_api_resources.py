@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -131,6 +132,203 @@ async def test_series_poster_404_when_missing_file_or_series(client) -> None:
     # 不存在的 series → 404
     resp = await c.get("/api/series/9999/poster")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 海报兜底下载（PR3+）：本地缺失 → 参考源懒拉取 → 落盘 → local-first
+# ---------------------------------------------------------------------------
+
+
+class _FakePosterDownloader:
+    """可编程图片下载 fake：按 URL 返回 (bytes, content-type)，记录调用。"""
+
+    def __init__(self, responses: dict[str, tuple[bytes, str] | None]) -> None:
+        self._responses = responses
+        self.calls: list[str] = []
+
+    async def fetch(self, url: str) -> tuple[bytes, str] | None:
+        self.calls.append(url)
+        return self._responses.get(url)
+
+
+class _StaticPosterChain:
+    """恒定返回同一 facts 的假链（poster_url 可控）。"""
+
+    def __init__(self, facts: ReferenceFacts | None) -> None:
+        self._facts = facts
+
+    async def lookup(self, title_shape: str) -> ReferenceFacts | None:
+        return self._facts
+
+
+async def _poster_series_id(client: httpx.AsyncClient, title: str) -> int:
+    resp = await client.post(
+        "/api/subscriptions",
+        json={"title_cn": title, "season_number": 1, "episode_count": 1},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def _install_poster_service(
+    app_state: Any,
+    settings: Settings,
+    *,
+    facts: ReferenceFacts | None,
+    downloader: _FakePosterDownloader,
+) -> None:
+    from autoanime.organize.poster import PosterService
+
+    monkeypatch_target = app_state
+    monkeypatch_target.reference_chain = _StaticPosterChain(facts)
+    monkeypatch_target.poster_service = PosterService(
+        storage=app_state.storage,
+        settings=settings,
+        chain_provider=lambda: app_state.reference_chain,
+        downloader=downloader,
+    )
+
+
+async def test_series_poster_lazy_download_persists_then_serves_local(
+    client, monkeypatch
+) -> None:
+    """本地缺失+参考源有图 → 下载落盘 200；二次请求走本地不再打网络。"""
+    c, settings = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    series_id = await _poster_series_id(c, "兜底下载番")
+    poster_bytes = b"\x89PNG-fake-poster-bytes"
+    downloader = _FakePosterDownloader(
+        {"https://img.example/poster.png": (poster_bytes, "image/png")}
+    )
+    _install_poster_service(
+        app_state,
+        settings,
+        facts=ReferenceFacts(
+            canonical_title="兜底下载番",
+            poster_url="https://img.example/poster.png",
+            source="bangumi",
+        ),
+        downloader=downloader,
+    )
+
+    resp = await c.get(f"/api/series/{series_id}/poster")
+    assert resp.status_code == 200, resp.text
+    assert resp.content == poster_bytes
+    assert resp.headers["content-type"].startswith("image/png")
+    # Content-Type → 扩展名映射：image/png 落盘为 poster.png
+    on_disk = settings.library_path / "兜底下载番" / "poster.png"
+    assert on_disk.is_file()
+    assert on_disk.read_bytes() == poster_bytes
+    # 负缓存记录 fetched + 实际扩展名
+    row = await app_state.storage.find_poster_fetch("兜底下载番")
+    assert row is not None and row.status == "fetched" and row.ext == ".png"
+
+    # 二次请求：本地直读，不再打网络
+    calls_after_first = list(downloader.calls)
+    resp2 = await c.get(f"/api/series/{series_id}/poster")
+    assert resp2.status_code == 200
+    assert resp2.content == poster_bytes
+    assert downloader.calls == calls_after_first
+
+
+async def test_series_poster_fetch_failure_writes_negative_cache(
+    client, monkeypatch
+) -> None:
+    """参考源有图但下载失败 → 404 + missing 负缓存；冷却期内不再发起远程。"""
+    from datetime import datetime, timedelta
+
+    c, settings = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    series_id = await _poster_series_id(c, "下载失败番")
+    downloader = _FakePosterDownloader(
+        {"https://img.example/poster.jpg": None}  # 下载失败（网络错误语义）
+    )
+    _install_poster_service(
+        app_state,
+        settings,
+        facts=ReferenceFacts(
+            canonical_title="下载失败番",
+            poster_url="https://img.example/poster.jpg",
+            source="bangumi",
+        ),
+        downloader=downloader,
+    )
+
+    resp = await c.get(f"/api/series/{series_id}/poster")
+    assert resp.status_code == 404
+    assert len(downloader.calls) == 1
+    row = await app_state.storage.find_poster_fetch("下载失败番")
+    assert row is not None and row.status == "missing"
+
+    # 冷却期内：不再发起远程
+    resp2 = await c.get(f"/api/series/{series_id}/poster")
+    assert resp2.status_code == 404
+    assert len(downloader.calls) == 1
+
+    # 冷却期过后：允许重试
+    assert row is not None
+    row.fetched_at = datetime.now() - timedelta(days=8)
+    await app_state.storage.upsert_poster_fetch(row)
+    resp3 = await c.get(f"/api/series/{series_id}/poster")
+    assert resp3.status_code == 404
+    assert len(downloader.calls) == 2
+
+
+async def test_series_poster_chain_hit_without_poster_url_is_negative(
+    client, monkeypatch
+) -> None:
+    """参考源命中但无海报直链 → 404 + 负缓存，下载器零调用。"""
+    c, settings = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    series_id = await _poster_series_id(c, "无图番")
+    downloader = _FakePosterDownloader({})
+    _install_poster_service(
+        app_state,
+        settings,
+        facts=ReferenceFacts(canonical_title="无图番", poster_url=None, source="bangumi"),
+        downloader=downloader,
+    )
+
+    resp = await c.get(f"/api/series/{series_id}/poster")
+    assert resp.status_code == 404
+    assert downloader.calls == []
+    row = await app_state.storage.find_poster_fetch("无图番")
+    assert row is not None and row.status == "missing"
+
+
+async def test_series_poster_content_type_whitelist_and_disabled_switch(
+    client, monkeypatch
+) -> None:
+    """白名单外 Content-Type 不落盘；总开关关闭时端点保持纯本地只读。"""
+    c, settings = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    series_id = await _poster_series_id(c, "白名单番")
+    downloader = _FakePosterDownloader(
+        {"https://img.example/poster.gif": (b"GIF89a", "image/gif")}
+    )
+    _install_poster_service(
+        app_state,
+        settings,
+        facts=ReferenceFacts(
+            canonical_title="白名单番",
+            poster_url="https://img.example/poster.gif",
+            source="bangumi",
+        ),
+        downloader=downloader,
+    )
+
+    # 白名单外（image/gif）→ 不落盘 → 404
+    resp = await c.get(f"/api/series/{series_id}/poster")
+    assert resp.status_code == 404
+    assert not (settings.library_path / "白名单番" / "poster.gif").exists()
+    row = await app_state.storage.find_poster_fetch("白名单番")
+    assert row is not None and row.status == "missing"
+
+    # 总开关关闭 → 本地直读语义，不发任何远程
+    settings.poster_download_enabled = False
+    resp2 = await c.get(f"/api/series/{series_id}/poster")
+    assert resp2.status_code == 404
+    assert len(downloader.calls) == 1  # 仍是关闭前那一次
 
 
 async def test_subscription_create_requires_title_and_delete_cascades(client) -> None:

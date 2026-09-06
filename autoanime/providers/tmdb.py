@@ -246,4 +246,17 @@ def _map_tv_detail(detail: dict[str, Any]) -> ReferenceFacts:
         episode_count=episode_count,
         aliases=tuple(aliases),
         source="tmdb",
+        poster_url=_tv_poster_url(detail),
     )
+
+
+TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
+"""TMDB 图片 CDN 直链前缀（w500 档：海报质量与体积均衡）。"""
+
+
+def _tv_poster_url(detail: dict[str, Any]) -> str | None:
+    """tv 详情 → 海报直链：``poster_path`` 拼 CDN 前缀，缺失返回 ``None``。"""
+    path = detail.get("poster_path")
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None
+    return f"{TMDB_IMAGE_BASE_URL}{path}"

@@ -78,6 +78,7 @@ def facts_to_json(facts: ReferenceFacts) -> dict[str, object]:
         "episode_count": facts.episode_count,
         "aliases": list(facts.aliases),
         "source": facts.source,
+        "poster_url": facts.poster_url,
     }
 
 
@@ -119,6 +120,7 @@ def facts_from_json(data: object) -> ReferenceFacts | None:
         ),
         aliases=_str_tuple(data.get("aliases")),
         source=source if isinstance(source, str) else None,
+        poster_url=(data["poster_url"] if isinstance(data.get("poster_url"), str) else None),
     )
 
 

@@ -36,6 +36,8 @@ class ReferenceFacts:
     episode_count: int | None = None
     aliases: tuple[str, ...] = ()
     source: str | None = None
+    poster_url: str | None = None
+    """参考源侧海报图直链（无则 None）；仅来自 adapter 响应，非用户输入。"""
 
 
 class ReferenceChain:

@@ -25,6 +25,7 @@ from autoanime.core.events import InMemoryEventBus
 from autoanime.core.interfaces import Registry
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.store import SqliteStorage
+from autoanime.organize.poster import PosterService
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.providers import register_reference_providers
 from autoanime.web.queries import ApiStore
@@ -66,9 +67,17 @@ def create_app(
         app.state.governance = MemoryGovernance(storage)
         app.state.bus = InMemoryEventBus()
         app.state.reference_chain = build_reference_chain(settings, storage)
+        # 海报兜底下载（PR3+）：chain 经 provider 惰性取，测试可整体替换。
+        app.state.poster_service = PosterService(
+            storage=storage,
+            settings=settings,
+            chain_provider=lambda: getattr(app.state, "reference_chain", None),
+        )
         try:
             yield
         finally:
+            # 海报服务的下载连接先于 storage 关闭。
+            await app.state.poster_service.aclose()
             await storage.close()
 
     app = FastAPI(

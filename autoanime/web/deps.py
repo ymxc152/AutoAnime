@@ -15,6 +15,7 @@ from autoanime.config import Settings
 from autoanime.core.events import InMemoryEventBus
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.store import SqliteStorage
+from autoanime.organize.poster import PosterService
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.web.queries import ApiStore
 
@@ -49,7 +50,14 @@ StorageDep = Annotated[SqliteStorage, Depends(get_storage)]
 ApiStoreDep = Annotated[ApiStore, Depends(get_api_store)]
 BusDep = Annotated[InMemoryEventBus, Depends(get_bus)]
 GovernanceDep = Annotated[MemoryGovernance, Depends(get_governance)]
+
+def get_poster_service(request: Request) -> PosterService:
+    """海报兜底下载服务（PR3+；lifespan 装配，测试可整体替换）。"""
+    return request.app.state.poster_service
+
+
 ReferenceChainDep = Annotated[ReferenceChain | None, Depends(get_reference_chain)]
+PosterServiceDep = Annotated[PosterService, Depends(get_poster_service)]
 
 
 @dataclass(frozen=True)
