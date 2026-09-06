@@ -208,6 +208,8 @@ export function SubscriptionsPage() {
   const { data, loading, error, reload } = useApi(fetcher)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
+  // 取消订阅失败不再静默(A2):复用页面级 role="alert" 错误条
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const subs = data?.items ?? []
 
@@ -218,10 +220,13 @@ export function SubscriptionsPage() {
       return
     }
     setRemovingId(id)
+    setActionError(null)
     try {
       await api.subscriptions.remove(id)
       setConfirmId(null)
       reload()
+    } catch (cause) {
+      setActionError(cause instanceof ApiError ? cause.message : strings.subscriptions.removeFailed)
     } finally {
       setRemovingId(null)
     }
@@ -230,6 +235,14 @@ export function SubscriptionsPage() {
   return (
     <>
       <PageTitle title={strings.subscriptions.title} />
+
+      {actionError !== null && (
+        <div role="alert" className="rounded-md border border-line px-3 py-2 text-sm text-ink-secondary">
+          <strong className="mr-1.5 text-danger">{strings.common.actionFailed}</strong>
+          {actionError}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <Card flush>
           {error !== null ? (

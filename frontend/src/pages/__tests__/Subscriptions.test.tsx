@@ -6,6 +6,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SubscriptionsPage } from '../Subscriptions'
 import { renderPage } from '../../test/testUtils'
+import { api, ApiError } from '../../api'
 import { resetMockState } from '../../mocks/handlers'
 
 describe('SubscriptionsPage', () => {
@@ -45,6 +46,27 @@ describe('SubscriptionsPage', () => {
     expect(await screen.findByText(/确认取消订阅「迷宫饭」/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认' }))
     await waitFor(() => expect(screen.queryByText('迷宫饭')).not.toBeInTheDocument())
+  })
+
+  it('回归 A2:取消订阅失败不再静默,展示 role=alert 错误条且行保留,重试可恢复', async () => {
+    const user = userEvent.setup()
+    const removeSpy = vi
+      .spyOn(api.subscriptions, 'remove')
+      .mockRejectedValueOnce(new ApiError(500, 'db locked'))
+    renderPage(<SubscriptionsPage />)
+    const row = (await screen.findByText('迷宫饭')).closest('div')!
+    await user.click(within(row).getByRole('button', { name: '移除' }))
+    await user.click(await screen.findByRole('button', { name: '确认' }))
+    // 失败信息如实展示(操作失败 + 后端 detail),行未被误删
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('操作失败')
+    expect(alert).toHaveTextContent('db locked')
+    expect(screen.getByText('迷宫饭')).toBeInTheDocument()
+    // 恢复后重试:错误条消失,行移除
+    removeSpy.mockRestore()
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(screen.queryByText('迷宫饭')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
   it('添加订阅:标题 + 季号 + 集数(预生成 MISSING 集表)', async () => {

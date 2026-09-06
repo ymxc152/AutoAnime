@@ -139,6 +139,7 @@ export const strings = {
     removeConfirm: '确认取消订阅「{title}」?已归档文件不受影响。',
     empty: '还没有订阅。先添加一个标题开始追番。',
     addFailed: '订阅失败',
+    removeFailed: '取消订阅失败',
   },
 
   rssSources: {
@@ -155,6 +156,8 @@ export const strings = {
     urlRequired: '请填写源地址',
     removeConfirm: '确认移除该 RSS 源?',
     empty: '没有 RSS 源。订阅会自动创建对应源,也可以手动添加。',
+    toggleFailed: '启停源失败',
+    removeFailed: '移除源失败',
   },
 
   pending: {

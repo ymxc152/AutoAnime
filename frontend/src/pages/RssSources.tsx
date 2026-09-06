@@ -112,14 +112,19 @@ export function RssSourcesPage() {
   const { data, loading, error, reload } = useApi(fetcher)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  // 启停/移除失败不再静默(A2):复用页面级 role="alert" 错误条
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const rows = data?.items ?? []
 
   const toggle = async (source: RssSourceDto): Promise<void> => {
     setBusyId(source.id)
+    setActionError(null)
     try {
       await api.rssSources.update(source.id, { enabled: !source.enabled })
       reload()
+    } catch (cause) {
+      setActionError(cause instanceof ApiError ? cause.message : strings.rssSources.toggleFailed)
     } finally {
       setBusyId(null)
     }
@@ -131,10 +136,13 @@ export function RssSourcesPage() {
       return
     }
     setBusyId(id)
+    setActionError(null)
     try {
       await api.rssSources.remove(id)
       setConfirmId(null)
       reload()
+    } catch (cause) {
+      setActionError(cause instanceof ApiError ? cause.message : strings.rssSources.removeFailed)
     } finally {
       setBusyId(null)
     }
@@ -215,6 +223,14 @@ export function RssSourcesPage() {
   return (
     <>
       <PageTitle title={strings.rssSources.title} />
+
+      {actionError !== null && (
+        <div role="alert" className="rounded-md border border-line px-3 py-2 text-sm text-ink-secondary">
+          <strong className="mr-1.5 text-danger">{strings.common.actionFailed}</strong>
+          {actionError}
+        </div>
+      )}
+
       <AddSourceForm onDone={reload} />
       <Card flush>
         {error !== null ? (
