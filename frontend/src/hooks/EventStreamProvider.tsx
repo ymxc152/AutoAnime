@@ -5,6 +5,7 @@ import { useCallback, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { useEvents } from './useEvents'
 import { EventStreamContext, type EventListener, type EventStreamValue } from './eventStreamContext'
+import { eventSourceFactory as defaultEventSourceFactory } from '../api'
 import type { EventSourceFactory } from '../api/sse'
 
 export interface EventStreamProviderProps {
@@ -26,7 +27,14 @@ export function EventStreamProvider({ children, factory, enabled = true }: Event
     [],
   )
 
-  const stream = useEvents({ onEvent, factory, enabled })
+  // 缺省必须落到 api 层工厂(按 mock 开关选定):否则生产装配下 factory
+  // 为 undefined,useEvents.connect 的 `if (!make) return` 会静默不建连,
+  // SSE 永远停留在「连接中」。
+  const stream = useEvents({
+    onEvent,
+    factory: factory ?? defaultEventSourceFactory,
+    enabled,
+  })
 
   const subscribe = useCallback((listener: EventListener) => {
     listenersRef.current.add(listener)
