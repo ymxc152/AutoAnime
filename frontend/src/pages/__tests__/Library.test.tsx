@@ -24,8 +24,9 @@ describe('LibraryPage', () => {
     await screen.findByText('葬送的芙莉莲')
     const imgs = screen.getAllByAltText('') as HTMLImageElement[]
     expect(imgs.length).toBeGreaterThan(0)
-    expect(imgs[0].getAttribute('src')).toBe('/api/series/1/poster')
-    expect(imgs[0].getAttribute('loading')).toBe('lazy')
+    const poster = imgs[0] as HTMLImageElement
+    expect(poster.getAttribute('src')).toBe('/api/series/1/poster')
+    expect(poster.getAttribute('loading')).toBe('lazy')
   })
 
   it('海报加载失败时降级为首字占位块', async () => {
@@ -71,3 +72,4 @@ describe('LibraryPage', () => {
     expect(within(dialog).getAllByText(/E04/).length).toBeGreaterThan(0)
   })
 })
+
