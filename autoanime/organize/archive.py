@@ -47,6 +47,7 @@ from autoanime.organize.expected import (
 )
 from autoanime.organize.naming import VIDEO_SUFFIXES, NamingInput, relative_path
 from autoanime.organize.upgrade import decide_upgrade, score_from_title
+from autoanime.pipeline.orchestrator import RouteOutcome
 from autoanime.scheduler.store import LoopStore, TransitionError
 
 logger = logging.getLogger(__name__)
@@ -135,45 +136,75 @@ class ArchiveService:
             release_record_id=release.id,
         )
         parse_context = ParseContext(known_series=series.id, fansub_pref=series.fansub_pref)
+        expected_episode_id = release.episode_id
 
+        # 预扫描分组（P0 修复 a）：全部视频文件先过一遍管线拿解析结论，
+        # 再逐个归档——多集种子的逐文件分流据此拥有一致快照，中途改挂/
+        # 回缺不再影响后续文件的解析与路由（回缺判断也据此得知期望集
+        # 是否真的没有文件覆盖）。
+        scanned: list[tuple[Path, RouteOutcome]] = []
         for video in video_files:
+            outcome = await self._orchestrator.process(
+                RawName(name=video.name, parent_path=str(video.parent)),
+                parse_context,
+                expected=expected,
+            )
+            scanned.append((video, outcome))
+        covered_expected = any(
+            self._covers_expected(outcome.result, expected) for _, outcome in scanned
+        )
+
+        backfill_requested = False
+        for video, outcome in scanned:
             try:
-                await self._process_file(
-                    video, release=release, expected=expected,
-                    season=season, series=series,
-                    parse_context=parse_context, report=report,
-                )
+                if await self._process_file(
+                    outcome, video=video, release=release, expected=expected,
+                    season=season, series=series, report=report,
+                ):
+                    backfill_requested = True
             except TransitionError as exc:
                 logger.warning("transition refused during organize: %s", exc)
                 report.notes.append(f"transition refused: {video.name}")
+
+        # 回缺延后（P0 修复 b）：A 改挂 / C 回补对期望集的回缺只在全部
+        # 文件归档完成后做一次性判断——期望集内容在本种子内有文件覆盖时
+        # 绝不回缺（多集种子中途回缺会把同种内随后要归档的期望集打回
+        # MISSING，死锁）；无覆盖才回缺，且只回缺一次。
+        if (
+            expected_episode_id is not None
+            and (report.reattached > 0 or backfill_requested)
+            and not covered_expected
+        ):
+            released = await self._release_expected_episode(
+                expected_episode_id, season,
+                reason="mismatch_backfill" if backfill_requested else "mismatch_reattach",
+            )
+            if released and backfill_requested:
+                report.backfilled += 1
         return report
 
     # ------------------------------------------------------------ per-file
 
     async def _process_file(
         self,
-        video: Path,
+        outcome: RouteOutcome,
         *,
+        video: Path,
         release: ReleaseRecord,
         expected: ExpectedContext,
         season: Season,
         series: Series,
-        parse_context: ParseContext,
         report: ArchiveReport,
-    ) -> None:
-        outcome = await self._orchestrator.process(
-            RawName(name=video.name, parent_path=str(video.parent)),
-            parse_context,
-            expected=expected,
-        )
+    ) -> bool:
+        """处理一个预解析过的文件；返回该文件是否请求了 C 回补（回缺延后）。"""
         result = outcome.result
-        if getattr(outcome, "fast_path", False) and result is not None:
+        if outcome.fast_path and result is not None:
             report.fast_path_hits += 1
             await self._route_by_episode_state(
                 video, release=release, expected=expected, season=season,
                 series=series, result=result, report=report,
             )
-            return
+            return False
         # 非快路径：解析结论驱动的确定性分流
         title_match = bool(
             result is not None
@@ -205,13 +236,16 @@ class ArchiveService:
             self._state(target) is EpisodeState.MISSING
         ):
             # A 语义（文件级改挂）：同番其他集仍缺 → 直接归档到该集，零重下
-            expected_episode_id = release.episode_id
             await self._archive_episode(
                 video, release=release,
                 episode=target, season=season, series=series,
                 result=result, report=report,
             )
-            await self._store.set_release_episode(release.id, target.id)
+            updated = await self._store.set_release_episode(release.id, target.id)
+            if updated is not None and updated.episode_id != release.episode_id:
+                # 改挂后刷新（P0 修复 c）：set_release_episode 在另一会话改库，
+                # 本地 release 不回写会拿着 stale episode_id 继续路由/审计。
+                release.episode_id = updated.episode_id
             report.reattached += 1
             await self._audit(
                 operation_id=uuid4().hex,
@@ -225,46 +259,47 @@ class ArchiveService:
                     "to_episode": target.number,
                 },
             )
-            # 期望集解除占用（R3 验收实测缺陷）：其下载内容已改挂他集，
-            # 原集若停留在 DOWNLOADED 是无文件谎报，且该状态会挡住回补
-            # 重下——回 MISSING 等 RSS 自然命中（与 C 分支回缺同语义）。
-            await self._release_expected_episode(expected_episode_id, season)
-            return
-        await self._handle_mismatch(
+            # 期望集回缺延后（P0 修复 b）：不再立即回缺——同种子的后续文件
+            # 可能就是期望集的内容，统一由 handle_completed 收尾一次性判断。
+            return False
+        return await self._handle_mismatch(
             video, release=release, expected=expected, season=season,
             series=series, result=result, title_match=title_match,
             target=target, report=report,
         )
 
-    async def _release_expected_episode(self, episode_id: int | None, season: Season) -> None:
-        """改挂后把原期望集回 MISSING（DOWNLOADED → MISSING 合法转移，D14）。
+    async def _release_expected_episode(
+        self, episode_id: int | None, season: Season, *, reason: str = "mismatch_reattach",
+    ) -> bool:
+        """改挂/回补后把原期望集回 MISSING（DOWNLOADED → MISSING 合法转移，D14）。
 
         仅在原集确处 DOWNLOADED（下载完成但内容已改挂他集）时回缺并发
-        episode.gap；其余状态（MISSING/ORGANIZED 等）不动，转移被拒时记
-        note 不 crash。
+        episode.gap；其余状态（MISSING/ORGANIZED 等）不动。返回是否真的
+        发生了回缺（转移被拒/状态不符一律 False）。
         """
         if episode_id is None:
-            return
+            return False
         context_row = await self._store.episode_context(episode_id)
         if context_row is None:
-            return
+            return False
         episode = context_row[0]
         if self._state(episode) is not EpisodeState.DOWNLOADED:
-            return
+            return False
         try:
             await self._store.transition_episode(episode.id, EpisodeState.MISSING)
         except TransitionError as exc:
             logger.warning("expected episode cannot return to MISSING: %s", exc)
-            return
+            return False
         await self._publish(
             EventCategory.NOTIFY,
             "episode.gap",
             {
                 "season_id": season.id,
                 "gap": [episode.number],
-                "reason": "mismatch_reattach",
+                "reason": reason,
             },
         )
+        return True
 
     async def _route_by_episode_state(
         self,
@@ -277,30 +312,26 @@ class ArchiveService:
         result: ParseResult,
         report: ArchiveReport,
     ) -> None:
-        # 期望集状态经 release.episode_id 取行（episode_context 参数是 id，
-        # expected.episode_number 是集号——多季订阅下 id≠number）。
-        context_row = (
-            await self._store.episode_context(release.episode_id)
-            if release.episode_id is not None
-            else None
-        )
-        if context_row is None:
-            report.notes.append("expected episode context missing; nothing to organize")
+        # 文件级路由（P0 修复 c）：快路径文件按 expected 集号定位归属集，
+        # 不读 release.episode_id——多集种子中途 A 改挂会让该指针漂到别的
+        # 集，旧代码据它路由会把后续文件判给错误的目标（stale episode_id）。
+        target = await self._store.episode_for_number(season.id, expected.episode_number)
+        if target is None:
+            report.notes.append("expected episode row missing; nothing to organize")
             return
-        episode = context_row[0]
-        state = self._state(episode)
+        state = self._state(target)
         if state is EpisodeState.DOWNLOADED:
             await self._archive_episode(
-                video, release=release, episode=episode, season=season,
+                video, release=release, episode=target, season=season,
                 series=series, result=result, report=report,
             )
         elif state is EpisodeState.ORGANIZED:
             await self._upgrade_episode(
-                video, release=release, episode=episode, season=season,
+                video, release=release, episode=target, season=season,
                 series=series, result=result, report=report,
             )
         else:
-            report.notes.append(f"episode {episode.number} in state {state}; nothing to organize")
+            report.notes.append(f"episode {target.number} in state {state}; nothing to organize")
 
     # ------------------------------------------------------------ archive
 
@@ -423,6 +454,7 @@ class ArchiveService:
             siblings=self._siblings(video),
             copy_policy=self._copy_policy(),
             skip_over_bytes=int(self._settings.upgrade_skip_size_gb * 1024**3),
+            allow_replace_existing=True,
         )
         if plan.strategy == "skip":
             report.notes.append(f"upgrade skipped: {plan.skip_reason}")
@@ -507,8 +539,12 @@ class ArchiveService:
         title_match: bool,
         target: Episode | None,
         report: ArchiveReport,
-    ) -> None:
-        """错配恢复 A/B/C（先隔离 + rejected 落库，再按分支执行，D14）。"""
+    ) -> bool:
+        """错配恢复 A/B/C（先隔离 + rejected 落库，再按分支执行，D14）。
+
+        返回该文件是否请求了 C 回补——期望集回缺延后到全部文件处理完
+        （P0 修复 b），由 handle_completed 统一一次性判断执行。
+        """
         # 回补预算按 expected 集的 episode_id 统计（R3 验收修复：该参数是
         # id；expected.episode_number 是集号——多季订阅下 id≠number，按号
         # 统计会数到别的番的 release，预算恒 0 / 误转人工）。
@@ -541,12 +577,15 @@ class ArchiveService:
             context_row = await self._store.episode_context(decision.reattach_episode_id)
             assert context_row is not None
             target_episode, target_season, target_series = context_row
-            await self._store.set_release_episode(release.id, target_episode.id)
             await self._archive_episode(
                 video, release=release, episode=target_episode,
                 season=target_season, series=target_series,
                 result=result, report=report,
             )
+            updated = await self._store.set_release_episode(release.id, target_episode.id)
+            if updated is not None and updated.episode_id != release.episode_id:
+                # 改挂后刷新（P0 修复 c）：消除 stale episode_id。
+                release.episode_id = updated.episode_id
             report.reattached += 1
             await self._audit(
                 operation_id=uuid4().hex,
@@ -559,8 +598,8 @@ class ArchiveService:
                     "branch": decision.branch,
                 },
             )
-            await self._release_expected_episode(expected_episode_id, season)
-            return
+            # 期望集回缺延后（P0 修复 b）：由 handle_completed 收尾统一判断。
+            return False
         # B / C：隔离
         quarantine_dir = Path(self._settings.quarantine_path) / release.torrent_hash[:12]
         moved = await asyncio.to_thread(self._quarantine, video, quarantine_dir)
@@ -591,30 +630,10 @@ class ArchiveService:
                     video.name, reason=f"mismatch {decision.branch}: {decision.detail}"
                 )
         if decision.backfill:
-            # C：期望集回 MISSING + 立即缺口通知（D15：回补等 RSS 自然命中）
-            context_row = (
-                await self._store.episode_context(expected_episode_id)
-                if expected_episode_id is not None
-                else None
-            )
-            if context_row is not None:
-                missing_episode = context_row[0]
-                try:
-                    await self._store.transition_episode(
-                        missing_episode.id, EpisodeState.MISSING
-                    )
-                    report.backfilled += 1
-                except TransitionError:
-                    report.notes.append("episode cannot return to MISSING")
-            await self._publish(
-                EventCategory.NOTIFY,
-                "episode.gap",
-                {
-                    "season_id": season.id,
-                    "gap": [expected.episode_number],
-                    "reason": "mismatch_backfill",
-                },
-            )
+            # C：期望集回缺延后（P0 修复 b，D15 回补仍等 RSS 自然命中）——
+            # 同种子的后续文件可能就是期望集的内容，回缺由 handle_completed
+            # 在全部文件处理完后统一判断（真无覆盖才回缺，只回缺一次）。
+            return True
         await self._audit(
             operation_id=uuid4().hex,
             entity="episode",
@@ -633,8 +652,24 @@ class ArchiveService:
             "mismatch.quarantined",
             {"branch": decision.branch, "episode_id": expected_episode_id},
         )
+        return False
 
     # ------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _covers_expected(result: ParseResult | None, expected: ExpectedContext) -> bool:
+        """一个解析结论是否覆盖期望集（回缺延后判断的覆盖依据）。
+
+        剧名命中 + 季相符 + 集号即期望集号才算覆盖——快路径文件必然满足；
+        剧名/季不符的文件（C 隔离对象）不因集号巧合而算数。
+        """
+        if result is None or result.episode is None:
+            return False
+        if result.episode != expected.episode_number:
+            return False
+        if result.season is not None and result.season != expected.season_number:
+            return False
+        return title_matches(result.title, expected.titles())
 
     def _copy_policy(self) -> mover.CopyPolicy:
         return "strict" if self._settings.upgrade_copy_policy == "strict" else "allow"

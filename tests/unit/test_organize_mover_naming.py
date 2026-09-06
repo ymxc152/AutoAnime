@@ -3,6 +3,7 @@ D9 hardlink/copy 降级决策表 + D21 原件不动 + audit reverse 执行（tmp
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -157,6 +158,54 @@ def test_plan_transfer_skips_missing_source(fs_pair: tuple[Path, Path]) -> None:
     )
     assert plan.strategy == "skip"
     assert plan.skip_reason == "missing_source"
+
+
+# --------------------------------------- D21 目标位守卫（plan 内统一，P1）
+
+
+def test_plan_transfer_skips_when_dst_exists_same_content(fs_pair: tuple[Path, Path]) -> None:
+    """目标位已存在且同一 inode → skip（内容已在库）。"""
+    downloads, library = fs_pair
+    video = _video(downloads)
+    dst_dir = library / "Show"
+    dst_dir.mkdir(parents=True)
+    dst = dst_dir / "Show - S01E01.1080p.mkv"
+    os.link(video, dst)  # 同 inode = 同内容
+    plan = mover.plan_transfer(
+        video, library_root=library, dst_dir=dst_dir, dst_name="Show - S01E01.1080p.mkv",
+    )
+    assert plan.strategy == "skip"
+    assert plan.skip_reason == "dst-exists-same-content"
+    assert plan.moves == ()
+
+
+def test_plan_transfer_skips_when_dst_exists_different_content(fs_pair: tuple[Path, Path]) -> None:
+    """目标位已存在且内容不同 → skip（库内替换属洗版评分闸门管辖）。"""
+    downloads, library = fs_pair
+    video = _video(downloads)
+    dst_dir = library / "Show"
+    dst_dir.mkdir(parents=True)
+    (dst_dir / "Show - S01E01.1080p.mkv").write_bytes(b"library-content")
+    plan = mover.plan_transfer(
+        video, library_root=library, dst_dir=dst_dir, dst_name="Show - S01E01.1080p.mkv",
+    )
+    assert plan.strategy == "skip"
+    assert plan.skip_reason == "dst-exists-upgrade-gated"
+
+
+def test_plan_transfer_allow_replace_existing_bypasses_guard(fs_pair: tuple[Path, Path]) -> None:
+    """洗版路径显式携带「已获准替换」标记 → 守卫放行，正常出计划。"""
+    downloads, library = fs_pair
+    video = _video(downloads)
+    dst_dir = library / "Show"
+    dst_dir.mkdir(parents=True)
+    (dst_dir / "Show - S01E01.1080p.mkv").write_bytes(b"old")
+    plan = mover.plan_transfer(
+        video, library_root=library, dst_dir=dst_dir, dst_name="Show - S01E01.1080p.mkv",
+        allow_replace_existing=True,
+    )
+    assert plan.strategy == "hardlink"
+    assert plan.moves[0].dst_name == "Show - S01E01.1080p.mkv"
 
 
 def test_execute_transfer_hardlink_keeps_source_seed(
