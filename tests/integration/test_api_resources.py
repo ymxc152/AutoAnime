@@ -248,10 +248,18 @@ async def test_pending_correct_alias_backfill_via_fake_reference_chain(client, m
 
     del SqliteStorage
     aliases = await app_state.storage.list(TitleAlias)
-    canonicals = {row.canonical_shape for row in aliases}
-    assert len(canonicals) == 1  # 同一 canonical 形状
-    shapes = {row.title_shape_norm for row in aliases}
-    assert len(shapes & canonicals) == 0  # self 映射被跳过
+    by_shape = {row.title_shape_norm: row.canonical_shape for row in aliases}
+    # 参考源回填：query/alias 形状 → 参考源 canonical（单一权威）
+    reference_targets = {
+        shape: canon
+        for shape, canon in by_shape.items()
+        if shape != "frieren"  # L1 草稿形状（见下）不参与本断言
+    }
+    assert set(reference_targets.values()) == {"sousou no frieren"}
+    assert "葬送的芙莉莲" in reference_targets  # 查询形状本身纳入映射
+    # R3 落地：L1 草稿形状（LocalRecognizer 重放 "[X] Frieren - 01 [1080p]"）
+    # 映射到确认标题形状——兄弟集经 alias 读侧零外呼命中记忆
+    assert by_shape.get("frieren") == "葬送的芙莉莲"
 
 
 async def test_pending_confirm_after_bypass_writes_nothing(client) -> None:
