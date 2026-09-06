@@ -252,9 +252,10 @@ class InstrumentedOrchestrator(Orchestrator):
 
     async def _alias_canonical_shape(
         self, store: MemoryStore, title_shape: str
-    ) -> str | None:
+    ) -> tuple[str, str | None] | None:
         found = await super()._alias_canonical_shape(store, title_shape)
-        self.pass_alias_shape = found
+        # A1'：父类返回 (canonical_shape, source)；插桩记 canonical shape。
+        self.pass_alias_shape = found[0] if isinstance(found, tuple) else found
         return found
 
     async def _canonical_memory_hit(
@@ -265,9 +266,12 @@ class InstrumentedOrchestrator(Orchestrator):
         context: ParseContext | None,
         operation_id: str,
         store: MemoryStore,
+        *,
+        override_title: bool = False,
     ) -> RouteOutcome | None:
         outcome = await super()._canonical_memory_hit(
-            raw, result, canonical_title, context, operation_id, store
+            raw, result, canonical_title, context, operation_id, store,
+            override_title=override_title,
         )
         if outcome is not None:
             self.canonical_requery_hits += 1

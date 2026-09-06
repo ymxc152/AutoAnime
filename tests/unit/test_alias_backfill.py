@@ -17,7 +17,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from autoanime.core.enums import Confidence, Segment
+from autoanime.core.enums import Confidence, MemorySource, Segment
 from autoanime.core.interfaces import ParseResult, RawName
 from autoanime.core.models import ParseMemory, TitleAlias
 from autoanime.memory import learn as learn_module
@@ -507,6 +507,51 @@ def test_sibling_episode_hits_memory_via_draft_alias() -> None:
     assert outcome.l2_applied is True
     assert outcome.result is not None
     assert outcome.result.episode == 5  # 集数来自本集 L1 草稿，不是被确认集
-    # filename-first 契约：memory 只补证据不覆盖 name/folder 证据的标题
-    assert outcome.result.title == "Anime AzurLane Slow Ahead"
+    # A1'（拍板）：draft alias 是 manual 行（confirm 写下的映射），命中时
+    # title 回放确认名——覆盖的是用户已确认的事实，不是猜测。
+    assert outcome.result.title == "碧蓝航线：微速前行！"
     assert outcome.result.evidence.get("key_level") == "memory:1"
+
+
+# ---------------------------------------------------------------------------
+# B1（拍板）：confirm 学习键经参考源归一
+
+
+async def test_confirm_canonicalizes_memory_key_via_reference(storage: SqliteStorage) -> None:
+    """confirm 输入名 ≠ 参考源权威名时，记忆两级键写权威名，输入名写
+    alias 表（source=参考源）——简繁/别名收敛到同一剧。"""
+    access = StorageMemoryAccess(storage)
+    outcome = await learn_confirmation(
+        access,
+        confirmed=_confirmed("葬送的芙莉莲 第二季 简繁内嵌"),
+        raw_name="Frieren.S2.01.mkv",
+        source=MemorySource.MANUAL,
+        bypass_lookup=access,
+        reference_lookup=FakeReference(),
+        draft_title=None,
+    )
+    assert outcome.bypassed is False
+    # 两级记忆键都写权威名（shape）
+    shapes = [entry.title_shape for entry in outcome.entries]
+    assert shapes == [CANONICAL_SHAPE, CANONICAL_SHAPE]
+    # 记忆行 result.title 保留权威名原文（A1' 覆盖的数据源）
+    assert all(entry.result["title"] == CANONICAL_TITLE for entry in outcome.entries)
+    # 用户输入名 shape → 权威名 shape（source=参考源）
+    aliases = await _alias_rows(storage)
+    user_shape = build_title_shape("葬送的芙莉莲 第二季 简繁内嵌")
+    assert aliases[user_shape].canonical_shape == CANONICAL_SHAPE
+
+
+async def test_confirm_reference_miss_keeps_user_title(storage: SqliteStorage) -> None:
+    """参考源 miss（facts None）→ 记忆键回退用户输入名，零行为变化。"""
+    access = StorageMemoryAccess(storage)
+    outcome = await learn_confirmation(
+        access,
+        confirmed=_confirmed("用户输入名"),
+        raw_name="Whatever.S01E01.mkv",
+        source=MemorySource.MANUAL,
+        bypass_lookup=access,
+        reference_lookup=FakeReference(facts=None),
+        draft_title=None,
+    )
+    assert [entry.title_shape for entry in outcome.entries] == ["用户输入名", "用户输入名"]

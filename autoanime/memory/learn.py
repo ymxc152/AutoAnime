@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast, runtime_checkable
 
 from autoanime.core.enums import MemorySource, MemoryStatus
@@ -302,11 +302,18 @@ async def backfill_title_aliases(
     写库失败）静默跳过并记日志——绝不向调用方抛错，绝不阻断 confirm
     主流程，也不影响已写入的 ``parse_memory`` 事实。self 映射（alias
     shape == canonical shape）由 ``put_alias_map`` 跳过。
+
+    ``learn_confirmation`` 主流程现改用 ``_lookup_reference_facts`` +
+    ``_backfill_aliases_with_facts``（B1 归一与回填共用一次查询）；本
+    函数保留为独立回填入口（公共 API + 单测覆盖）。
     """
+    facts = await _lookup_reference_facts(reference_lookup, confirmed)
+    if facts is None:
+        return
     try:
-        mapping, source = await _alias_mapping_from_reference(reference_lookup, confirmed)
+        mapping, source = _mapping_from_facts(facts, confirmed.title)
     except Exception:
-        logger.warning("alias backfill: reference lookup failed or timed out; skipping")
+        logger.warning("alias backfill: mapping derivation failed; skipping")
         return
     if not mapping:
         return
@@ -316,26 +323,23 @@ async def backfill_title_aliases(
         logger.warning("alias backfill: alias map write failed; skipping")
 
 
-async def _alias_mapping_from_reference(
-    reference_lookup: ReferenceLookup, confirmed: ParseResult
+def _mapping_from_facts(
+    facts: ReferenceFacts, query_title: str
 ) -> tuple[dict[str, str], str]:
-    """查参考源并归一出「alias shape → canonical shape」映射。
+    """把一次参考源查询的 facts 归一出「alias shape → canonical shape」映射。
 
-    参考源 miss/超时/无 ``canonical_title``/归一为空都返回空映射（跳过
-    信号）；查询超时由 ``ALIAS_BACKFILL_TIMEOUT_S`` 硬性封顶。
+    ``canonical_title`` 为空或归一为空返回空映射（跳过信号）；查询标题
+    形状本身纳入映射（未来查询会以该形状出现）。
     """
-    query_shape = build_title_shape(confirmed.title)
-    if not query_shape:
-        return {}, ""
-    facts = await asyncio.wait_for(
-        reference_lookup.lookup(query_shape), timeout=ALIAS_BACKFILL_TIMEOUT_S
-    )
-    if facts is None or not facts.canonical_title:
+    if not facts.canonical_title:
         return {}, ""
     canonical_shape = build_title_shape(facts.canonical_title)
     if not canonical_shape:
         return {}, ""
-    mapping: dict[str, str] = {query_shape: canonical_shape}
+    mapping: dict[str, str] = {}
+    query_shape = build_title_shape(query_title)
+    if query_shape:
+        mapping[query_shape] = canonical_shape
     for alias in facts.aliases:
         alias_shape = build_title_shape(alias)
         if alias_shape:
@@ -369,29 +373,87 @@ async def learn_confirmation(
     if bypass_lookup is not None and await bypass_lookup.has_bypass(pattern_hash(raw_name)):
         return LearnOutcome(entries=(), bypassed=True)
 
+    # B1（拍板）：confirm 学习键经参考源归一——用户输入名查一次 canonical
+    # （与 alias 回填共用同一 facts，零额外外呼）。命中则记忆两级键写权威
+    # 名（简繁/罗马音/别名收敛到同一剧）；miss/超时/异常回退用户输入名，
+    # 行为与归一前完全一致。
+    facts: ReferenceFacts | None = None
+    if reference_lookup is not None:
+        facts = await _lookup_reference_facts(reference_lookup, confirmed)
+    effective = confirmed
+    canonical_title = facts.canonical_title if facts is not None else None
+    if canonical_title:
+        canonical_shape = build_title_shape(canonical_title)
+        query_shape = build_title_shape(confirmed.title)
+        if canonical_shape and query_shape and canonical_shape != query_shape:
+            effective = replace(confirmed, title=canonical_title)
+
     entries: list[Any] = []
     for key_level in (KEY_LEVEL_SERIES, KEY_LEVEL_EXACT):
         entries.append(
             await upsert_parse_memory(
-                store, confirmed=confirmed, key_level=key_level, source=source
+                store, confirmed=effective, key_level=key_level, source=source
             )
         )
     if reference_lookup is not None:
         # 回填在成功路径尾部，且自身吞掉一切异常：主流程已落库的事实
         # 不受参考源可用性影响。store 由装配侧（StorageMemoryAccess）
         # 保证同时具备 put_alias_map 能力，这里收窄协议即可。
-        await backfill_title_aliases(
+        # facts 已在归一查询取得（可能为 None），直接映射写表，零二次外呼。
+        await _backfill_aliases_with_facts(
             cast(AliasBackfillStore, store),
-            reference_lookup,
-            confirmed=confirmed,
+            facts,
+            query_title=confirmed.title,
         )
     if draft_title is not None:
         await backfill_draft_alias(
             cast(AliasBackfillStore, store),
             draft_title=draft_title,
-            confirmed=confirmed,
+            confirmed=effective,
         )
     return LearnOutcome(entries=tuple(entries), bypassed=False)
+
+
+async def _lookup_reference_facts(
+    reference_lookup: ReferenceLookup, confirmed: ParseResult
+) -> ReferenceFacts | None:
+    """confirm 归一/回填共用的参考源查询；任何失败静默返回 ``None``。"""
+    try:
+        query_shape = build_title_shape(confirmed.title)
+        if not query_shape:
+            return None
+        return await asyncio.wait_for(
+            reference_lookup.lookup(query_shape), timeout=ALIAS_BACKFILL_TIMEOUT_S
+        )
+    except Exception:
+        logger.warning("confirm reference lookup failed or timed out; skipping")
+        return None
+
+
+async def _backfill_aliases_with_facts(
+    store: AliasBackfillStore,
+    facts: ReferenceFacts | None,
+    *,
+    query_title: str,
+) -> None:
+    """把已取得的参考源 facts 映射写入 alias 窄表（B1 共用查询版回填）。
+
+    ``facts`` 为 ``None``（miss/超时/异常）时静默跳过——与
+    ``backfill_title_aliases`` 的降级口径一致。
+    """
+    if facts is None:
+        return
+    try:
+        mapping, source = _mapping_from_facts(facts, query_title)
+    except Exception:
+        logger.warning("alias backfill: mapping derivation failed; skipping")
+        return
+    if not mapping:
+        return
+    try:
+        await store.put_alias_map(mapping, source)
+    except Exception:
+        logger.warning("alias backfill: alias map write failed; skipping")
 
 
 async def backfill_draft_alias(

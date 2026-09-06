@@ -124,6 +124,7 @@ class FakeMemoryStore:
         fail_after: int | None = None,
         alias_map: dict[str, str] | None = None,
         alias_error: Exception | None = None,
+        alias_rows: dict[str, tuple[str, str | None]] | None = None,
     ) -> None:
         self._rows = {(row.key_level, row.key_hash): row for row in rows}
         self.recorded_hits: list[Any] = []
@@ -131,6 +132,8 @@ class FakeMemoryStore:
         self._fail_after = fail_after
         self._alias_map = alias_map if alias_map is not None else {}
         self._alias_error = alias_error
+        # A1'：带 source 的 alias 行（manual = 用户 confirm 写下的映射）。
+        self._alias_rows = alias_rows if alias_rows is not None else {}
         self.alias_lookups: list[str] = []
 
     async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
@@ -143,7 +146,22 @@ class FakeMemoryStore:
         self.alias_lookups.append(title_shape_norm)
         if self._alias_error is not None:
             raise self._alias_error
+        if title_shape_norm in self._alias_rows:
+            return self._alias_rows[title_shape_norm][0]
         return self._alias_map.get(title_shape_norm)
+
+    async def find_alias_row(
+        self, title_shape_norm: str
+    ) -> tuple[str, str | None] | None:
+        self.alias_lookups.append(title_shape_norm)
+        if self._alias_error is not None:
+            raise self._alias_error
+        # alias_map 视为窄口径（source 未知）映射；alias_rows 是带 source 行。
+        if title_shape_norm in self._alias_rows:
+            return self._alias_rows[title_shape_norm]
+        if title_shape_norm in self._alias_map:
+            return (self._alias_map[title_shape_norm], None)
+        return None
 
     async def record_hit(
         self, parse_memory: Any, *, operation_id: str | None = None
@@ -647,3 +665,58 @@ def test_build_title_shape_known_non_idempotent_edge_is_documented() -> None:
     # (see test_alias_hit_with_non_stable_shape_falls_through_to_reference_chain).
     title = "Show.Name.S02E05.720p"
     assert build_title_shape(build_title_shape(title)) != build_title_shape(title)
+
+
+# --- A1'（拍板）：manual alias 命中时确认名覆盖 L1 title ------------------------
+
+
+async def test_manual_alias_hit_overrides_title_with_confirmed_name() -> None:
+    """manual alias 行（用户 confirm 写下的草稿形状映射）命中 → title 用
+    确认名原文（记忆行 result.title），evidence 记 memory。回放用户已
+    确认的事实，不是猜测。"""
+    store = FakeMemoryStore(
+        _canonical_series_row(),
+        alias_rows={build_title_shape(ROMAJI): (build_title_shape(CANONICAL), "manual")},
+    )
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(FakeReferenceProvider()),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.result is not None
+    assert outcome.result.title == CANONICAL
+    assert outcome.result.evidence["title"] == "memory"
+
+
+async def test_reference_backfilled_alias_hit_keeps_l1_title() -> None:
+    """参考源回填的 alias 行（source=bangumi 等）命中 → 维持补缺语义，
+    title 保留 L1 草稿名——参考源数据不覆盖确定性解析。"""
+    store = FakeMemoryStore(
+        _canonical_series_row(),
+        alias_rows={build_title_shape(ROMAJI): (build_title_shape(CANONICAL), "bangumi")},
+    )
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(FakeReferenceProvider()),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.result is not None
+    l1 = _l1()
+    assert outcome.result.title == l1.title  # L1 name 证据优先（PR4 契约）
+
+
+async def test_narrow_alias_store_without_source_never_overrides() -> None:
+    """只带 find_alias_key 的窄口径 store（PR4 fake / 旧装配）→ 不覆盖，
+    行为与 PR7 M2b 完全一致（向后兼容）。"""
+    store = FakeMemoryStore(
+        _canonical_series_row(),
+        alias_map={build_title_shape(ROMAJI): build_title_shape(CANONICAL)},
+    )
+    store.find_alias_row = None  # type: ignore[reportAttributeAccessIssue]  # 模拟窄口径实现
+    outcome = await _wired_orchestrator(
+        _l1(), store=store, chain=_chain(FakeReferenceProvider()),
+    ).process(_raw())
+
+    assert outcome.route == ROUTE_MEMORY
+    assert outcome.result is not None
+    assert outcome.result.title == _l1().title
