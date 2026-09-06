@@ -21,7 +21,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from autoanime.core.enums import EpisodeState, ReleaseStatus
 from autoanime.core.events import Event, EventBus, EventCategory
@@ -200,6 +200,8 @@ class DownloadPoller:
         """启动补扫（A4/B4）：COMPLETED 但 episode 仍 DOWNLOADING 的悬挂任务。
 
         ``now`` 与 ``poll_once`` 对齐（事件审计用），补扫本身不判时限。
+        网关不可达（R2 落地 R1 验收遗留建议：``ping()`` 接进补扫路径）→
+        DB 侧悬挂恢复照常完成，qB 侧对账记 note 如实降级，不 crash。
         """
         report = DownloadPollReport()
         completed = await self._store.list_releases_by_status([ReleaseStatus.COMPLETED])
@@ -226,9 +228,19 @@ class DownloadPoller:
             [ReleaseStatus.PICKED, ReleaseStatus.DOWNLOADING]
         )
         tracked = {release.torrent_hash for release in in_flight}
+        probe = getattr(self._gateway, "ping", None)
+        if callable(probe):
+            # 真网关先登录探测；测试 fake 未实现 ping 时跳过（行为同旧版）。
+            try:
+                await cast(Callable[[], Awaitable[bool]], probe)()
+            except GatewayError as exc:
+                logger.warning("downloader unreachable at startup reconcile: %s", exc)
+                report.notes = (*report.notes, f"downloader unreachable: {exc}")
+                return report
         try:
             hashes = await self._gateway_completed_hashes()
         except GatewayError:
+            report.notes = (*report.notes, "downloader unreachable during reconcile")
             return report
         for torrent_hash in hashes:
             if torrent_hash in tracked:
