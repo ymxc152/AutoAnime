@@ -1,10 +1,11 @@
 /*
  * 抽屉(Soft Ink:右侧滑出,12px 圆角左缘,z 层级走 token;
- * Esc / 点击遮罩关闭)。
+ * Esc / 点击遮罩关闭;焦点圈禁 — Tab 限制在 dialog 内,关闭后归还)。
  */
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 export interface DrawerProps {
   open: boolean
@@ -16,6 +17,9 @@ export interface DrawerProps {
 }
 
 export function Drawer({ open, onClose, title, subtitle, children, width = 480 }: DrawerProps) {
+  const drawerRef = useRef<HTMLElement | null>(null)
+  useFocusTrap(drawerRef, open)
+
   useEffect(() => {
     if (!open) return
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -40,9 +44,11 @@ export function Drawer({ open, onClose, title, subtitle, children, width = 480 }
         data-testid="drawer-backdrop"
       />
       <aside
+        ref={drawerRef}
         role="dialog"
         aria-modal="true"
-        className="absolute right-0 top-0 flex h-full flex-col overflow-y-auto bg-surface shadow-soft-lg rounded-l-lg animate-[drawer-in_var(--ink-transition-normal)_ease-out]"
+        tabIndex={-1}
+        className="absolute right-0 top-0 flex h-full flex-col overflow-y-auto bg-surface shadow-soft-lg rounded-l-lg animate-[drawer-in_var(--ink-transition-normal)_ease-out] outline-none"
         style={{ width: `min(${width}px, 100vw)`, zIndex: 'var(--ink-z-drawer)' }}
       >
         <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">

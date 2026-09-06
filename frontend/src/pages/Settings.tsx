@@ -3,8 +3,10 @@
  * 可覆写白名单(进程内,重启回 env/toml):dry_run/l2_enabled/llm_enabled/
  * llm_model/reference_enabled/reference_order;密钥只回 has_* 布尔。
  * quality/naming 段 v1 暂缺(无持久化 settings 表,依赖 E4),只给说明不造假数据。
+ * dirty 时路由离开需确认(useBlocker 拦截侧栏点击 + 浏览器返回)。
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useBlocker } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings } from '../strings'
@@ -35,6 +37,22 @@ export function SettingsPage() {
     setEdit((prev) => ({ ...prev, ...partial }))
   }
 
+  // dirty 只依赖 edit state,可无条件在 hooks 区域计算
+  const dirty = Object.keys(edit).length > 0
+
+  // 未保存更改时,路由离开需确认(useBlocker 拦截侧栏点击 + 浏览器返回)
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && currentLocation.pathname !== nextLocation.pathname,
+  )
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      const leave = window.confirm('有未保存的更改,确定离开吗?')
+      if (leave) blocker.proceed()
+      else blocker.reset()
+    }
+  }, [blocker])
+
   if (error !== null) {
     return (
       <>
@@ -57,7 +75,6 @@ export function SettingsPage() {
   }
 
   const base: SettingsDto = savedSnapshot ?? data
-  const dirty = Object.keys(edit).length > 0
   const dryRun = edit.dry_run ?? base.dry_run
   const l2Enabled = edit.l2_enabled ?? base.l2_enabled
   const llmEnabled = edit.llm_enabled ?? base.llm_enabled

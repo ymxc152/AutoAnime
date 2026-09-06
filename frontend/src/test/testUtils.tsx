@@ -2,24 +2,33 @@
  * 测试工具:统一 Provider 包裹(EventStreamProvider + MemoryRouter)。
  * 测试始终跑在 mock 模式(api/index 的 isMockMode 在 vitest 下为 dev 默认开),
  * 用 resetMockState() 在每个用例前复位 fixtures。
+ *
+ * 路由用 createMemoryRouter(data router)而非 MemoryRouter:
+ * 支持 useBlocker/useLoader 等 data API,与 App.tsx 的 createHashRouter 形态对齐。
  */
 import type { ReactElement } from 'react'
 import { render } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { EventStreamProvider } from '../hooks/EventStreamProvider'
 import type { EventSourceFactory, EventSourceHandle, SseMessage } from '../api/sse'
 
 export interface RenderOptions {
   /** 注入受控 SSE 工厂(事件由测试手动 emit) */
   factory?: EventSourceFactory
+  /** 初始路由路径(默认 /) */
+  initialPath?: string
 }
 
 export function renderPage(ui: ReactElement, options: RenderOptions = {}) {
-  return render(
-    <EventStreamProvider factory={options.factory}>
-      <MemoryRouter initialEntries={['/']}>{ui}</MemoryRouter>
-    </EventStreamProvider>,
+  const { initialPath = '/' } = options
+
+  // 单一 catch-all 路由:任何路径都渲染传入的 ui
+  const router = createMemoryRouter(
+    [{ path: '*', element: <EventStreamProvider factory={options.factory}>{ui}</EventStreamProvider> }],
+    { initialEntries: [initialPath] },
   )
+
+  return render(<RouterProvider router={router} />)
 }
 
 /** 测试用可控 EventSource:手动 emit 事件 / 触发错误 */
