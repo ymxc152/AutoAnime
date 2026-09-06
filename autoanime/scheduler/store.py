@@ -13,7 +13,8 @@ torrent_hash 唯一约束兜底）。
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -24,6 +25,7 @@ from autoanime.core.enums import (
     EpisodeState,
     PendingStatus,
     ReleaseStatus,
+    ResolvedBy,
     SeasonState,
 )
 from autoanime.core.models import (
@@ -387,6 +389,45 @@ class LoopStore:
                 )
             ).scalars().all()
         return frozenset(rows)
+
+    async def resolve_open_pendings_by_raw_name(
+        self,
+        raw_name: str,
+        *,
+        resolution: dict[str, object],
+        audit_row_for: Callable[[PendingQueue], AuditLog | None],
+    ) -> int:
+        """把 ``raw_name`` 匹配的未决 pending 行批量 resolve（CLI confirm 收尾）。
+
+        与 WebUI ``POST /pending/{id}/confirm`` 同语义（status/resolution/
+        resolved_by=manual + 同事务审计行），否则 CLI 确认后行永远挂着、
+        重跑 import 又被 already-pending 幂等挡住。audit 行由调用方按行
+        构造（``web.learning.pending_audit_row``），本方法只负责同一事务
+        落库。返回 resolve 的行数。
+        """
+        async with self._storage.transaction() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(PendingQueue).where(
+                            PendingQueue.raw_name == raw_name,
+                            PendingQueue.status == PendingStatus.PENDING.value,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                row.status = PendingStatus.RESOLVED
+                row.resolution = json.dumps(resolution, ensure_ascii=False)
+                row.resolved_by = ResolvedBy.MANUAL
+                row.resolved_at = datetime.now()
+                session.add(row)
+                audit_row = audit_row_for(row)
+                if audit_row is not None:
+                    session.add(audit_row)
+        return len(rows)
 
     async def list_pending(
         self, *, status: str | None = None, limit: int = 50, offset: int = 0
