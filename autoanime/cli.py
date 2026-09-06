@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 from autoanime.config import Settings, load_settings
 from autoanime.core.enums import (
@@ -33,10 +36,12 @@ from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
+from autoanime.organize import mover
+from autoanime.organize.naming import NamingInput, relative_path
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.pipeline.l3_llm import LlmFallbackRecognizer
-from autoanime.pipeline.orchestrator import ROUTE_ARCHIVE, Orchestrator
+from autoanime.pipeline.orchestrator import ROUTE_ARCHIVE, Orchestrator, RouteOutcome
 from autoanime.providers import (
     LLM_TRANSPORT_NAME,
     register_providers,
@@ -58,7 +63,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "download poll + RSS poll; 与 rerun 共用同一实现，A7)"
     )
     subparsers.add_parser("run", help=run_help, description=run_help)
-    subparsers.add_parser("import", help="Import a local library (placeholder)")
     confirm_parser = subparsers.add_parser(
         "confirm",
         help="Confirm a release's parse result and learn it into parse_memory",
@@ -96,12 +100,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit the full summary as JSON (default: human-readable lines)",
     )
     subparsers.add_parser("init-db", help="Create the v2 SQLite schema")
+    queue_help = (
+        "List pending_queue rows awaiting manual confirmation "
+        "(--status filter, --limit cap; table output, --json optional)"
+    )
     queue_parser = subparsers.add_parser(
-        "queue",
-        help=(
-            "List pending_queue rows awaiting manual confirmation "
-            "(--status filter, --limit cap; table output, --json optional)"
-        ),
+        "queue", help=queue_help, description=queue_help
     )
     queue_parser.add_argument(
         "--status",
@@ -164,6 +168,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     rerun_parser.add_argument(
         "--source-id", type=int, default=None, help="Only poll this rss_source id"
+    )
+    import_help = (
+        "Scan a local directory for video files, route every release through "
+        "the L1/L2/L3 pipeline (E1 batch entry, same-folder grouping) and "
+        "archive or enqueue accordingly (JSON summary)"
+    )
+    import_parser = subparsers.add_parser(
+        "import", help=import_help, description=import_help
+    )
+    import_parser.add_argument(
+        "directory", help="Directory to scan recursively for video files"
+    )
+    import_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Print the actions that would be taken (with planned destinations) "
+            "without writing the database or touching files"
+        ),
     )
     return parser
 
@@ -649,6 +672,313 @@ async def _queue(args: argparse.Namespace) -> int:
     return 0
 
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# import：本地库存手动导入（用户头号验收场景：扫描 → 识别 → 归档/入队）
+# ---------------------------------------------------------------------------
+
+#: import 扫描的视频扩展名（v1 定版语义；naming.VIDEO_SUFFIXES 是归档域全集）。
+_IMPORT_VIDEO_SUFFIXES = frozenset({".mkv", ".mp4", ".avi", ".ts"})
+
+#: archive 路由里「给不出集号」的兜底：季包/无集 HIGH 结果不硬归档，入队人工。
+_PENDING_REASON_NO_EPISODE = "archive route without episode number"
+
+
+def _scan_video_files(root: Path) -> tuple[int, list[Path]]:
+    """递归扫描目录下的视频文件；跳过隐藏（``.`` 开头）与临时（``~`` 开头）。
+
+    返回 (目录内全部文件数, 选中的视频文件列表)；列表按路径排序，保证同目录
+    分组的输入顺序稳定（合批分组与输出明细都可复现）。
+    """
+    total = 0
+    videos: list[Path] = []
+    for child in sorted(root.rglob("*")):
+        if not child.is_file():
+            continue
+        total += 1
+        if child.suffix.lower() not in _IMPORT_VIDEO_SUFFIXES:
+            continue
+        if child.name.startswith((".", "~")):
+            continue
+        videos.append(child)
+    return total, videos
+
+
+def _group_by_parent(files: Sequence[Path]) -> list[tuple[Path, list[Path]]]:
+    """按父目录分组（E1 机会主义合批的 folder 语义）；目录按路径排序。"""
+    groups: dict[Path, list[Path]] = {}
+    for file in files:
+        groups.setdefault(file.parent, []).append(file)
+    return sorted(groups.items(), key=lambda item: item[0])
+
+
+def _archive_plan(file: Path, result: ParseResult, settings: Settings) -> mover.TransferPlan:
+    """L1 HIGH（route=archive）文件的归档计划：D17 命名 + D18 字幕跟随 + D9。
+
+    复用 E4 organize 四件套中的 naming + mover（与 ArchiveService._archive_episode
+    同一原语）；手动导入没有订阅行，解析结论的 title 即展示标题（三槽同填，
+    由 ``naming_title_language`` 的回退链决定实际取用）。plan_transfer 是纯
+    决策（只 stat 源文件），dry-run 亦可安全调用。
+    """
+    media_type = "movie" if result.segment is Segment.MOVIE else "tv"
+    naming = NamingInput(
+        title_cn=result.title,
+        title_romaji=result.title,
+        title_jp=result.title,
+        season_number=result.season or 1,
+        episode_number=result.episode or 0,
+        media_type=media_type,
+        release_title=file.name,
+    )
+    rel = relative_path(
+        naming, language=settings.naming_title_language, extension=file.suffix.lower()
+    )
+    library_root = Path(settings.library_path)
+    siblings = (
+        [child for child in file.parent.iterdir() if child.is_file()]
+        if file.parent.exists()
+        else []
+    )
+    return mover.plan_transfer(
+        file,
+        library_root=library_root,
+        dst_dir=library_root / rel.parent,
+        dst_name=rel.name,
+        siblings=siblings,
+        copy_policy="strict" if settings.upgrade_copy_policy == "strict" else "allow",
+        skip_over_bytes=int(settings.upgrade_skip_size_gb * 1024**3),
+    )
+
+
+def _pending_draft_context(file: Path, outcome: RouteOutcome) -> dict[str, object]:
+    """pending 行 context：识别草稿契约键（web/learning._DRAFT_FIELDS 口径）。
+
+    web 确认/纠正流（build_confirmed_result）直接消费这些键合成权威
+    ParseResult；route/level 仅作人工处理时的现场信息。
+    """
+    result = outcome.result
+    return {
+        "title": result.title if result else None,
+        "season": result.season if result else None,
+        "episode": result.episode if result else None,
+        "segment": result.segment.value if result else None,
+        "fansub": result.fansub if result else None,
+        "folder": file.parent.name,
+        "parent_path": str(file.parent),
+        "route": outcome.route,
+        "level": result.level.value if result else None,
+    }
+
+
+def _pending_reason(outcome: RouteOutcome) -> str:
+    """入队原因（与 E4 stage="mismatch" 行的 reason 同为人工可读短句）。"""
+    result = outcome.result
+    if result is None:
+        return "unparsed"
+    if outcome.route == ROUTE_ARCHIVE:
+        return _PENDING_REASON_NO_EPISODE
+    return f"{outcome.route}:{result.level.value}"
+
+
+async def _import_audit(
+    governance: MemoryGovernance,
+    file: Path,
+    result: ParseResult,
+    plan: mover.TransferPlan,
+    executed: mover.TransferResult,
+) -> None:
+    """import 归档的 audit 行（与 E4 归档同簿记：reverse 供回滚、E2 Logs 可见）。"""
+    try:
+        await governance.record_audit(
+            operation_id=uuid4().hex,
+            entity="episode",
+            action="episode.organized",
+            instruction={
+                "file": file.name,
+                "dst": str(executed.dst_paths[0]),
+                "strategy": executed.strategy,
+                "source": "import",
+                "title": result.title,
+                "season": result.season,
+                "episode": result.episode,
+            },
+            reverse={"moves": list(plan.reverse_moves)},
+        )
+    except Exception:  # noqa: BLE001 -- 审计失败不阻塞归档（与 ArchiveService 同口径）
+        logger.warning("import audit write failed", exc_info=True)
+
+
+async def _handle_import_outcome(
+    file: Path,
+    outcome: RouteOutcome,
+    *,
+    settings: Settings,
+    store: LoopStore,
+    governance: MemoryGovernance,
+    dry_run: bool,
+) -> dict[str, object]:
+    """单文件路由结果处理；返回该文件的输出明细（action 即发生的/将发生的动作）。
+
+    - archive 路由且能给出演集号（或剧场版）→ organize 路径归档；
+    - memory/l3 路由、LOW、无法解析、archive 但给不出集号 → 落 pending_queue
+      （stage="import"，context 携带识别草稿契约键），供人工处理；
+    - dry-run 只规划：归档给出计划目标位（plan_transfer 纯决策），入队不写行。
+    """
+    result = outcome.result
+    item: dict[str, object] = {
+        "file": str(file),
+        "route": outcome.route,
+        "title": result.title if result else None,
+        "season": result.season if result else None,
+        "episode": result.episode if result else None,
+    }
+    archivable = bool(
+        result is not None
+        and outcome.route == ROUTE_ARCHIVE
+        and (result.segment is Segment.MOVIE or result.episode is not None)
+    )
+    if not archivable:
+        item["action"] = "pending"
+        item["reason"] = _pending_reason(outcome)
+        if not dry_run:
+            row = await store.add_pending(
+                PendingQueue(
+                    raw_name=file.name,
+                    context=_pending_draft_context(file, outcome),
+                    stage="import",
+                    reason=str(item["reason"]),
+                )
+            )
+            item["pending_id"] = row.id
+        return item
+    assert result is not None
+    plan = _archive_plan(file, result, settings)
+    item["strategy"] = plan.strategy
+    item["dst"] = str(plan.dst_dir / plan.moves[0].dst_name) if plan.moves else None
+    if plan.strategy == "skip":
+        item["action"] = "skip"
+        item["reason"] = plan.skip_reason
+        return item
+    if dry_run:
+        item["action"] = "archive"
+        return item
+    executed = await asyncio.to_thread(mover.execute_transfer, plan)
+    if executed.error is not None or not executed.dst_paths:
+        item["action"] = "error"
+        item["reason"] = executed.error or "transfer failed"
+        return item
+    item["action"] = "archive"
+    item["dst"] = str(executed.dst_paths[0])
+    await _import_audit(governance, file, result, plan, executed)
+    return item
+
+
+async def _import(args: argparse.Namespace) -> int:
+    """CLI 手动导入入口（``import <目录> [--dry-run]``）。
+
+    递归扫描目录下视频文件，按父目录分组喂 ``orchestrator.process_batch
+    (batching=True)``（E1 库存入口；expected=None——D13 手动路径）。--dry-run
+    只输出将发生的动作不落库不归档。输出 JSON 汇总：
+    total（目录内全部文件）/scanned（视频文件）/routes（路由分布）/
+    archived/pending/failed（skip+error）/items（逐文件明细）。
+    """
+    root = Path(args.directory)
+    if not root.is_dir():
+        print(json.dumps({"error": f"not a directory: {args.directory}"}, ensure_ascii=False))
+        return 2
+    settings = load_settings()
+    total_seen, videos = _scan_video_files(root)
+    orchestrator, storage, transport_obj = await _build_orchestrator(settings)
+    own_storage = False
+    if storage is None:
+        # L1-only 配置（L2/L3 全关）：管线不带库，pending 落库自开一个。
+        storage = SqliteStorage(settings.database_url)
+        own_storage = True
+    store = LoopStore(storage)
+    governance = MemoryGovernance(storage)
+    routes: Counter[str] = Counter()
+    items: list[dict[str, object]] = []
+    archived = pending = failed = 0
+    if not args.dry_run:
+        # 归档目标根先就位：plan_transfer 的同盘判定需要 stat 到 library 根，
+        # 缺失时会把本可 hardlink 的归档静默降级为 copy（D9 hardlink 优先）。
+        try:
+            Path(settings.library_path).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.warning("library root not preparable: %s", settings.library_path)
+    try:
+        if own_storage:
+            try:
+                await storage.create_all()
+            except Exception as exc:  # noqa: BLE001 -- 存储不可用给出可操作提示
+                print(f"import: storage unavailable ({type(exc).__name__}); run 'autoanime init-db'")
+                return 1
+        for parent, files in _group_by_parent(videos):
+            raws = [
+                RawName(name=file.name, folder=parent.name, parent_path=str(parent))
+                for file in files
+            ]
+            try:
+                outcomes = await orchestrator.process_batch(
+                    raws,
+                    batching=True,
+                    batch_min_size=settings.batch_min_size,
+                    batch_max_size=settings.batch_max_size,
+                )
+            except Exception as exc:  # noqa: BLE001 -- 单组失败不拖垮整批
+                logger.warning("import batch failed for %s", parent, exc_info=True)
+                for file in files:
+                    items.append(
+                        {"file": str(file), "route": None, "action": "error",
+                         "reason": type(exc).__name__}
+                    )
+                    failed += 1
+                continue
+            for file, outcome in zip(files, outcomes, strict=True):
+                routes[outcome.route] += 1
+                item = await _handle_import_outcome(
+                    file, outcome,
+                    settings=settings, store=store, governance=governance,
+                    dry_run=bool(args.dry_run),
+                )
+                action = str(item["action"])
+                if action == "archive":
+                    archived += 1
+                elif action == "pending":
+                    pending += 1
+                else:  # skip / error：归档动作没有发生，计入失败侧
+                    failed += 1
+                items.append(item)
+    finally:
+        try:
+            await cast("Any", transport_obj).aclose()
+        except AttributeError:
+            pass
+        except Exception:
+            pass
+        if own_storage and storage is not None:
+            await storage.close()
+    print(
+        json.dumps(
+            {
+                "directory": str(root),
+                "dry_run": bool(args.dry_run),
+                "total": total_seen,
+                "scanned": len(videos),
+                "routes": dict(sorted(routes.items())),
+                "archived": archived,
+                "pending": pending,
+                "failed": failed,
+                "items": items,
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
 async def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "init-db":
         settings = load_settings()
@@ -669,6 +999,8 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return await _run_loop_cycle(args)
     if args.command == "run":
         return await _run_loop_cycle(args)
+    if args.command == "import":
+        return await _import(args)
     if args.command == "parse":
         settings = load_settings()
         orchestrator, storage, transport_obj = await _build_orchestrator(settings)
