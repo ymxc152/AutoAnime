@@ -418,7 +418,7 @@ def test_import_dst_conflict_does_not_overwrite(tmp_path: Path) -> None:
 def test_import_same_content_dst_is_noop_skip(tmp_path: Path) -> None:
     """同内容不同名的重放（已 hardlink 进库）→ noop 跳过，不重复链接。"""
 
-    async def scenario() -> tuple[dict[str, object], Path]:
+    async def scenario() -> tuple[dict[str, object], dict[str, object]]:
         storage = _db(tmp_path)
         await storage.create_all()
         try:
