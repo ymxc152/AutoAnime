@@ -75,7 +75,7 @@ export const strings = {
     levelL2: 'L2 记忆命中',
     levelL3: 'L3 LLM 兜底',
     llmCallsShort: 'LLM 调用',
-    weeklyCurve: 'LLM 调用周曲线(8 周)',
+    weeklyCurve: 'LLM 调用周曲线',
     episodeStates: '库内集状态分布',
     noData: '暂无数据',
   },

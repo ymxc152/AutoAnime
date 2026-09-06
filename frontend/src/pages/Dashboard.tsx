@@ -7,7 +7,7 @@ import { useCallback } from 'react'
 import { api } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings } from '../strings'
-import { Badge, Card, ErrorState, PageTitle, Skeleton } from '../components'
+import { Badge, Card, EmptyState, ErrorState, PageTitle, Skeleton } from '../components'
 import { formatPercent } from '../lib/views'
 import type { Metrics } from '../api/types'
 
@@ -29,38 +29,47 @@ function MetricCard({
   )
 }
 
-/** LLM 调用周曲线柱状图(8 个 ISO 周),手绘 SVG,无图表依赖 */
+/** LLM 调用周曲线柱状图(仅渲染有调用的周),手绘 SVG,无图表依赖 */
 function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
-  const max = Math.max(1, ...points.map((p) => p.llm_called))
+  // 空桶(0 调用)无信息量,过滤掉;全空时显示空态
+  const active = points.filter((p) => p.llm_called > 0)
+  const max = Math.max(1, ...active.map((p) => p.llm_called))
   const barWidth = 24
   const gap = 10
   const height = 72
+  if (active.length === 0) {
+    return <EmptyState title={strings.common.empty} />
+  }
   return (
     <div className="overflow-x-auto">
       <svg
-        viewBox={`0 0 ${points.length * (barWidth + gap)} ${height + 18}`}
+        viewBox={`0 0 ${active.length * (barWidth + gap)} ${height + 18}`}
         className="w-full min-w-[280px]"
         role="img"
         aria-label={strings.dashboard.weeklyCurve}
       >
-        {points.map((p, i) => {
+        {active.map((p, i) => {
           const x = i * (barWidth + gap)
           const barH = (p.llm_called / max) * height
           return (
             <g key={p.bucket}>
+              {/* 透明命中区覆盖整列,细柱也易 hover;<title> 为原生 tooltip */}
+              <rect x={x} y={0} width={barWidth + gap} height={height} fill="transparent">
+                <title>{`${p.bucket} · LLM 调用 ${p.llm_called} 次`}</title>
+              </rect>
               <rect
                 x={x}
                 y={height - barH}
                 width={barWidth}
                 height={barH}
                 rx={2}
-                className="fill-primary"
+                className="fill-primary pointer-events-none"
               />
               <text
                 x={x + barWidth / 2}
                 y={height + 12}
                 textAnchor="middle"
-                className="fill-[var(--ink-text-secondary)] text-[9px]"
+                className="fill-[var(--ink-text-secondary)] text-[9px] pointer-events-none"
               >
                 {p.bucket.slice(5)}
               </text>
@@ -68,9 +77,9 @@ function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
                 x={x + barWidth / 2}
                 y={height - barH - 3}
                 textAnchor="middle"
-                className="fill-[var(--ink-text-secondary)] text-[9px]"
+                className="fill-[var(--ink-text-secondary)] text-[9px] pointer-events-none"
               >
-                {p.llm_called > 0 ? p.llm_called : ''}
+                {p.llm_called}
               </text>
             </g>
           )
