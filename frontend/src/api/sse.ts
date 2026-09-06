@@ -21,6 +21,20 @@ export interface EventSourceHandle {
 
 export type EventSourceFactory = (url: string) => EventSourceHandle
 
+/**
+ * 后端 SSE 帧带命名事件类型(event: parse/download/organize/error/notify/system,
+ * 与 core.events.EventCategory 一一对应)。原生 `onmessage` 只触发于无
+ * `event:` 字段的默认消息——必须按类别 addEventListener 才能收到任何帧。
+ */
+const SSE_EVENT_CATEGORIES = [
+  'parse',
+  'download',
+  'organize',
+  'error',
+  'notify',
+  'system',
+] as const
+
 export const nativeEventSourceFactory: EventSourceFactory = (url) => {
   const source = new EventSource(url)
   return {
@@ -29,6 +43,13 @@ export const nativeEventSourceFactory: EventSourceFactory = (url) => {
       source.onopen = () => cb()
     },
     onMessage: (cb) => {
+      const dispatch = (ev: MessageEvent): void => {
+        cb({ data: ev.data, lastEventId: ev.lastEventId })
+      }
+      for (const category of SSE_EVENT_CATEGORIES) {
+        source.addEventListener(category, dispatch as EventListener)
+      }
+      // 无 event: 字段的默认消息兜底
       source.onmessage = (ev) => cb({ data: ev.data, lastEventId: ev.lastEventId })
     },
     onError: (cb) => {
