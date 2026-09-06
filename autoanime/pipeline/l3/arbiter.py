@@ -52,7 +52,10 @@ from autoanime.pipeline.l2.placeholders import build_title_shape
 from autoanime.pipeline.l3.reference import ReferenceFacts
 from autoanime.pipeline.l3.schema import L3_EVIDENCE, L3_FIELDS
 
-EVIDENCE_PRIORITY: tuple[str, ...] = ("name", "folder", "context", "memory", "llm")
+# 证据来源优先级（小者优先）。``confirmed``（A1'，拍板）：确认名覆盖——
+# 用户 confirm 写下的「草稿形状 → 确认名」alias 链命中时的 title 证据，
+# 是用户已确认的事实，优先于一切自动来源（含 L1 name 解析）。
+EVIDENCE_PRIORITY: tuple[str, ...] = ("confirmed", "name", "folder", "context", "memory", "llm")
 
 #: 未来 bangumi/tmdb 参考源证据插在 memory 与 llm 之间（预留位）。
 _FUTURE_REFERENCE_EVIDENCE = "reference"
