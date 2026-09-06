@@ -6,6 +6,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PendingPage } from '../Pending'
 import { renderPage } from '../../test/testUtils'
+import { api } from '../../api'
 import { resetMockState } from '../../mocks/handlers'
 
 /** 打开某行纠正抽屉(行内首按钮现在是 checkbox,需按名找「纠正」) */
@@ -180,5 +181,32 @@ describe('PendingPage', () => {
     await screen.findByText(/共 4 条/)
     expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled()
+  })
+
+  it('批量部分失败:成功项从选中集剔除,失败项保留可重试', async () => {
+    const user = userEvent.setup()
+    renderPage(<PendingPage />)
+    await screen.findByText(/共 4 条/)
+
+    // 模拟另一客户端先处理了第一行:批量执行时该条返回 409(对齐后端 already resolved 语义)
+    const pending = await api.pending.list({ status: 'pending' })
+    const staleId = pending.items[0]!.id
+    await api.pending.confirm(staleId)
+
+    // 勾选前两行(此时 UI 尚未感知第一行已被处理)
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[1]!)
+    await user.click(checkboxes[2]!)
+    expect(screen.getByText('已选 2 条')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '批量确认' }))
+    await user.click(screen.getByRole('button', { name: '确认 2 条？' }))
+
+    // 部分失败如实提示;成功项剔除(已选 2 → 1),失败项保留可重试
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 条处理失败')
+    await waitFor(() => expect(screen.getByText('已选 1 条')).toBeInTheDocument())
+    // 成功的第二行出队(直接 confirm 探路 1 条 + 批量成功 1 条),计数刷新
+    await waitFor(() => expect(screen.getByText(/共 2 条/)).toBeInTheDocument())
+    expect(screen.queryByText(pending.items[1]!.raw_name)).not.toBeInTheDocument()
   })
 })

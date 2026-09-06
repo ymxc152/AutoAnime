@@ -123,6 +123,11 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
             throw new ApiError(404, `pending ${id} not found`)
           })
         }
+        if (item.status !== 'pending') {
+          return delayVoid().then(() => {
+            throw new ApiError(409, `pending ${id} already resolved (status=${item.status})`)
+          })
+        }
         item.status = 'resolved'
         item.resolved_at = new Date().toISOString()
         item.resolved_by = 'manual'
@@ -174,6 +179,11 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         if (!item) {
           return delayVoid().then(() => {
             throw new ApiError(404, `pending ${id} not found`)
+          })
+        }
+        if (item.status !== 'pending') {
+          return delayVoid().then(() => {
+            throw new ApiError(409, `pending ${id} already resolved (status=${item.status})`)
           })
         }
         item.status = 'skipped'
