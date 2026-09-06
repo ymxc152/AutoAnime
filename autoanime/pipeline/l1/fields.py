@@ -15,6 +15,9 @@ from autoanime.pipeline.l1.normalize import normalize_whitespace, strip_extensio
 
 _DIGITS_RE = re.compile(r"\d{1,4}")
 _MOVIE_MARKERS_RE = re.compile(r"劇場版|剧场版|電影|电影|Movie", re.IGNORECASE)
+# A plausible group name contains at least one letter, digit or CJK char
+# (CJK range 一-鿿); bare punctuation residue ("]", "-", "…") never qualifies.
+_FANSUB_CHAR_RE = re.compile(r"[A-Za-z0-9一-鿿]")
 _NON_FANSUB_RE = re.compile(
     r"(?:4320|2160|1440|1080|720|480|360)p"
     r"|x26[45]|H\.?26[45]|HEVC|AVC|Hi10P?|\d{1,2}bit"
@@ -56,6 +59,11 @@ def is_likely_fansub(token: str) -> bool:
     if not token or len(token) > 40:
         return False
     if token.isdigit():
+        return False
+    # A group name carries at least one letter/digit/CJK char; a residue of
+    # bare punctuation (e.g. a stray "]" after a bracket-internal anchor) is
+    # never a fansub.
+    if not _FANSUB_CHAR_RE.search(token):
         return False
     return _NON_FANSUB_RE.search(token) is None
 

@@ -147,8 +147,11 @@ def _title_ambiguity(base: str, spans: list[AnchorSpan]) -> tuple[bool, bool]:
 
 def _fansub_from(base: str, spans: list[AnchorSpan]) -> str | None:
     tail = base[max(span.end for span in spans) :].lstrip(" -") if spans else ""
-    if tail and is_likely_fansub(tail):
-        return tail
+    # A structural anchor may sit inside a bracket group ("[H264 8bit 1080P]"):
+    # the tail then starts with bracket residue, which is not a fansub shape.
+    stripped = tail.strip("[]【】") if tail else ""
+    if stripped and is_likely_fansub(stripped):
+        return stripped
     return extract_fansub(base)
 
 

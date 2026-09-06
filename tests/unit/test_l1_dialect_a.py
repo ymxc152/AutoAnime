@@ -171,3 +171,27 @@ def test_folder_equal_to_name_is_not_reparsed() -> None:
     result = dot.parse(RawName(name=folder, folder=folder))
     assert result is not None
     assert all(source in ("name", "none") for source in result.evidence.values())
+
+
+def test_fansub_bracket_internal_anchor_yields_group_not_residue() -> None:
+    """R4-5 轮真实样本回归：结构锚点在方括号内部（"[H264 8bit 1080P]"）时，
+    tail 只剩括号残渣——必须回落 bracket 提取，产出字幕组而非 "]"。"""
+    result = dot.parse(
+        RawName(
+            name="非人学生与厌世教师 - S01E12 - [三明治摆烂组][简日内嵌][H264 8bit 1080P].mp4"
+        )
+    )
+    assert result is not None
+    assert result.fansub == "三明治摆烂组"
+    assert result.title == "非人学生与厌世教师"
+    assert result.season == 1 and result.episode == 12
+
+
+def test_is_likely_fansub_rejects_punctuation_residue() -> None:
+    """纯标点残渣（如 "]"）不是字幕组名。"""
+    from autoanime.pipeline.l1.fields import is_likely_fansub
+
+    assert is_likely_fansub("]") is False
+    assert is_likely_fansub("【") is False
+    assert is_likely_fansub("MWeb") is True
+    assert is_likely_fansub("三明治摆烂组") is True
