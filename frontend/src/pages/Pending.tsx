@@ -5,7 +5,7 @@
  * 纠正提交 POST /api/pending/{id}/correct:title 必填——未纠正也始终
  * 带上当前 title(触发学习三件套);confirm/reject 另有两键。
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings, t } from '../strings'
@@ -20,6 +20,7 @@ import {
   Field,
   Input,
   PageTitle,
+  Pagination,
   Select,
   type Column,
 } from '../components'
@@ -184,14 +185,156 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
   )
 }
 
+/** 每页条数;与后端 ?limit=&offset= 分页契约对齐 */
+const PAGE_SIZE = 20
+
 export function PendingPage() {
-  const fetcher = useCallback(() => api.pending.list({ status: 'pending', limit: 50 }), [])
+  const [page, setPage] = useState(1)
+  const fetcher = useCallback(
+    () =>
+      api.pending.list({ status: 'pending', limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    [page],
+  )
   const { data, loading, error, reload } = useApi(fetcher)
   const [selected, setSelected] = useState<PendingItemDto | null>(null)
+  // 多选(跨页保留已勾选 id;操作成功后剔除)
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set())
+  const [busyId, setBusyId] = useState<number | null>(null)
+  // 批量轻确认:第一次点击只切换按钮文案,第二次点击才执行
+  const [batchArm, setBatchArm] = useState<'confirm' | 'reject' | null>(null)
+  const [batchBusy, setBatchBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const items = data?.items ?? []
+  const total = data?.total ?? 0
+
+  // 当前页被处理空后回第一页,避免停在空页
+  useEffect(() => {
+    if (!loading && data !== null && data.items.length === 0 && page > 1) {
+      setPage(1)
+    }
+  }, [loading, data, page])
+
+  const changePage = (next: number): void => {
+    setPage(next)
+    setSelectedIds(new Set())
+    setBatchArm(null)
+  }
+
+  const removeFromSelection = (id: number): void => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }
+
+  /** 行内快捷确认/拒绝:单条不二次确认 */
+  const resolveOne = async (item: PendingItemDto, action: 'confirm' | 'reject'): Promise<void> => {
+    setBusyId(item.id)
+    setActionError(null)
+    try {
+      if (action === 'confirm') {
+        await api.pending.confirm(item.id)
+      } else {
+        await api.pending.reject(item.id)
+      }
+      removeFromSelection(item.id)
+      if (selected?.id === item.id) setSelected(null)
+      reload()
+    } catch (cause) {
+      setActionError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  /** 批量确认/拒绝(已过轻确认);allSettled 部分容错:只剔除成功 id,失败项保留可重试 */
+  const resolveBatch = async (action: 'confirm' | 'reject'): Promise<void> => {
+    const ids = [...selectedIds]
+    setBatchBusy(true)
+    setActionError(null)
+    const results = await Promise.allSettled(
+      ids.map((id) => (action === 'confirm' ? api.pending.confirm(id) : api.pending.reject(id))),
+    )
+    const succeeded: number[] = []
+    const failed: number[] = []
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        succeeded.push(ids[index]!)
+      } else {
+        failed.push(ids[index]!)
+      }
+    })
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const id of succeeded) {
+        next.delete(id)
+      }
+      return next
+    })
+    setBatchArm(null)
+    if (failed.length > 0) {
+      setActionError(t(strings.pending.batchPartialFailed, { n: failed.length }))
+    }
+    if (selected !== null && succeeded.includes(selected.id)) setSelected(null)
+    reload()
+    setBatchBusy(false)
+  }
+
+  const toggleOne = (id: number, checked: boolean): void => {
+    setBatchArm(null)
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        next.add(id)
+      } else {
+        next.delete(id)
+      }
+      return next
+    })
+  }
+
+  const allPageSelected = items.length > 0 && items.every((item) => selectedIds.has(item.id))
+
+  const toggleAllPage = (): void => {
+    setBatchArm(null)
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const item of items) {
+        if (allPageSelected) {
+          next.delete(item.id)
+        } else {
+          next.add(item.id)
+        }
+      }
+      return next
+    })
+  }
 
   const columns: Column<PendingItemDto>[] = [
+    {
+      key: 'select',
+      header: (
+        <input
+          type="checkbox"
+          aria-label={strings.pending.selectAll}
+          checked={allPageSelected}
+          onChange={toggleAllPage}
+          className="h-3.5 w-3.5 accent-[var(--ink-primary)]"
+        />
+      ),
+      render: (row) => (
+        <input
+          type="checkbox"
+          aria-label={t(strings.pending.selectRow, { name: row.raw_name })}
+          checked={selectedIds.has(row.id)}
+          disabled={busyId === row.id}
+          onChange={(e) => toggleOne(row.id, e.target.checked)}
+          className="h-3.5 w-3.5 accent-[var(--ink-primary)]"
+        />
+      ),
+    },
     {
       key: 'rawName',
       header: strings.pending.rawName,
@@ -226,9 +369,28 @@ export function PendingPage() {
       key: 'action',
       header: '',
       render: (row) => (
-        <Button size="sm" variant="secondary" onClick={() => setSelected(row)}>
-          {strings.pending.correctAction}
-        </Button>
+        <span className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={busyId === row.id}
+            disabled={busyId !== null && busyId !== row.id}
+            onClick={() => void resolveOne(row, 'confirm')}
+          >
+            {strings.pending.quickConfirm}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busyId === row.id}
+            onClick={() => void resolveOne(row, 'reject')}
+          >
+            {strings.pending.rejectAction}
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setSelected(row)}>
+            {strings.pending.correctAction}
+          </Button>
+        </span>
       ),
     },
   ]
@@ -236,6 +398,67 @@ export function PendingPage() {
   return (
     <>
       <PageTitle title={strings.pending.title} description={strings.pending.queueHint} />
+
+      {actionError !== null && (
+        <div role="alert" className="rounded-md border border-line px-3 py-2 text-sm text-ink-secondary">
+          <strong className="mr-1.5 text-danger">{strings.common.actionFailed}</strong>
+          {actionError}
+        </div>
+      )}
+
+      {/* 批量操作条:选中后才出现;确认/拒绝均需二次点击 */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface px-3 py-2">
+          <span className="text-xs text-ink-secondary">
+            {t(strings.pending.selectedCount, { n: selectedIds.size })}
+          </span>
+          <Button
+            size="sm"
+            variant="primary"
+            loading={batchBusy && batchArm === 'confirm'}
+            disabled={batchBusy && batchArm !== 'confirm'}
+            onClick={() => {
+              if (batchArm === 'confirm') {
+                void resolveBatch('confirm')
+              } else {
+                setBatchArm('confirm')
+              }
+            }}
+          >
+            {batchArm === 'confirm'
+              ? t(strings.pending.batchConfirmAsk, { n: selectedIds.size })
+              : strings.pending.batchConfirm}
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            loading={batchBusy && batchArm === 'reject'}
+            disabled={batchBusy && batchArm !== 'reject'}
+            onClick={() => {
+              if (batchArm === 'reject') {
+                void resolveBatch('reject')
+              } else {
+                setBatchArm('reject')
+              }
+            }}
+          >
+            {batchArm === 'reject'
+              ? t(strings.pending.batchRejectAsk, { n: selectedIds.size })
+              : strings.pending.batchReject}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setSelectedIds(new Set())
+              setBatchArm(null)
+            }}
+          >
+            {strings.pending.clearSelection}
+          </Button>
+        </div>
+      )}
+
       <Card flush>
         {error !== null ? (
           <div className="p-4">
@@ -249,9 +472,7 @@ export function PendingPage() {
             loading={loading}
             empty={<EmptyState title={strings.pending.empty} />}
             footer={
-              <span className="text-xs text-ink-secondary data-text">
-                {t(strings.common.total, { count: data?.total ?? 0 })}
-              </span>
+              <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={changePage} />
             }
           />
         )}
@@ -260,6 +481,7 @@ export function PendingPage() {
         <CorrectDrawer
           item={selected}
           onDone={() => {
+            removeFromSelection(selected.id)
             setSelected(null)
             reload()
           }}

@@ -183,6 +183,16 @@ export const strings = {
     submitCorrect: '提交纠正',
     empty: '队列为空,没有需要人工确认的解析结果。',
     resolved: '已处理',
+    quickConfirm: '确认',
+    batchConfirm: '批量确认',
+    batchReject: '批量拒绝',
+    batchConfirmAsk: '确认 {n} 条？',
+    batchRejectAsk: '拒绝 {n} 条？',
+    selectedCount: '已选 {n} 条',
+    selectAll: '全选本页',
+    selectRow: '选择 {name}',
+    clearSelection: '取消选择',
+    batchPartialFailed: '{n} 条处理失败,已保留在队列中,可重试',
   },
 
   pipeline: {
@@ -241,6 +251,7 @@ export const strings = {
     rollbackHint: '按该组最新审计行执行撤销;无可回滚 reverse 指令时后端返回 409',
     empty: '还没有审计日志。',
     filterPlaceholder: '搜索操作 ID / 对象…',
+    rollbackConfirmCount: '撤销这 {n} 条操作？',
   },
 
   settings: {

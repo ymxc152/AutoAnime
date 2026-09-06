@@ -137,8 +137,8 @@ function SeriesDrawer({ series, onClose }: { series: SeriesDto; onClose: () => v
 
 export function LibraryPage() {
   const [query, setQuery] = useState('')
-  // 后端 GET /api/series 不支持标题过滤:一次拉全量,搜索在前端做
-  const fetcher = useCallback(() => api.series.list({ limit: 100 }), [])
+  // 后端 GET /api/series 不支持标题过滤:一次拉全量(上限 300),搜索在前端做
+  const fetcher = useCallback(() => api.series.list({ limit: 300 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
   const [selected, setSelected] = useState<SeriesDto | null>(null)
 
@@ -223,6 +223,12 @@ export function LibraryPage() {
             )
           })}
         </div>
+      )}
+
+      {data !== null && (
+        <p className="text-xs text-ink-secondary data-text">
+          {t(strings.common.total, { count: data.total })}
+        </p>
       )}
 
       {selected !== null && <SeriesDrawer series={selected} onClose={() => setSelected(null)} />}

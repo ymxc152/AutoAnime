@@ -8,7 +8,7 @@
 import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
-import { strings } from '../strings'
+import { strings, t } from '../strings'
 import {
   Badge,
   Button,
@@ -78,6 +78,9 @@ function GroupRow({
   expanded,
   onToggle,
   rollingBack,
+  confirmRollback,
+  onArmRollback,
+  onCancelRollback,
   onRollback,
   rollbackMessage,
 }: {
@@ -85,6 +88,9 @@ function GroupRow({
   expanded: boolean
   onToggle: () => void
   rollingBack: boolean
+  confirmRollback: boolean
+  onArmRollback: () => void
+  onCancelRollback: () => void
   onRollback: (auditId: number) => void
   rollbackMessage: string | null
 }) {
@@ -120,16 +126,35 @@ function GroupRow({
         {rollbackMessage !== null && (
           <span className="text-xs text-success">{rollbackMessage}</span>
         )}
-        {/* 撤销以该组最新 audit 行(last_audit_id)为准;无可回滚 reverse 时后端回 409 */}
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={rollingBack}
-          title={strings.logs.rollbackHint}
-          onClick={() => onRollback(group.last_audit_id)}
-        >
-          {strings.common.rollback}
-        </Button>
+        {/* 撤销以该组最新 audit 行(last_audit_id)为准;无可回滚 reverse 时后端回 409。
+            危险操作:先内联二次确认,文案带条数。 */}
+        {confirmRollback ? (
+          <span className="flex items-center gap-1.5">
+            <span className="text-xs text-ink-secondary">
+              {t(strings.logs.rollbackConfirmCount, { n: group.rows })}
+            </span>
+            <Button
+              size="sm"
+              variant="danger"
+              loading={rollingBack}
+              onClick={() => onRollback(group.last_audit_id)}
+            >
+              {strings.common.confirm}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onCancelRollback}>
+              {strings.common.cancel}
+            </Button>
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            variant="danger"
+            title={strings.logs.rollbackHint}
+            onClick={onArmRollback}
+          >
+            {strings.common.rollback}
+          </Button>
+        )}
       </div>
       {expanded && (
         <div className="flex flex-col gap-3 bg-surface-2/60 px-4 py-3 md:pl-10">
@@ -146,6 +171,7 @@ export function LogsPage() {
   const [filter, setFilter] = useState('')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [rollingBackId, setRollingBackId] = useState<string | null>(null)
+  const [confirmRollbackId, setConfirmRollbackId] = useState<string | null>(null)
   const [rolledBack, setRolledBack] = useState<string | null>(null)
   const [rollbackError, setRollbackError] = useState<string | null>(null)
 
@@ -174,6 +200,7 @@ export function LogsPage() {
   }
 
   const rollback = async (group: OperationGroupDto): Promise<void> => {
+    setConfirmRollbackId(null)
     setRollingBackId(group.operation_id)
     setRollbackError(null)
     setRolledBack(null)
@@ -234,6 +261,9 @@ export function LogsPage() {
                 expanded={expandedIds.has(group.operation_id)}
                 onToggle={() => toggle(group.operation_id)}
                 rollingBack={rollingBackId === group.operation_id}
+                confirmRollback={confirmRollbackId === group.operation_id}
+                onArmRollback={() => setConfirmRollbackId(group.operation_id)}
+                onCancelRollback={() => setConfirmRollbackId(null)}
                 onRollback={() => void rollback(group)}
                 rollbackMessage={
                   rolledBack === group.operation_id ? strings.common.rolledBack : null

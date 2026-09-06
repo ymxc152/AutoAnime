@@ -24,7 +24,7 @@ function MetricCard({
     <Card>
       <p className="text-xs text-ink-secondary">{label}</p>
       <p className="data-text mt-1 text-2xl font-semibold text-ink">{value}</p>
-      {hint !== undefined && <p className="mt-0.5 text-xs text-ink-muted">{hint}</p>}
+      {hint !== undefined && <p className="mt-0.5 text-xs text-ink-secondary">{hint}</p>}
     </Card>
   )
 }
