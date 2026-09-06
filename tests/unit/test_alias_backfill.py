@@ -18,18 +18,22 @@ from alembic import command
 from alembic.config import Config
 
 from autoanime.core.enums import Confidence, Segment
-from autoanime.core.interfaces import ParseResult
+from autoanime.core.interfaces import ParseResult, RawName
 from autoanime.core.models import ParseMemory, TitleAlias
 from autoanime.memory import learn as learn_module
+from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import (
     ALIAS_BACKFILL_TIMEOUT_S,
     StorageMemoryAccess,
     backfill_title_aliases,
     learn_confirmation,
 )
+from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.reference_cache import CachedReference
 from autoanime.memory.store import SqliteStorage
+from autoanime.pipeline.l2.placeholders import build_title_shape
 from autoanime.pipeline.l3.reference import ReferenceFacts
+from autoanime.pipeline.orchestrator import Orchestrator, RouteOutcome
 
 _MEMORY_DB = "sqlite+aiosqlite:///:memory:"
 
@@ -394,3 +398,115 @@ def test_migration_0004_upgrade_and_downgrade(tmp_path: Path) -> None:
 def test_alias_backfill_timeout_is_strict() -> None:
     """护栏契约：miss 外呼的超时上限常量为 3 秒。"""
     assert ALIAS_BACKFILL_TIMEOUT_S <= 3.0
+
+
+# ---------------------------------------------- L1 草稿形状绑定（R3 验收）
+
+AZUR_E06_NAME = "Anime.AzurLane.Slow.Ahead.S02E06.1080p.Baha.WEB-DL.AAC2.0.H.264-MWeb.mkv"
+AZUR_E05_NAME = "Anime.AzurLane.Slow.Ahead.S02E05.1080p.Baha.WEB-DL.AAC2.0.H.264-MWeb.mkv"
+AZUR_FOLDER = "Anime.AzurLane.Slow.Ahead.S02.1080p.Baha.WEB-DL.AAC2.0.H.264-MWeb"
+
+
+def _confirmed_azur() -> ParseResult:
+    return ParseResult(
+        title="碧蓝航线：微速前行！", season=2, episode=6, segment=Segment.EPISODE,
+        fansub=None, level=Confidence.HIGH, confidence=1.0,
+    )
+
+
+def test_learn_confirmation_binds_l1_draft_shape_to_confirmed() -> None:
+    """R3 验收：draft_title 传入时把 L1 草稿形状映射到确认形状。
+
+    修复前学习只绑确认标题形状——草稿形状与参考源均不认识时（"Anime."
+    前缀发布名），同风格兄弟集的 alias 读侧无行可查，跨集命中永不发生。
+    """
+
+    async def scenario() -> str | None:
+        storage = SqliteStorage(_MEMORY_DB)
+        await storage.create_all()
+        try:
+            access = StorageMemoryAccess(storage)
+            outcome = await learn_confirmation(
+                access,
+                confirmed=_confirmed_azur(),
+                raw_name=AZUR_E06_NAME,
+                draft_title="Anime AzurLane Slow Ahead",
+            )
+            assert outcome.bypassed is False
+            assert len(outcome.entries) == 2  # parse_memory 两级照常
+            return await storage.find_alias_key("anime azurlane slow ahead")
+        finally:
+            await storage.close()
+
+    assert asyncio.run(scenario()) == build_title_shape("碧蓝航线：微速前行！")
+
+
+def test_learn_confirmation_without_draft_title_writes_no_draft_alias() -> None:
+    """不传 draft_title 行为不变（向后兼容）；草稿形状==确认形状不写。"""
+
+    async def scenario() -> tuple[int, int]:
+        storage = SqliteStorage(_MEMORY_DB)
+        await storage.create_all()
+        try:
+            access = StorageMemoryAccess(storage)
+            await learn_confirmation(
+                access, confirmed=_confirmed_azur(), raw_name=AZUR_E06_NAME
+            )
+            without = await storage.find_alias_key("anime azurlane slow ahead")
+            await learn_confirmation(
+                access,
+                confirmed=_confirmed_azur(),
+                raw_name=AZUR_E06_NAME,
+                draft_title="碧蓝航线：微速前行！",  # 与确认标题同形状 → self 映射跳过
+            )
+            rows = await storage.list(TitleAlias)
+            return (0 if without is None else 1, len(rows))
+        finally:
+            await storage.close()
+
+    without, total_rows = asyncio.run(scenario())
+    assert without == 0
+    assert total_rows == 0  # 不传 draft_title 不写；同形状 draft 是 self 映射也跳过
+
+
+def test_sibling_episode_hits_memory_via_draft_alias() -> None:
+    """R3 验收端到端链（离线）：确认 E06 后，同风格 E05 走 alias→L2 命中。
+
+    L1 对该发布名产 MEDIUM → 直接 L2 miss（记忆在确认标题形状下）→
+    PR7 M2b alias 读侧把草稿形状归一到确认形状 → L2 系列级命中 →
+    route=memory，全程零 LLM。
+    """
+
+    async def scenario() -> RouteOutcome:
+        storage = SqliteStorage(_MEMORY_DB)
+        await storage.create_all()
+        try:
+            governance = MemoryGovernance(storage)
+            access = StorageMemoryAccess(storage)
+            await learn_confirmation(
+                access,
+                confirmed=_confirmed_azur(),
+                raw_name=AZUR_E06_NAME,
+                draft_title="Anime AzurLane Slow Ahead",
+            )
+            orchestrator = Orchestrator(
+                memory_store=StorageMemoryStore(storage, audit_governance=governance),
+                l2_enabled=True,
+                l3_enabled=False,
+            )
+            # 与 import 生产路径同形：folder 与文件名标题冲突（"Anime." 前缀）
+            # 使 L1 降到 MEDIUM，进入 L2 段——这正是跨集命中的前提。
+            return await orchestrator.process(
+                RawName(name=AZUR_E05_NAME, folder=AZUR_FOLDER, parent_path="E:/downloads")
+            )
+        finally:
+            await storage.close()
+
+    outcome = asyncio.run(scenario())
+    assert outcome.route == "memory"
+    assert outcome.l2_applied is True
+    assert outcome.result is not None
+    assert outcome.result.episode == 5  # 集数来自本集 L1 草稿，不是被确认集
+    # filename-first 契约：memory 只补证据不覆盖 name/folder 证据的标题
+    assert outcome.result.title == "Anime AzurLane Slow Ahead"
+    assert outcome.result.evidence.get("key_level") == "memory:1"

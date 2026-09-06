@@ -336,6 +336,7 @@ async def _confirm(args: argparse.Namespace) -> int:
             source=MemorySource(args.source),
             bypass_lookup=access,
             reference_lookup=_confirm_reference_lookup(settings, storage),
+            draft_title=draft.title if draft else None,
         )
     if outcome.bypassed:
         print(json.dumps({"bypassed": True, "entries": []}, ensure_ascii=False))
