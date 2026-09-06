@@ -288,3 +288,28 @@ class ReferenceCache(Base):
     facts: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+
+class PosterFetch(Base):
+    """``poster_fetch`` 表：海报兜底下载的状态与负缓存（PR3+）。
+
+    以 ``folder``（``naming.sanitize(title)`` 后的库内目录名）为键，每
+    目录至多一行：
+
+    - ``status``：``fetched``（已落盘，``ext`` 记实际扩展名）/ ``missing``
+      （参考源无图或下载失败，``fetched_at`` 起进入冷却期，冷却期内懒拉取
+      直接 404 不再外呼）/ ``pending``（下载进行中，防并发重复拉取；
+      超过 staleness 窗口的 pending 视为僵死，允许重试）；
+    - ``url``：来源直链（仅参考源 adapter 响应，审计用），不回显给前端。
+
+    新表经 ``SqliteStorage.create_all`` 自动创建，存量库免迁移。
+    """
+
+    __tablename__ = "poster_fetch"
+
+    folder: Mapped[str] = mapped_column(String, primary_key=True)
+    status: Mapped[str] = mapped_column(String)
+    ext: Mapped[str | None] = mapped_column(String, nullable=True)
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

@@ -202,6 +202,8 @@ export function PendingPage() {
   const [busyId, setBusyId] = useState<number | null>(null)
   // 批量轻确认:第一次点击只切换按钮文案,第二次点击才执行
   const [batchArm, setBatchArm] = useState<'confirm' | 'reject' | null>(null)
+  // 单条拒绝同样走 arm 二次确认(B1:拒绝不可逆,零确认误触无法回退)
+  const [armRejectId, setArmRejectId] = useState<number | null>(null)
   const [batchBusy, setBatchBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -212,6 +214,7 @@ export function PendingPage() {
     setPage(next)
     setSelectedIds(new Set())
     setBatchArm(null)
+    setArmRejectId(null)
   }
 
   const removeFromSelection = (id: number): void => {
@@ -222,7 +225,7 @@ export function PendingPage() {
     })
   }
 
-  /** 行内快捷确认/拒绝:单条不二次确认 */
+  /** 行内快捷确认/拒绝:确认单条不二次确认;拒绝不可逆,走 arm 二次确认(B1) */
   const resolveOne = async (item: PendingItemDto, action: 'confirm' | 'reject'): Promise<void> => {
     setBusyId(item.id)
     setActionError(null)
@@ -288,6 +291,7 @@ export function PendingPage() {
 
   const toggleOne = (id: number, checked: boolean): void => {
     setBatchArm(null)
+    setArmRejectId(null)
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (checked) {
@@ -303,6 +307,7 @@ export function PendingPage() {
 
   const toggleAllPage = (): void => {
     setBatchArm(null)
+    setArmRejectId(null)
     setSelectedIds((prev) => {
       const next = new Set(prev)
       for (const item of items) {
@@ -342,6 +347,7 @@ export function PendingPage() {
     {
       key: 'rawName',
       header: strings.pending.rawName,
+      sticky: true,
       render: (row) => (
         <span className="data-text block max-w-sm truncate text-sm text-ink" title={row.raw_name}>
           {row.raw_name}
@@ -387,9 +393,19 @@ export function PendingPage() {
             size="sm"
             variant="ghost"
             disabled={busyId === row.id}
-            onClick={() => void resolveOne(row, 'reject')}
+            onClick={() => {
+              // 单条拒绝与批量一致走 arm 二次确认(B1):第一次点击只切换文案
+              if (armRejectId === row.id) {
+                setArmRejectId(null)
+                void resolveOne(row, 'reject')
+              } else {
+                setArmRejectId(row.id)
+              }
+            }}
           >
-            {strings.pending.rejectAction}
+            {armRejectId === row.id
+              ? t(strings.pending.batchRejectAsk, { n: 1 })
+              : strings.pending.rejectAction}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setSelected(row)}>
             {strings.pending.correctAction}

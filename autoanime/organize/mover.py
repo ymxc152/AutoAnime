@@ -72,11 +72,14 @@ def plan_transfer(
     siblings: list[Path] | None = None,
     copy_policy: CopyPolicy = "allow",
     skip_over_bytes: int = 20 * 1024**3,
+    allow_replace_existing: bool = False,
 ) -> TransferPlan:
     """规划一次搬移（纯决策，不碰文件；参数化单测钉死）。
 
     - 源不存在 → skip（missing_source）；
     - 单文件超限 → skip（size_over_limit，D9）；
+    - 目标位已存在：same content 幂等 skip；different content 默认 skip，
+      只有洗版闸门显式放行（``allow_replace_existing=True``）才替换；
     - 同文件系统 → hardlink（原件保留做种，D21）；
     - 跨盘 → allow=copy（D9 默认降级）/ strict=skip（cross_fs_copy_disabled）。
     字幕跟随（D18）与视频同策略。
@@ -90,6 +93,22 @@ def plan_transfer(
             dst_dir=dst_dir, moves=(), strategy="skip",
             skip_reason=f"size_over_limit:{size}",
         )
+    dst = dst_dir / dst_name
+    if dst.exists():
+        try:
+            same_content = video_src.samefile(dst)
+        except OSError:
+            same_content = False
+        if same_content:
+            return TransferPlan(
+                dst_dir=dst_dir, moves=(), strategy="skip",
+                skip_reason="dst-exists-same-content",
+            )
+        if not allow_replace_existing:
+            return TransferPlan(
+                dst_dir=dst_dir, moves=(), strategy="skip",
+                skip_reason="dst-exists-upgrade-gated",
+            )
     same_fs = _same_filesystem(video_src.parent if video_src.parent.exists() else video_src, library_root)
     if same_fs:
         kind: TransferKind = "hardlink"

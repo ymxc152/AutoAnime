@@ -263,6 +263,7 @@ def _map_subject(
         episode_count=episode_count,
         aliases=tuple(aliases),
         source="bangumi",
+        poster_url=_subject_poster_url(detail),
     )
 
 
@@ -289,3 +290,19 @@ def _derive_seasons(
         number = detect_season_number(hit_name, hit_name_cn)
         seasons.add(number or 1)
     return tuple(sorted(seasons))
+
+
+def _subject_poster_url(detail: dict[str, Any]) -> str | None:
+    """subject 详情 → 海报直链：``images.large`` → ``common`` → ``medium``。
+
+    Bangumi v0 subject 详情自带 ``images`` 对象；取首个 http(s) 直链，
+    缺失/形状不符返回 ``None``（海报是增强信息，缺失不影响 facts 有效性）。
+    """
+    images = detail.get("images")
+    if not isinstance(images, dict):
+        return None
+    for key in ("large", "common", "medium"):
+        value = images.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    return None

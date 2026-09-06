@@ -23,12 +23,14 @@ from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.store import SqliteStorage
 from autoanime.organize import confirm_archive
+from autoanime.organize.poster import schedule_poster_fetch
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.web.deps import (
     ApiStoreDep,
     BusDep,
     GovernanceDep,
     PaginationDep,
+    PosterServiceDep,
     ReferenceChainDep,
     SettingsDep,
     StorageDep,
@@ -63,6 +65,7 @@ async def _archive_after_resolution(
     settings: Settings,
     governance: MemoryGovernance,
     source: str,
+    poster_service: PosterServiceDep | None = None,
 ) -> confirm_archive.ArchiveOutcome:
     """确认/纠正后的归档通路（报告 §6.1 v2 首要补齐项）。
 
@@ -99,6 +102,13 @@ async def _archive_after_resolution(
     if outcome.archived:
         logger.info(
             "pending #%s archived via %s: %s", row.id, source, outcome.dst
+        )
+        # 海报兜底（PR3+ 触发点 A）：归档建目录后 best-effort 拉取海报。
+        # 后台任务失败只打日志/记负缓存，不影响归档结果与本次响应时延。
+        schedule_poster_fetch(
+            poster_service,
+            titles=(confirmed.title, None, None),
+            library_path=Path(settings.library_path),
         )
     return outcome
 
@@ -172,6 +182,7 @@ async def confirm_pending(
     governance: GovernanceDep,
     settings: SettingsDep,
     reference_chain: ReferenceChainDep,
+    poster_service: PosterServiceDep,
     body: PendingConfirmIn | None = None,
 ) -> PendingResolveOut:
     """确认解析结论（字段缺省回退行内草稿）→ 学习（parse_memory+alias）。"""
@@ -183,7 +194,7 @@ async def confirm_pending(
         raise HTTPException(status_code=422, detail=str(exc)) from None
     learned, bypassed = await _learn(storage, reference_chain, row=row, confirmed=confirmed)
     archive = await _archive_after_resolution(
-        row, confirmed, settings=settings, governance=governance, source="confirm"
+        row, confirmed, settings=settings, governance=governance, source="confirm", poster_service=poster_service
     )
     resolution: dict[str, object] = {
         "action": "confirm",
@@ -227,6 +238,7 @@ async def correct_pending(
     settings: SettingsDep,
     bus: BusDep,
     reference_chain: ReferenceChainDep,
+    poster_service: PosterServiceDep,
 ) -> PendingResolveOut:
     """字段纠正（5.2 学习三件套：parse_memory + alias + bypass 负记忆）。"""
     row = await _load_open_pending(store, pending_id)
@@ -239,7 +251,7 @@ async def correct_pending(
     # 负记忆（5.3）：该 raw_name 的既有 L1/L2 结论已被人工推翻，登记 bypass。
     await governance.add_bypass(row.raw_name, reason=f"webui correct: pending #{pending_id}")
     archive = await _archive_after_resolution(
-        row, confirmed, settings=settings, governance=governance, source="correct"
+        row, confirmed, settings=settings, governance=governance, source="correct", poster_service=poster_service
     )
     resolution: dict[str, object] = {
         "action": "correct",

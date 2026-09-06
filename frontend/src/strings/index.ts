@@ -75,7 +75,7 @@ export const strings = {
     levelL2: 'L2 记忆命中',
     levelL3: 'L3 LLM 兜底',
     llmCallsShort: 'LLM 调用',
-    weeklyCurve: 'LLM 调用周曲线(8 周)',
+    weeklyCurve: 'LLM 调用周曲线',
     episodeStates: '库内集状态分布',
     noData: '暂无数据',
   },
@@ -139,6 +139,7 @@ export const strings = {
     removeConfirm: '确认取消订阅「{title}」?已归档文件不受影响。',
     empty: '还没有订阅。先添加一个标题开始追番。',
     addFailed: '订阅失败',
+    removeFailed: '取消订阅失败',
   },
 
   rssSources: {
@@ -146,8 +147,11 @@ export const strings = {
     addSource: '添加源',
     url: '地址',
     season: '关联季',
-    seasonHint: '必填:挂载到已存在的季 ID',
-    seasonRequired: '请填写关联季 ID',
+    seasonHint: '必填:从订阅列表选择要挂载的季',
+    seasonPlaceholder: '请选择关联季',
+    seasonEmptyOption: '暂无可选季,请先在「追番」页创建订阅',
+    seasonOption: '{title} · 第 {n} 季(ID {id})',
+    seasonRequired: '请选择关联季',
     lastPolledAt: '上次拉取',
     token: '令牌(可选)',
     tokenHint: 'RSS token 按密钥处理,不会出现在日志里',
@@ -155,6 +159,8 @@ export const strings = {
     urlRequired: '请填写源地址',
     removeConfirm: '确认移除该 RSS 源?',
     empty: '没有 RSS 源。订阅会自动创建对应源,也可以手动添加。',
+    toggleFailed: '启停源失败',
+    removeFailed: '移除源失败',
   },
 
   pending: {
@@ -198,6 +204,7 @@ export const strings = {
   pipeline: {
     title: '管线',
     subtitle: '三级识别 → 仲裁 → 归档,实时文件流',
+    flowSteps: '流程步骤',
     node: {
       input: '输入',
       l1: 'L1 本地解析',
@@ -276,6 +283,12 @@ export const strings = {
     sseHeartbeat: 'SSE 心跳间隔',
     sseReplay: 'SSE 重放上限',
     apiToken: 'API Token',
+    apiTokenInput: 'API Token(本端注入)',
+    apiTokenHint: '后端设置 AUTOANIME_API_TOKEN 时,请求需携带同值(X-API-Token 头;SSE 走 ?token=)。保存在浏览器 localStorage,保存/清除后刷新页面生效',
+    apiTokenSave: '保存 Token',
+    apiTokenClear: '清除 Token',
+    apiTokenSavedNotice: '已保存,刷新页面后生效',
+    apiTokenClearedNotice: '已清除,刷新页面后生效',
     llmApiKey: 'LLM API Key',
     configured: '已配置',
     notConfigured: '未配置',

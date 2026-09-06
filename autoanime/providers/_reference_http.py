@@ -258,6 +258,44 @@ class ReferenceHttpClient:
                 return None
         return None
 
+
+
+    async def request_content(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> tuple[bytes, str] | None:
+        """发一次（429 时最多两次）请求并返回 ``(字节体, Content-Type)``。
+
+        与 :meth:`request_json` 同一套失败语义：网络错误/超时/4xx/5xx →
+        ``None``；429 按 ``Retry-After`` 退避一次再失败即 ``None``；绝不抛
+        异常。供海报等二进制资源下载复用频控与超时（图片 CDN 直链不走
+        API 配额，但节流仍在此层统一生效）。
+        """
+        for attempt in (0, 1):
+            await self._throttle()
+            try:
+                client = await self._ensure_client()
+                response = await client.request(
+                    method,
+                    url,
+                    headers={**self._headers, **(headers or {})},
+                )
+            except httpx.HTTPError:
+                return None
+            if response.status_code == 429:
+                if attempt == 0:
+                    delay = parse_retry_after(response.headers.get("retry-after"))
+                    await self._sleeper(delay)
+                    continue
+                return None
+            if not (200 <= response.status_code < 300):
+                return None
+            content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+            return response.content, content_type
+        return None
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(

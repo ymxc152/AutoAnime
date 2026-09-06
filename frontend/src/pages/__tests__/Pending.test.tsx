@@ -126,7 +126,26 @@ describe('PendingPage', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('行内快捷拒绝:单条无二次确认', async () => {
+  it('行内快捷拒绝:先 arm 轻确认「拒绝 1 条？」,二次点击才执行(回归 B1)', async () => {
+    const user = userEvent.setup()
+    renderPage(<PendingPage />)
+    await screen.findByText(/共 4 条/)
+    const row = screen
+      .getByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]')
+      .closest('tr')!
+    // 第一次点击:仅 arm,按钮文案变为「拒绝 1 条？」,队列不变
+    await user.click(within(row).getByRole('button', { name: '拒绝' }))
+    expect(within(row).getByRole('button', { name: '拒绝 1 条？' })).toBeInTheDocument()
+    expect(screen.getByText(/共 4 条/)).toBeInTheDocument()
+    // 第二次点击:执行,行出队
+    await user.click(within(row).getByRole('button', { name: '拒绝 1 条？' }))
+    await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
+    expect(
+      screen.queryByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('行内拒绝 arm 后改选其他行:arm 重置,需重新确认', async () => {
     const user = userEvent.setup()
     renderPage(<PendingPage />)
     await screen.findByText(/共 4 条/)
@@ -134,10 +153,11 @@ describe('PendingPage', () => {
       .getByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]')
       .closest('tr')!
     await user.click(within(row).getByRole('button', { name: '拒绝' }))
-    await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
-    expect(
-      screen.queryByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]'),
-    ).not.toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: '拒绝 1 条？' })).toBeInTheDocument()
+    // 勾选任意一行 → 单条 arm 重置回「拒绝」
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[1]!)
+    expect(within(row).getByRole('button', { name: '拒绝' })).toBeInTheDocument()
   })
 
   it('批量确认:勾选 2 条 → 轻确认「确认 2 条？」→ 二次点击执行', async () => {

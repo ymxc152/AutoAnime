@@ -40,6 +40,8 @@ class OperationGroup:
     actions: list[str]
     first_audit_id: int
     last_audit_id: int
+    #: Logs UI 只对「组内最新行有 reverse 指令」的组开放撤销入口。
+    rollbackable: bool
 
 
 @dataclass
@@ -206,6 +208,7 @@ class ApiStore:
                 actions=sorted({row.action for row in rows_}),
                 first_audit_id=rows_[0].id,
                 last_audit_id=rows_[-1].id,
+                rollbackable=bool(rows_[-1].reverse or {}),
             )
             for operation_id, rows_ in page
         ], total

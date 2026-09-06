@@ -42,6 +42,7 @@ interface MockState {
   subscriptions: SubscriptionDto[]
   rssSources: RssSourceDto[]
   settings: SettingsDto
+  metrics: Metrics
   nextId: number
   nextOpSeq: number
 }
@@ -56,6 +57,7 @@ function freshState(): MockState {
     subscriptions: clone(mockSubscriptions),
     rssSources: clone(mockRssSources),
     settings: clone(mockSettings),
+    metrics: clone(mockMetrics),
     nextId: 1000,
     nextOpSeq: 1,
   }
@@ -64,6 +66,11 @@ function freshState(): MockState {
 /** 测试用:重置 mock 数据到初始 fixtures */
 export function resetMockState(): void {
   state = freshState()
+}
+
+/** 测试用:覆写 metrics 基线(pending_open 仍由 pending 列表派生) */
+export function setMockMetrics(metrics: Metrics): void {
+  state.metrics = clone(metrics)
 }
 
 /** Page 信封:与后端 schemas.Page 一致(total/limit/offset/items) */
@@ -96,7 +103,7 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
     metrics: {
       get: () => {
         const metrics: Metrics = {
-          ...clone(mockMetrics),
+          ...state.metrics,
           pending_open: state.pending.filter((p) => p.status === 'pending').length,
         }
         return delayed(metrics)
@@ -105,6 +112,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
 
     series: {
       list: (query = {}) => delayed(paginate(state.series, query.limit, query.offset)),
+      // 海报 URL 构造与真实端点一致(mock 不拦截 <img>,由 vite proxy/MSW 之外处理)
+      posterUrl: (id: number) => `/api/series/${id}/poster`,
     },
 
     pending: {
@@ -236,6 +245,7 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
               actions: [...new Set(sorted.map((r) => r.action))].sort(),
               first_audit_id: sorted[0]!.id,
               last_audit_id: sorted[sorted.length - 1]!.id,
+              rollbackable: Object.keys(sorted[sorted.length - 1]!.reverse).length > 0,
             }
           })
           .sort((a, b) => b.last_audit_id - a.last_audit_id)

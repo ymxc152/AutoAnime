@@ -35,6 +35,9 @@ export const endpoints = {
   /** GET /api/series —— Library(series 列表,内嵌 season/episode 全树;无 q 过滤) */
   series: {
     list: (query: SeriesQuery = {}) => request<Page<SeriesDto>>('/api/series', { query }),
+    /** GET /api/series/{id}/poster —— 本地库海报直读(404 = 无海报,前端降级);
+     *  注意:<img> 无法携带 X-API-Token 头,配置 token 时此端点会 401 → 前端降级 */
+    posterUrl: (id: number) => `/api/series/${id}/poster`,
   },
 
   /** /api/pending —— 待确认队列(确认/纠正/拒绝,响应 PendingResolveOut) */

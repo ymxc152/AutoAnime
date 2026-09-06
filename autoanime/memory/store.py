@@ -14,6 +14,7 @@ from autoanime.core.models import (
     BypassList,
     LlmCacheRow,
     ParseMemory,
+    PosterFetch,
     ReferenceCache,
     TitleAlias,
 )
@@ -172,6 +173,38 @@ class SqliteStorage:
                 existing.facts = row.facts
                 existing.fetched_at = row.fetched_at
                 existing.expires_at = row.expires_at
+            await session.commit()
+
+    async def find_poster_fetch(self, folder: str) -> PosterFetch | None:
+        """按目录名读一条海报下载状态（PR3+ 负缓存/并发护栏读侧）。
+
+        冷却期判定与 pending 僵死判定由调用方（``organize.poster``）负责，
+        store 层只存取。未命中返回 ``None``。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(PosterFetch).where(PosterFetch.folder == folder)
+            )
+            return result.scalar_one_or_none()
+
+    async def upsert_poster_fetch(self, row: PosterFetch) -> None:
+        """写一条海报下载状态（PR3+）。
+
+        同一 ``folder`` 重复写入覆盖旧记录（fetched/missing/pending 互相
+        覆盖）；每目录至多一行，``folder`` 主键兜底。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(PosterFetch).where(PosterFetch.folder == row.folder)
+            )
+            existing = result.scalar_one_or_none()
+            if existing is None:
+                session.add(row)
+            else:
+                existing.status = row.status
+                existing.ext = row.ext
+                existing.url = row.url
+                existing.fetched_at = row.fetched_at
             await session.commit()
 
     async def find_alias_key(self, title_shape_norm: str) -> str | None:

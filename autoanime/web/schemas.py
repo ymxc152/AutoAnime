@@ -166,6 +166,8 @@ class OperationGroupOut(BaseModel):
     actions: list[str]
     first_audit_id: int
     last_audit_id: int
+    #: 以组内最新行判定；UI 据此隐藏不可撤销操作，避免无意义 409。
+    rollbackable: bool
 
 
 # ---------------------------------------------------------------------------

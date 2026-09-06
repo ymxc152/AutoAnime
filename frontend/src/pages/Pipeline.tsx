@@ -164,7 +164,7 @@ export function PipelinePage() {
       />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_280px]">
-        <Card flush className="overflow-hidden">
+        <Card flush className="hidden overflow-hidden lg:block">
           <div className="h-[420px]">
             <ReactFlow
               nodes={nodes}
@@ -180,6 +180,33 @@ export function PipelinePage() {
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
             </ReactFlow>
           </div>
+        </Card>
+
+        {/* 移动端:ReactFlow 缩放后节点文字不可读,降级为纵向步骤列表 */}
+        <Card title={strings.pipeline.flowSteps} className="lg:hidden">
+          <ol className="flex flex-col">
+            {(Object.keys(NODE_META) as PipelineNodeId[]).map((id, i) => {
+              const meta = NODE_META[id]
+              return (
+                <li
+                  key={id}
+                  className="flex items-center gap-3 border-b border-line py-2 last:border-b-0"
+                >
+                  <span className="data-text flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs text-ink-secondary">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-ink">{meta.title}</p>
+                    <p className="text-xs text-ink-secondary">{meta.desc}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="data-text text-sm text-ink">{state.counters[id] ?? 0}</p>
+                    <p className="text-xs text-ink-secondary">{strings.pipeline.badge.passed}</p>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
         </Card>
 
         <Card title={strings.pipeline.flow.recent} flush>

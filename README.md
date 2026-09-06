@@ -181,7 +181,7 @@ docker compose up -d --build   # WebUI 在 http://127.0.0.1:3080
 
 ## 安全提示
 
-**勿暴露公网。** AutoAnime 是单用户本地工具，只有一层简单 token 认证（`AUTOANIME_API_TOKEN`），没有用户体系、没有 HTTPS。请只在 LAN 内使用并设置 token；路由器端口转发 = 把整库管理权暴露给公网，明确不支持。Mikan 私有订阅的 `?token=` 按密钥处理（只进库/env，不进日志与报告）。
+**勿暴露公网。** AutoAnime 是单用户本地工具，只有一层简单 token 认证（`AUTOANIME_API_TOKEN`），没有用户体系、没有 HTTPS。请只在 LAN 内使用并设置 token；路由器端口转发 = 把整库管理权暴露给公网，明确不支持。Mikan 私有订阅的独立 token 字段按密钥处理（只进库/env，不进日志与报告）。如直接粘贴带 `?token=` 的 RSS URL，WebUI 会按 URL 原样展示；请勿截图或共享该页面。
 
 ## 已知边界（如实）
 

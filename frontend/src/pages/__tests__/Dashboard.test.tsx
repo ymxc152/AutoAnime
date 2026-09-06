@@ -4,7 +4,8 @@
 import { screen, waitFor } from '@testing-library/react'
 import { DashboardPage } from '../Dashboard'
 import { renderPage } from '../../test/testUtils'
-import { resetMockState } from '../../mocks/handlers'
+import { resetMockState, setMockMetrics } from '../../mocks/handlers'
+import { mockMetrics } from '../../mocks/data'
 
 describe('DashboardPage', () => {
   beforeEach(() => {
@@ -38,11 +39,32 @@ describe('DashboardPage', () => {
   it('渲染 LLM 调用周曲线(SVG)与库内集状态分布', async () => {
     renderPage(<DashboardPage />)
     expect(
-      await screen.findByRole('img', { name: 'LLM 调用周曲线(8 周)' }),
+      await screen.findByRole('img', { name: 'LLM 调用周曲线' }),
     ).toBeInTheDocument()
     expect(screen.getByText('库内集状态分布')).toBeInTheDocument()
     // episode_states 徽标
     expect(screen.getByText(/missing 30/)).toBeInTheDocument()
     expect(screen.getByText(/organized 87/)).toBeInTheDocument()
+  })
+
+  it('周曲线过滤空桶(0 调用的周不渲染)', async () => {
+    renderPage(<DashboardPage />)
+    const svg = await screen.findByRole('img', { name: 'LLM 调用周曲线' })
+    // mock 数据 W35/W36 两周 llm_called=0,应被过滤
+    expect(svg.textContent).not.toContain('W35')
+    expect(svg.textContent).not.toContain('W36')
+    expect(svg.textContent).toContain('W29')
+  })
+
+  it('周曲线全为 0 时显示空态', async () => {
+    setMockMetrics({
+      ...mockMetrics,
+      llm_call_curve_weekly: mockMetrics.llm_call_curve_weekly.map((p) => ({
+        ...p,
+        llm_called: 0,
+      })),
+    })
+    renderPage(<DashboardPage />)
+    expect(await screen.findByText('暂无数据')).toBeInTheDocument()
   })
 })
