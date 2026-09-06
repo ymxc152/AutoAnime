@@ -903,8 +903,8 @@ async def _import(args: argparse.Namespace) -> int:
     (batching=True)``（E1 库存入口；expected=None——D13 手动路径）。--dry-run
     只输出将发生的动作不落库不归档。输出 JSON 汇总：
     total（目录内全部文件）/scanned（视频文件）/routes（路由分布）/
-    archived/pending/failed（skip+error）/skipped（已归档或已入队——重跑
-    幂等跳过，R2 验收）/items（逐文件明细）。
+    archived/pending/failed（仅 error）/skipped（重跑幂等跳过与目标位
+    已占用跳过——均非错误）/items（逐文件明细）。
     """
     root = Path(args.directory)
     if not root.is_dir():
@@ -988,7 +988,11 @@ async def _import(args: argparse.Namespace) -> int:
                     archived += 1
                 elif action == "pending":
                     pending += 1
-                else:  # skip / error：归档动作没有发生，计入失败侧
+                elif action == "skip":
+                    # 目标位已占用的跳过（同内容 noop / 让位洗版闸门）：
+                    # 与幂等桶同属"未归档但非错误"，不进 failed。
+                    skipped += 1
+                else:  # error：归档动作异常终止
                     failed += 1
                 items.append(item)
     finally:

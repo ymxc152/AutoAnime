@@ -449,3 +449,23 @@ def test_import_same_content_dst_is_noop_skip(tmp_path: Path) -> None:
     assert item1["action"] == "archive"
     assert item2["action"] == "skip"
     assert item2["reason"] == "dst-exists-same-content"
+
+
+def test_import_dst_exists_skip_counts_as_skipped_not_failed(env: dict[str, Path]) -> None:
+    """目标位已占用（同内容重名 replay）→ skipped 计数，failed 只计 error。
+
+    同 inode 不同名文件不进幂等桶（audit 按源文件名），走到归档才发现
+    dst 存在：这是"内容已在库"的正常跳过，不是失败（第 4 轮真实测试发现）。
+    """
+    source = _make_tree(env["root"], {HIGH_NAME: b"high-content"})
+    first = json.loads(_run_cli("import", source.as_posix())[1])
+    assert first["archived"] == 1 and first["failed"] == 0
+
+    # 同 inode 换名副本：audit 幂等桶不认识，但归档目标位已有同内容文件
+    renamed = source / "Bocchi.the.Rock.S01E01.1080p.renamed.mkv"
+    os.link(source / HIGH_NAME, renamed)
+    second = json.loads(_run_cli("import", source.as_posix())[1])
+    assert second["failed"] == 0
+    assert second["skipped"] == 2  # already-archived + dst-exists-same-content
+    reasons = {Path(str(i["file"])).name: i["reason"] for i in second["items"]}
+    assert reasons["Bocchi.the.Rock.S01E01.1080p.renamed.mkv"] == "dst-exists-same-content"
