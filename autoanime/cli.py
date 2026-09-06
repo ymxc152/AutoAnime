@@ -450,6 +450,7 @@ async def _run_loop_cycle(args: argparse.Namespace) -> int:
             json.dumps(
                 {
                     "reconciled": reconcile.reconciled,
+                    "reconcile_notes": list(reconcile.notes),
                     "download": {
                         "checked": downloads.checked,
                         "completed": downloads.completed,
