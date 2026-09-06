@@ -150,6 +150,29 @@ async def test_pending_confirm_learns_parse_memory(client) -> None:
     assert resp.json()["total"] == 0
 
 
+async def test_pending_confirm_audit_row_counts_as_manual_actor(client) -> None:
+    """回归（R2 验收）：人工 confirm 的 audit 行 actor=manual。
+
+    E1 报表口径 manual_intervention_rate = actor==manual 的 audit 行数 /
+    archived_events；修复前 pending_audit_row 不带 actor（默认 auto），
+    resolved_by=manual 与审计脱节，报表的人工介入率恒 0。
+    """
+    c, _ = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    pending_id = await _seed_pending(
+        c,
+        app_state,
+        "[SubsPlease] Sousou no Frieren - 02 (1080p) [mkv]",
+        {"title": "Sousou no Frieren", "season": 1, "episode": 2, "fansub": "SubsPlease"},
+    )
+    resp = await c.post(f"/api/pending/{pending_id}/confirm", json={"title": "葬送的芙莉莲"})
+    assert resp.status_code == 200, resp.text
+    rows = await app_state.storage.list(AuditLog)
+    pending_rows = [row for row in rows if row.action == "pending_confirm"]
+    assert len(pending_rows) == 1
+    assert pending_rows[0].actor == Actor.MANUAL
+
+
 async def test_pending_confirm_falls_back_to_context_draft(client) -> None:
     c, _ = client
     app_state = c._transport.app.state  # type: ignore[attr-defined]
