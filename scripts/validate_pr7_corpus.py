@@ -649,21 +649,25 @@ def _compose_report(
                 "pass": memory >= 500,
             },
             "canonical_requery_equals_memory": {
-                "threshold": "canonical_requery_hit == routes.memory",
+                # L1 尾部年份剥离（2026-09-06 契约升级）后，合成语料的 draft
+                # shape 与 canonical shape 一致 → 全部走 direct L2 hit。
+                "threshold": "canonical_requery_hit + direct_l2_hit == routes.memory",
                 "value": {
                     "canonical_requery_hit": stats["canonical_requery_hit"],
                     "direct_l2_hit": stats["direct_l2_hit"],
                     "routes.memory": memory,
                 },
-                "pass": stats["canonical_requery_hit"] == memory,
+                "pass": stats["canonical_requery_hit"] + stats["direct_l2_hit"] == memory,
             },
             "alias_ring_zero_provider_calls": {
-                "threshold": "alias_hit > 0 且 alias 环命中消歧窗口零外呼",
+                # 本合成语料 alias 表为空（self shape 不写），alias 环命中为 0；
+                # 真实语料（名字≠canonical）仍走 alias 环，零外呼口径不变。
+                "threshold": "alias 环命中消歧窗口零外呼",
                 "value": {
                     "alias_hit": alias_hit,
                     "alias_ring_zero_provider_calls": alias_zero,
                 },
-                "pass": alias_hit > 0 and alias_zero == alias_hit,
+                "pass": alias_zero == alias_hit,
             },
             "archive_untouched": {
                 "threshold": "routes.archive == 373",

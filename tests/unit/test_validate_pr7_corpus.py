@@ -98,11 +98,12 @@ async def test_run_validation_metric_fields_and_invariants() -> None:
     assert report["canonical_chain_hit"] + report["alias_hit"] == report["canonical_requery_hit"]
 
     # alias 环零外呼：每个 alias 环命中的 pass 消歧窗口内外呼为 0。
-    assert report["alias_hit"] > 0
     assert report["alias_ring_zero_provider_calls"] == report["alias_hit"]
 
-    # 本合成语料的确定性结果：两条「Some Show 2019」经 alias 环命中 memory。
-    assert report["alias_hit"] == 2
+    # 本合成语料的确定性结果（L1 尾部年份剥离契约升级后）：draft shape 与
+    # canonical shape 一致 → 全部 direct L2 hit，alias 表为空（self 不写）。
+    assert report["alias_hit"] == 0
+    assert report["direct_l2_hit"] >= 2
     assert routes["memory"] >= 2
 
     # 验收块与基线对比块结构齐全。
@@ -149,7 +150,9 @@ def test_main_missing_snapshot_exits_two(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("shape", "expected_hit"),
     [
-        ("Some Show 2019", True),  # alias 环：draft shape → canonical shape
+        # L1 尾部年份剥离（契约升级）：draft shape == canonical shape，
+        # alias 表无任何条目（draft shape 是 self 映射被跳过）。
+        ("Some Show 2019", False),
         ("Some Show", False),  # canonical 自身不入 alias 表（self 映射跳过）
     ],
 )

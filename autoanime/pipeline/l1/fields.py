@@ -22,8 +22,14 @@ _NON_FANSUB_RE = re.compile(
     r"(?:4320|2160|1440|1080|720|480|360)p"
     r"|x26[45]|H\.?26[45]|HEVC|AVC|Hi10P?|\d{1,2}bit"
     r"|WEB-?DL|WEBRip|Blu-?ray|BDRip|DVDRip|Remux|HDTV"
+    r"|DD[P]?2\.0|E-?AC-?3|Atmos|TrueHD"
+    # 版本噪声（"TV版&无修版"等）是发布版本标记，不是字幕组名（F01 契约）。
+    r"|TV版|无修版?|未删减|无删节|修正版|高清修复|熟肉|精校"
     r"|B-Global|Baha|Bahamut|friDay|AT-X|BiliBili|Crunchyroll|FunTV|AI-Raws"
-    r"|ASS|ASSx2|AAC|FLAC|MP3|MP4|MKV|AV1|VSR|10bit|8bit|简体|繁体|简日|繁日|内嵌|内封|无字幕|chinese|japanese",
+    r"|ASS|ASSx2|AAC|FLAC|MP3|MP4|MKV|AV1|VSR|10bit|8bit|简体|繁体|简日|繁日|内嵌|内封|无字幕|chinese|japanese"
+    # 字幕语言组合标签的开放形态（简／繁、简&繁、简日双语…）——用模式覆盖，
+    # 不逐字枚举（F01 契约：这类标签不是字幕组名）。
+    r"|[简簡].{0,2}[繁日體]|双语|雙語|中字|外挂|外掛",
     re.IGNORECASE,
 )
 

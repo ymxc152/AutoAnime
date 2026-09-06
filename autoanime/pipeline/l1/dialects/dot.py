@@ -23,7 +23,12 @@ from dataclasses import replace
 
 from autoanime.core.enums import Confidence
 from autoanime.core.interfaces import ParseContext, ParseResult, RawName
-from autoanime.pipeline.l1.anchors import AnchorKind, AnchorSpan, find_anchors
+from autoanime.pipeline.l1.anchors import (
+    AnchorKind,
+    AnchorSpan,
+    find_anchors,
+    find_anchors_of_kind,
+)
 from autoanime.pipeline.l1.anitopy_adapter import parse_with_anitopy
 from autoanime.pipeline.l1.confidence import base_level, downgrade, missing_fields_for
 from autoanime.pipeline.l1.context import (
@@ -119,6 +124,14 @@ def _parse_text(text: str) -> L1Draft | None:
     )
 
 
+# 尾部 release year（"…Naru.2026.S02"→title 不含年份）；仅当剥离后标题
+# 仍有 ≥2 个词时才剥，避免吃掉标题本身以年份结尾的番（如「1983」）。
+_TRAILING_YEAR_RE = re.compile(r"\s+(?:19|20)\d{2}$")
+
+# "编码-组名"尾巴（".DDP2.0-UBWEB"）：组名取最后一个 "-" 之后的部分。
+_GROUP_SUFFIX_RE = re.compile(r"-(?P<group>[^-]+)$")
+
+
 def _structural_spans(base: str) -> list[AnchorSpan]:
     spans = [span for span in find_anchors(base) if span.kind is not AnchorKind.BRACKET]
     spans.extend(
@@ -128,9 +141,29 @@ def _structural_spans(base: str) -> list[AnchorSpan]:
     return sorted(spans, key=lambda span: (span.start, span.end))
 
 
+def _title_region_start(base: str, spans: list[AnchorSpan]) -> int:
+    """title region 起点：前缀 BRACKET（中式「[字幕组/季名] 包名」形态）之后。
+
+    BRACKET 内容已由 fansub/season 通道消费（extract_fansub / 季标记降档），
+    title 从最后一个前缀 bracket 之后开始，不再携带 "[…]" 残段。
+    """
+    limit = spans[0].start if spans else len(base)
+    end = 0
+    for span in find_anchors_of_kind(base, AnchorKind.BRACKET):
+        if span.end <= limit:
+            end = max(end, span.end)
+    return end
+
+
 def _title_from(base: str, spans: list[AnchorSpan]) -> str:
-    region = base[: spans[0].start] if spans else base
-    return separators_to_spaces(region.strip(" .-_"))
+    region = base[_title_region_start(base, spans) : spans[0].start if spans else len(base)]
+    title = separators_to_spaces(region.strip(" .-_"))
+    # 尾部年份护栏：剥后仍 ≥2 词才生效——标题本身以年份结尾的番（如
+    # 「1983」单词名）不受影响。
+    stripped = _TRAILING_YEAR_RE.sub("", title)
+    if stripped != title and len(stripped.split()) >= 2:
+        title = stripped
+    return title
 
 
 def _title_ambiguity(base: str, spans: list[AnchorSpan]) -> tuple[bool, bool]:
@@ -147,11 +180,25 @@ def _title_ambiguity(base: str, spans: list[AnchorSpan]) -> tuple[bool, bool]:
 
 def _fansub_from(base: str, spans: list[AnchorSpan]) -> str | None:
     tail = base[max(span.end for span in spans) :].lstrip(" -") if spans else ""
-    # A structural anchor may sit inside a bracket group ("[H264 8bit 1080P]"):
-    # the tail then starts with bracket residue, which is not a fansub shape.
-    stripped = tail.strip("[]【】") if tail else ""
-    if stripped and is_likely_fansub(stripped):
+    # tail 起点落在某个 BRACKET 内部（"[AAC AVC][CHT]" 的 AAC AVC 之后）：
+    # tail 是 bracket 残渣，剥完字符再放行会产出 "[CHT]"→"CHT" 这类标签。
+    # 此时只有 "编码-组名" 末段（不含 bracket 的后半截）与 extract_fansub
+    # 两条路可走。
+    tail_start = max(span.end for span in spans) if spans else 0
+    tail_in_bracket = any(
+        span.start < tail_start < span.end
+        for span in find_anchors_of_kind(base, AnchorKind.BRACKET)
+    )
+    stripped = tail.strip("[]【】.-_") if tail else ""
+    if not tail_in_bracket and stripped and is_likely_fansub(stripped):
         return stripped
+    # "编码-组名"尾巴（".DDP2.0-UBWEB"）：末段是组名候选（不含 bracket 残渣）。
+    if not tail_in_bracket and stripped:
+        match = _GROUP_SUFFIX_RE.search(stripped)
+        if match is not None:
+            group = match.group("group").strip()
+            if group and is_likely_fansub(group):
+                return group
     return extract_fansub(base)
 
 
