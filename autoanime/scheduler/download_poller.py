@@ -118,6 +118,11 @@ class DownloadPoller:
         report: DownloadPollReport,
         files: list[dict[str, object]] | None = None,
     ) -> None:
+        # 完成可能先于首次在途采样（小种子/快速下载在两次 poll 之间已完成）：
+        # release 仍处于 picked 时先补 picked → downloading 一跳（状态机不
+        # 允许 picked → completed 直达），否则该任务永远卡死在 picked。
+        if self._release_status(release) is ReleaseStatus.PICKED:
+            await self._store.transition_release(release.id, ReleaseStatus.DOWNLOADING, now=now)
         await self._store.transition_release(release.id, ReleaseStatus.COMPLETED, now=now)
         episode_id = release.episode_id
         if episode_id is not None:
