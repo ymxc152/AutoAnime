@@ -21,10 +21,10 @@ Lookup order and gating (PR4 contract decisions):
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from autoanime.core.enums import MemoryStatus
@@ -173,6 +173,19 @@ class StorageMemoryStore:
         # PR7 M2b: 透传 title_aliases 读侧，否则 orchestrator 的 alias 环
         # 鸭子类型探测失败、生产装配下静默退化为参考链路径。
         return await self._storage.find_alias_key(title_shape_norm)
+
+    async def find_alias_row(
+        self, title_shape_norm: str
+    ) -> tuple[str, str | None] | None:
+        # A1'（拍板）：带 source 的 alias 读侧透传——manual 行触发确认名
+        # 覆盖；缺席时 orchestrator 退回 find_alias_key（不覆盖）。
+        row_finder = getattr(self._storage, "find_alias_row", None)
+        if not callable(row_finder):
+            return None
+        row_lookup = cast(
+            "Callable[[str], Awaitable[tuple[str, str | None] | None]]", row_finder
+        )
+        return await row_lookup(title_shape_norm)
 
     async def record_hit(
         self, parse_memory: Any, *, operation_id: str | None = None

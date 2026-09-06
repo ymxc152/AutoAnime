@@ -257,9 +257,10 @@ async def test_pending_correct_alias_backfill_via_fake_reference_chain(client, m
     }
     assert set(reference_targets.values()) == {"sousou no frieren"}
     assert "葬送的芙莉莲" in reference_targets  # 查询形状本身纳入映射
-    # R3 落地：L1 草稿形状（LocalRecognizer 重放 "[X] Frieren - 01 [1080p]"）
-    # 映射到确认标题形状——兄弟集经 alias 读侧零外呼命中记忆
-    assert by_shape.get("frieren") == "葬送的芙莉莲"
+    # R3 落地 + B1（拍板）：L1 草稿形状映射到**权威名形状**（confirm 时经
+    # 参考源归一，所有形状收敛到单一 canonical）——兄弟集经 alias 读侧
+    # 零外呼命中记忆
+    assert by_shape.get("frieren") == "sousou no frieren"
 
 
 async def test_pending_confirm_after_bypass_writes_nothing(client) -> None:

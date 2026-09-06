@@ -185,6 +185,22 @@ class SqliteStorage:
             row = await session.get(TitleAlias, title_shape_norm)
             return row.canonical_shape if row is not None else None
 
+    async def find_alias_row(
+        self, title_shape_norm: str
+    ) -> tuple[str, str | None] | None:
+        """带 source 的 alias 读侧（A1' 确认名覆盖用）。
+
+        返回 ``(canonical_shape, source)``；source 标记该映射是谁写的
+        （``manual`` = 用户 confirm 时的草稿形状映射 / ``bangumi`` 等 =
+        参考源回填）。orchestrator 仅对 ``manual`` 行触发确认名覆盖——
+        覆盖必须可追溯到用户确认过的事实。
+        """
+        async with self._session_factory() as session:
+            row = await session.get(TitleAlias, title_shape_norm)
+            if row is None:
+                return None
+            return (row.canonical_shape, row.source)
+
     async def put_alias_map(self, mapping: dict[str, str], source: str) -> None:
         """幂等 upsert 一批「alias shape → canonical shape」映射（PR7 M3）。
 

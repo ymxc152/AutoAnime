@@ -422,10 +422,15 @@ class Orchestrator:
         # Link 1 (PR7 M2b): the alias table -- pure DB read, no network. The
         # store carries the narrow ``find_alias_key`` extension (PR7 M3);
         # absent on fakes or failing, the link is silently skipped.
-        canonical_shape = await self._alias_canonical_shape(store, shape)
-        if canonical_shape is not None:
+        # A1'（拍板）：source=manual 的 alias 行（用户 confirm 时写下的
+        # 「草稿形状 → 确认名」映射）命中时，确认名覆盖 L1 title——回放
+        # 用户已确认的事实，不是猜测；参考源回填行仍维持只补缺语义。
+        canonical = await self._alias_canonical_shape(store, shape)
+        if canonical is not None:
+            canonical_shape, alias_source = canonical
             outcome = await self._canonical_memory_hit(
-                raw, result, canonical_shape, context, operation_id, store
+                raw, result, canonical_shape, context, operation_id, store,
+                override_title=(alias_source == "manual"),
             )
             if outcome is not None:
                 return outcome
@@ -446,13 +451,25 @@ class Orchestrator:
 
     async def _alias_canonical_shape(
         self, store: MemoryStore, title_shape: str
-    ) -> str | None:
-        """The alias read side (PR7 M2b): shape -> canonical shape or ``None``.
+    ) -> tuple[str, str | None] | None:
+        """The alias read side (PR7 M2b): shape -> (canonical shape, source).
 
-        ``find_alias_key`` is duck-typed off the store (the ``MemoryStore``
-        protocol stays PR4-narrow); a missing method or a failing query is
-        logged and treated as a miss, never an error.
+        ``find_alias_row``（带 source 的 duck-typed 扩展）优先；无该方法的
+        store 退回窄口径 ``find_alias_key``（source 未知，不触发确认名覆盖）。
+        A missing method or a failing query is logged and treated as a miss,
+        never an error.
         """
+        row_finder = getattr(store, "find_alias_row", None)
+        if callable(row_finder):
+            row_lookup = cast("Callable[[str], Awaitable[tuple[str, str | None] | None]]", row_finder)
+            try:
+                found = await row_lookup(title_shape)
+            except Exception:
+                logger.warning(
+                    "alias lookup failed; continuing without alias", exc_info=True
+                )
+                return None
+            return found if found else None
         finder = getattr(store, "find_alias_key", None)
         if not callable(finder):
             return None
@@ -466,7 +483,7 @@ class Orchestrator:
                 "alias lookup failed; continuing without alias", exc_info=True
             )
             return None
-        return found if found else None
+        return (found, None) if found else None
 
     async def _canonical_memory_hit(
         self,
@@ -476,6 +493,8 @@ class Orchestrator:
         context: ParseContext | None,
         operation_id: str,
         store: MemoryStore,
+        *,
+        override_title: bool = False,
     ) -> _L2Stage | None:
         """Re-query L2 under a canonical title and adopt a hit (PR7 M2 semantics).
 
@@ -485,6 +504,10 @@ class Orchestrator:
         any failure) returns ``None`` so the caller falls through. E1: the
         fused outcome is returned as an ``_L2Stage`` (l2_applied), with the
         L3 segment left to the caller -- the batch entry needs the stage.
+
+        ``override_title``（A1'，拍板）：``True`` 时 canonical 记忆命中后把
+        title 换成记忆行的确认名原文（用户 confirm 过的名字），不再沿用
+        L1 草稿名；evidence 记 ``memory``。仅 manual alias 链传入。
         """
         try:
             canonical_draft = replace(result, title=canonical_title)
@@ -495,6 +518,14 @@ class Orchestrator:
             return None
         try:
             enhanced = apply_memory_hit(result, match.hit)
+            if override_title:
+                confirmed_title = match.hit.title
+                if confirmed_title:
+                    enhanced = replace(
+                        enhanced,
+                        title=confirmed_title,
+                        evidence={**enhanced.evidence, "title": "memory"},
+                    )
             await store.record_hit(match.memory, operation_id=operation_id)
         except Exception:
             return None
