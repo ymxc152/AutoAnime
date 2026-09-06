@@ -887,7 +887,8 @@ async def _import(args: argparse.Namespace) -> int:
     (batching=True)``（E1 库存入口；expected=None——D13 手动路径）。--dry-run
     只输出将发生的动作不落库不归档。输出 JSON 汇总：
     total（目录内全部文件）/scanned（视频文件）/routes（路由分布）/
-    archived/pending/failed（skip+error）/items（逐文件明细）。
+    archived/pending/failed（skip+error）/skipped（已归档或已入队——重跑
+    幂等跳过，R2 验收）/items（逐文件明细）。
     """
     root = Path(args.directory)
     if not root.is_dir():
@@ -907,7 +908,7 @@ async def _import(args: argparse.Namespace) -> int:
     governance = MemoryGovernance(storage)
     routes: Counter[str] = Counter()
     items: list[dict[str, object]] = []
-    archived = pending = failed = 0
+    archived = pending = failed = skipped = 0
     if not args.dry_run:
         # 归档目标根先就位：plan_transfer 的同盘判定需要 stat 到 library 根，
         # 缺失时会把本可 hardlink 的归档静默降级为 copy（D9 hardlink 优先）。
@@ -922,7 +923,23 @@ async def _import(args: argparse.Namespace) -> int:
             except Exception as exc:  # noqa: BLE001 -- 存储不可用给出可操作提示
                 print(f"import: storage unavailable ({type(exc).__name__}); run 'autoanime init-db'")
                 return 1
-        for parent, files in _group_by_parent(videos):
+        # 重跑幂等（R2 验收）：已归档（audit episode.organized）或已在等人工
+        # （未决 pending 行）的文件先于识别跳过——不重复 hardlink/audit/pending，
+        # 也不再烧 LLM。key 都是源文件名（raw_name，与 audit instruction 同口径）。
+        handled_names: dict[str, str] = {}
+        for name in await store.archived_file_names():
+            handled_names[name] = "already-archived"
+        for name in await store.open_pending_raw_names():
+            handled_names.setdefault(name, "already-pending")
+        fresh: list[Path] = []
+        for file in videos:
+            reason = handled_names.get(file.name)
+            if reason is None:
+                fresh.append(file)
+                continue
+            skipped += 1
+            items.append({"file": str(file), "route": None, "action": "skip", "reason": reason})
+        for parent, files in _group_by_parent(fresh):
             raws = [
                 RawName(name=file.name, folder=parent.name, parent_path=str(parent))
                 for file in files
@@ -977,6 +994,7 @@ async def _import(args: argparse.Namespace) -> int:
                 "routes": dict(sorted(routes.items())),
                 "archived": archived,
                 "pending": pending,
+                "skipped": skipped,
                 "failed": failed,
                 "items": items,
             },

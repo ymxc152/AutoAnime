@@ -27,6 +27,7 @@ from autoanime.core.enums import (
     SeasonState,
 )
 from autoanime.core.models import (
+    AuditLog,
     Episode,
     PendingQueue,
     ReleaseRecord,
@@ -353,6 +354,39 @@ class LoopStore:
                     )
                 ).scalar_one()
             )
+
+    async def archived_file_names(self) -> frozenset[str]:
+        """audit 簿记里 ``episode.organized`` 行登记的源文件名集合（幂等读侧）。
+
+        E4 archive 与 CLI import 写同一口径的 instruction（R1 验收确认），
+        ``instruction["file"]`` 即源文件名——import 重跑据此跳过已归档文件
+        （R2 验收：同目录连跑两遍，第二遍零 hardlink/audit/pending）。
+        """
+        async with self._storage.transaction() as session:
+            rows = (
+                await session.execute(
+                    select(AuditLog).where(AuditLog.action == "episode.organized")
+                )
+            ).scalars().all()
+        return frozenset(
+            str(row.instruction["file"]) for row in rows if "file" in row.instruction
+        )
+
+    async def open_pending_raw_names(self) -> frozenset[str]:
+        """仍未决 pending 行的 raw_name 集合（幂等读侧，不区分 stage）。
+
+        同名文件已在等人工处理时重跑 import 只会重复入队 + 重复烧 LLM，
+        按已存在跳过；web 确认/纠正把行置 resolved 后该名字自然放行。
+        """
+        async with self._storage.transaction() as session:
+            rows = (
+                await session.execute(
+                    select(PendingQueue.raw_name).where(
+                        PendingQueue.status == PendingStatus.PENDING.value
+                    )
+                )
+            ).scalars().all()
+        return frozenset(rows)
 
     async def list_pending(
         self, *, status: str | None = None, limit: int = 50, offset: int = 0
