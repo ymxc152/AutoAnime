@@ -61,6 +61,15 @@ logger = logging.getLogger(__name__)
 __all__ = ["LlmFallbackRecognizer"]
 
 
+def _transport_exc_desc(exc: Exception) -> str:
+    """transport 失败的日志描述：``LlmTransportError`` 消息已按脱敏设计
+    （只含异常类型与 origin），直接输出便于区分超时/额度/网络类故障；
+    其他未知异常保守只打类型名，防未脱敏内容进日志。"""
+    from autoanime.providers.llm import LlmTransportError
+
+    return str(exc) if isinstance(exc, LlmTransportError) else type(exc).__name__
+
+
 class LlmFallbackRecognizer:
     """L3Recognizer 契约的 LLM fallback 实现。
 
@@ -160,7 +169,7 @@ class LlmFallbackRecognizer:
                 if transport_retry_allowed(failed_attempts, max_retries=self._max_retries):
                     logger.debug(
                         "llm transport failed (%s), retrying, op=%s",
-                        type(exc).__name__,
+                        _transport_exc_desc(exc),
                         operation_id,
                     )
                     continue
@@ -168,7 +177,7 @@ class LlmFallbackRecognizer:
                 logger.warning(
                     "llm transport unavailable after %d attempts (%s), op=%s",
                     failed_attempts,
-                    type(exc).__name__,
+                    _transport_exc_desc(exc),
                     operation_id,
                 )
                 return None
@@ -250,14 +259,14 @@ class LlmFallbackRecognizer:
                 if transport_retry_allowed(attempts, max_retries=self._max_retries):
                     logger.debug(
                         "llm batch transport failed (%s), retrying, op=%s",
-                        type(exc).__name__,
+                        _transport_exc_desc(exc),
                         operation_id,
                     )
                     continue
                 logger.warning(
                     "llm batch transport unavailable after %d attempts (%s), op=%s",
                     attempts,
-                    type(exc).__name__,
+                    _transport_exc_desc(exc),
                     operation_id,
                 )
                 # 批量调用不可用：整批回落单文件路径（每项有自己的重试语义）。

@@ -241,6 +241,49 @@ async def test_recognizer_gives_up_after_retry_budget() -> None:
     assert store.puts == []
 
 
+async def test_transport_failure_log_carries_sanitized_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """transport 失败日志：``LlmTransportError`` 输出脱敏消息（可区分
+    超时/额度/网络），未知异常只打类型名。"""
+    boom = LlmTransportError("llm request failed (ReadTimeout) at https://example.invalid")
+    transport = ScriptedTransport([boom, boom])
+    store = MemoryCacheStore()
+    recognizer = _make_recognizer()
+
+    with caplog.at_level("WARNING", logger="autoanime.pipeline.l3_llm"):
+        result = await recognizer.enhance(
+            RawName(name="Some.Release.S01E01.mkv"), None, None, transport, store
+        )
+
+    assert result is None
+    warnings = [r for r in caplog.records if "transport unavailable" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "ReadTimeout" in warnings[0].getMessage()
+    assert "example.invalid" in warnings[0].getMessage()
+
+
+async def test_transport_failure_log_masks_unknown_exception_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """非 ``LlmTransportError`` 的未知异常：日志只打类型名，不透传消息。"""
+    boom = RuntimeError("raw secret detail must not leak")
+    transport = ScriptedTransport([boom, boom])
+    store = MemoryCacheStore()
+    recognizer = _make_recognizer()
+
+    with caplog.at_level("WARNING", logger="autoanime.pipeline.l3_llm"):
+        result = await recognizer.enhance(
+            RawName(name="Some.Release.S01E01.mkv"), None, None, transport, store
+        )
+
+    assert result is None
+    warnings = [r for r in caplog.records if "transport unavailable" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "RuntimeError" in warnings[0].getMessage()
+    assert "raw secret detail" not in warnings[0].getMessage()
+
+
 async def test_recognizer_dirty_cache_falls_through_to_real_call() -> None:
     """脏缓存（响应非法）按 miss 继续真实调用，成功后覆盖写回。"""
     raw = RawName(name="Dirty.Cache.Release.S01E02.mkv")
