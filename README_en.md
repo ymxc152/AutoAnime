@@ -10,7 +10,7 @@ English | [简体中文](./README.md)
 
 ## Features (all verified against real data)
 
-- **Three-tier recognition pipeline**: L1 local rules (deterministic, zero network) → L2 parse memory (confirmed naming patterns hit directly) → L3 LLM recognition (optional) + reference-source disambiguation. An arbiter rules by confidence: HIGH auto-archive / MEDIUM manual confirm / LOW to the pending queue.
+- **Three-tier recognition pipeline**: L1 local rules (deterministic, zero network) → L2 parse memory (confirmed naming patterns hit directly) → L3 LLM recognition (optional) + reference-source disambiguation. An arbiter rules by confidence: a deterministic L1 HIGH goes straight to archiving, while HIGH results that involved memory/LLM still go to the pending queue (errors would be amplified by learning — deliberately conservative); MEDIUM awaits manual confirm, LOW goes to the pending queue.
 - **Mikan RSS subscriptions + gap backfill**: RSS polling → push to downloader → progress reconcile → missing-episode detection and backfill (air-date checks are always computed in JST to avoid false gaps for late-night shows).
 - **Sonarr-compatible naming**: `{Title CN}/Season {SS}/{Title CN} - S{SS}E{EE}.{quality}.mkv` — recognized by Jellyfin / Plex / Emby with zero config; subtitles are renamed along.
 - **Hardlink seed preservation**: the download-side original stays untouched for seeding; the archive side is a hardlink atomically renamed; upgrade replacement only unlinks the archive-side name, seeding is unaffected.
