@@ -198,6 +198,7 @@ export const strings = {
   pipeline: {
     title: '管线',
     subtitle: '三级识别 → 仲裁 → 归档,实时文件流',
+    flowSteps: '流程步骤',
     node: {
       input: '输入',
       l1: 'L1 本地解析',

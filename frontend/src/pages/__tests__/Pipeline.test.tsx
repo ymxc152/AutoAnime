@@ -111,4 +111,13 @@ describe('PipelinePage', () => {
       vi.useRealTimers()
     }
   })
+  it('移动端降级:渲染纵向流程步骤列表(7 个节点)', async () => {
+    renderPage(<PipelinePage />)
+    expect(await screen.findByText('流程步骤')).toBeInTheDocument()
+    // 步骤列表的节点标题(NODE_META 7 个)
+    expect(screen.getAllByText('L1 本地解析').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('仲裁').length).toBeGreaterThan(0)
+    // 步骤列表传 li 序号 1..7(序号徽标)
+    expect(screen.getByText('7')).toBeInTheDocument()
+  })
 })
