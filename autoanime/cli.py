@@ -36,7 +36,7 @@ from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
-from autoanime.organize import mover
+from autoanime.organize import confirm_archive, mover
 from autoanime.organize.naming import NamingInput, relative_path
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l3 import ReferenceChain
@@ -305,6 +305,56 @@ def _confirm_reference_lookup(
     )
 
 
+async def _archive_confirmed_file(
+    confirmed: ParseResult,
+    *,
+    raw_name: str,
+    resolved_rows: Sequence[Any],
+    settings: Settings,
+    governance: MemoryGovernance,
+) -> confirm_archive.ArchiveOutcome:
+    """确认结果落归档（confirm 归档通路，CLI/WebUI 共用实现）。
+
+    文件路径从 resolved pending 行 context 的 parent_path 还原；无行或
+    文件已不在位时如实记原因（学习不受影响）。审计行与 import 同口径
+    （episode.organized，instruction["file"]=源文件名）。
+    """
+    file_path = _confirmed_file_path(raw_name, resolved_rows)
+    if file_path is None:
+        return confirm_archive.ArchiveOutcome(archived=False, reason="no-source-file")
+    outcome = await asyncio.to_thread(
+        confirm_archive.archive_confirmed_release,
+        file_path=file_path,
+        result=confirmed,
+        settings=settings,
+    )
+    try:
+        await governance.record_audit(
+            operation_id=uuid4().hex,
+            entity="episode",
+            action="episode.organized",
+            instruction=confirm_archive.archive_audit_instruction(
+                file_path=file_path, result=confirmed, outcome=outcome
+            ),
+            reverse={},
+        )
+    except Exception:  # noqa: BLE001 -- 审计失败不阻塞归档（与 ArchiveService 同口径）
+        logger.warning("confirm archive audit write failed", exc_info=True)
+    return outcome
+
+
+def _confirmed_file_path(
+    raw_name: str, resolved_rows: Sequence[Any]
+) -> Path | None:
+    """从 resolved pending 行还原源文件路径；无 parent_path 上下文返回 None。"""
+
+    for row in resolved_rows:
+        parent = row.context.get("parent_path") if isinstance(row.context, dict) else None
+        if parent:
+            return Path(str(parent)) / raw_name
+    return None
+
+
 async def _confirm(args: argparse.Namespace) -> int:
     draft = await LocalRecognizer().parse(RawName(name=args.name))
     title = args.title or (draft.title if draft else None)
@@ -342,12 +392,20 @@ async def _confirm(args: argparse.Namespace) -> int:
         # 确认收尾（与 WebUI confirm 同语义）：raw_name 匹配的未决 pending 行
         # 一并 resolve——否则 CLI 确认后队列不减，重跑 import 又被
         # already-pending 幂等挡住（第 4 轮真实测试发现）。
-        resolved_count = await LoopStore(storage).resolve_open_pendings_by_raw_name(
+        governance = MemoryGovernance(storage)
+        resolved_rows = await LoopStore(storage).resolve_open_pendings_by_raw_name(
             args.name,
             resolution={"action": "confirm", "confirmed_title": title},
             audit_row_for=lambda row: pending_audit_row(
                 pending=row, action=ACTION_PENDING_CONFIRM, confirmed=confirmed
             ),
+        )
+        # 确认归档通路（报告 §6.1 v2 首要补齐项）：确认结果直接 hardlink
+        # 入库——不再需要「确认后删除重导」。文件路径从 resolved 行的
+        # parent_path 还原；无 pending 行（纯 parse 场景）按现状只学习。
+        archive = await _archive_confirmed_file(
+            confirmed, raw_name=args.name, resolved_rows=resolved_rows,
+            settings=settings, governance=governance,
         )
     if outcome.bypassed:
         print(json.dumps({"bypassed": True, "entries": []}, ensure_ascii=False))
@@ -356,7 +414,8 @@ async def _confirm(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "bypassed": False,
-                "resolved_pending": resolved_count,
+                "resolved_pending": len(resolved_rows),
+                "archive": archive.as_dict(),
                 "entries": [
                     {
                         "key_level": entry.key_level,

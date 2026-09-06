@@ -83,6 +83,14 @@ def test_confirm_resolves_matching_pending_row(env: dict[str, Path]) -> None:
     assert rows[0][2] is not None and "葬送的芙莉莲" in str(rows[0][2])
     assert rows[0][3] == "manual"
 
+    # 确认归档通路：确认结果直接 hardlink 入库（D17 命名），不再需要
+    # 「确认后删除重导」（报告 §6.1 v2 首要补齐项）
+    # 确认结果无画质信息 → 命名 quality 槽取默认 SD（naming 契约降级）
+    archived = env["library"] / "葬送的芙莉莲" / "Season 01" / "葬送的芙莉莲 - S01E01.SD.mkv"
+    assert archived.exists()
+    src = env["root"] / "downloads" / PENDING_NAME
+    assert src.exists()  # D21：下载原件保留（hardlink 归档）
+
     # 审计行（manual_intervention_rate 的数据源）同步落库
     audits = _pending_audit_rows(env["db"])
     assert audits == [("pending_confirm", "manual")]
@@ -108,20 +116,8 @@ def test_confirm_then_reimport_reenters_pipeline_with_learned_title(
     code, out = _run_cli("import", downloads.as_posix())
     assert code == 0
     payload = json.loads(out)
-    # 不再是 already-pending 跳过：走完整管线并重新入队
+    # 确认已归档：重导被 already-archived 幂等桶放行（audit 同口径）
     item = payload["items"][0]
-    assert item["action"] == "pending"
-    assert item["reason"] != "already-pending"
-    # 学习生效：canonical 消歧链（draft shape → alias → 记忆）命中，
-    # route=memory 且 season 从记忆补齐。title 保留 L1 name 证据是
-    # PR4 融合契约（memory 只补缺不覆盖；确认名覆盖策略属待拍板项）。
-    assert item["route"] == "memory"
-    context = json.loads(
-        sqlite3.connect(env["db"])
-        .execute(
-            "SELECT context FROM pending_queue ORDER BY id DESC LIMIT 1"
-        )
-        .fetchone()[0]
-    )
-    assert context["season"] == 1
-    assert context["episode"] == 1
+    assert item["action"] == "skip"
+    assert item["reason"] == "already-archived"
+    assert payload["skipped"] == 1 and payload["failed"] == 0

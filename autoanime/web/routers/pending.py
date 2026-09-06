@@ -7,14 +7,22 @@ parse_memory+alias 部分、``MemoryGovernance.add_bypass`` 负记忆部分）�
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from pathlib import Path
+from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException
 
+from autoanime.config import Settings
 from autoanime.core.enums import MemorySource, PendingStatus, ResolvedBy
 from autoanime.core.events import EventCategory
-from autoanime.core.interfaces import RawName
+from autoanime.core.interfaces import ParseResult, RawName
 from autoanime.core.models import PendingQueue
+from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.store import SqliteStorage
+from autoanime.organize import confirm_archive
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.web.deps import (
     ApiStoreDep,
@@ -22,6 +30,7 @@ from autoanime.web.deps import (
     GovernanceDep,
     PaginationDep,
     ReferenceChainDep,
+    SettingsDep,
     StorageDep,
 )
 from autoanime.web.learning import (
@@ -41,6 +50,58 @@ from autoanime.web.schemas import (
     PendingRejectIn,
     PendingResolveOut,
 )
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/pending", tags=["pending"])
+
+
+async def _archive_after_resolution(
+    row: PendingQueue,
+    confirmed: ParseResult,
+    *,
+    settings: Settings,
+    governance: MemoryGovernance,
+    source: str,
+) -> confirm_archive.ArchiveOutcome:
+    """确认/纠正后的归档通路（报告 §6.1 v2 首要补齐项）。
+
+    以确认结果 hardlink 入库（D17/D18/D9/D21 全套守卫，与 import/E4 同
+    原语）；审计行与 import 同口径（episode.organized），import 重跑的
+    already-archived 幂等桶据此放行。文件路径从 pending 行 context 的
+    ``parent_path`` 还原；无上下文或文件已不在位时如实记原因——学习与
+    resolve 不受影响。归档事件走 ORGANIZE 类别（Pipeline 页实时可见）。
+    """
+    context = row.context if isinstance(row.context, dict) else {}
+    parent = context.get("parent_path")
+    if not parent:
+        return confirm_archive.ArchiveOutcome(archived=False, reason="no-source-file")
+    file_path = Path(str(parent)) / row.raw_name
+    outcome = await asyncio.to_thread(
+        confirm_archive.archive_confirmed_release,
+        file_path=file_path,
+        result=confirmed,
+        settings=settings,
+        source=source,
+    )
+    try:
+        await governance.record_audit(
+            operation_id=uuid4().hex,
+            entity="episode",
+            action="episode.organized",
+            instruction=confirm_archive.archive_audit_instruction(
+                file_path=file_path, result=confirmed, outcome=outcome, source=source
+            ),
+            reverse={},
+        )
+    except Exception:  # noqa: BLE001 -- 审计失败不阻塞归档（与 ArchiveService 同口径）
+        logger.warning("confirm archive audit write failed", exc_info=True)
+    if outcome.archived:
+        logger.info(
+            "pending #%s archived via %s: %s", row.id, source, outcome.dst
+        )
+    return outcome
+
 
 router = APIRouter(prefix="/pending", tags=["pending"])
 
@@ -111,6 +172,8 @@ async def confirm_pending(
     store: ApiStoreDep,
     storage: StorageDep,
     bus: BusDep,
+    governance: GovernanceDep,
+    settings: SettingsDep,
     reference_chain: ReferenceChainDep,
     body: PendingConfirmIn | None = None,
 ) -> PendingResolveOut:
@@ -122,7 +185,14 @@ async def confirm_pending(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     learned, bypassed = await _learn(storage, reference_chain, row=row, confirmed=confirmed)
-    resolution: dict[str, object] = {"action": "confirm", "confirmed_title": confirmed.title}
+    archive = await _archive_after_resolution(
+        row, confirmed, settings=settings, governance=governance, source="confirm"
+    )
+    resolution: dict[str, object] = {
+        "action": "confirm",
+        "confirmed_title": confirmed.title,
+        "archive": archive.as_dict(),
+    }
     audit = await store.resolve_pending(
         pending_id,
         status=PendingStatus.RESOLVED,
@@ -157,6 +227,7 @@ async def correct_pending(
     store: ApiStoreDep,
     storage: StorageDep,
     governance: GovernanceDep,
+    settings: SettingsDep,
     bus: BusDep,
     reference_chain: ReferenceChainDep,
 ) -> PendingResolveOut:
@@ -170,7 +241,14 @@ async def correct_pending(
     learned, bypassed = await _learn(storage, reference_chain, row=row, confirmed=confirmed)
     # 负记忆（5.3）：该 raw_name 的既有 L1/L2 结论已被人工推翻，登记 bypass。
     await governance.add_bypass(row.raw_name, reason=f"webui correct: pending #{pending_id}")
-    resolution: dict[str, object] = {"action": "correct", "confirmed_title": confirmed.title}
+    archive = await _archive_after_resolution(
+        row, confirmed, settings=settings, governance=governance, source="correct"
+    )
+    resolution: dict[str, object] = {
+        "action": "correct",
+        "confirmed_title": confirmed.title,
+        "archive": archive.as_dict(),
+    }
     audit = await store.resolve_pending(
         pending_id,
         status=PendingStatus.RESOLVED,
