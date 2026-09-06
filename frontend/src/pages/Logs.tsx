@@ -126,35 +126,37 @@ function GroupRow({
         {rollbackMessage !== null && (
           <span className="text-xs text-success">{rollbackMessage}</span>
         )}
-        {/* 撤销以该组最新 audit 行(last_audit_id)为准;无可回滚 reverse 时后端回 409。
+        {/* 撤销以该组最新 audit 行(last_audit_id)为准;后端 rollbackable=false 时直接隐藏入口。
             危险操作:先内联二次确认,文案带条数。 */}
-        {confirmRollback ? (
-          <span className="flex items-center gap-1.5">
-            <span className="text-xs text-ink-secondary">
-              {t(strings.logs.rollbackConfirmCount, { n: group.rows })}
+        {group.rollbackable ? (
+          confirmRollback ? (
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs text-ink-secondary">
+                {t(strings.logs.rollbackConfirmCount, { n: group.rows })}
+              </span>
+              <Button
+                size="sm"
+                variant="danger"
+                loading={rollingBack}
+                onClick={() => onRollback(group.last_audit_id)}
+              >
+                {strings.common.confirm}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => onCancelRollback()}>
+                {strings.common.cancel}
+              </Button>
             </span>
+          ) : (
             <Button
               size="sm"
               variant="danger"
-              loading={rollingBack}
-              onClick={() => onRollback(group.last_audit_id)}
+              title={strings.logs.rollbackHint}
+              onClick={onArmRollback}
             >
-              {strings.common.confirm}
+              {strings.common.rollback}
             </Button>
-            <Button size="sm" variant="ghost" onClick={onCancelRollback}>
-              {strings.common.cancel}
-            </Button>
-          </span>
-        ) : (
-          <Button
-            size="sm"
-            variant="danger"
-            title={strings.logs.rollbackHint}
-            onClick={onArmRollback}
-          >
-            {strings.common.rollback}
-          </Button>
-        )}
+          )
+        ) : null}
       </div>
       {expanded && (
         <div className="flex flex-col gap-3 bg-surface-2/60 px-4 py-3 md:pl-10">

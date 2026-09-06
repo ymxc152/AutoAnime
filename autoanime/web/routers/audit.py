@@ -53,6 +53,7 @@ async def list_audit_operations(
                 actions=group.actions,
                 first_audit_id=group.first_audit_id,
                 last_audit_id=group.last_audit_id,
+                rollbackable=group.rollbackable,
             )
             for group in groups
         ],
