@@ -187,7 +187,7 @@ Subscription (Mikan RSS polling)        Import (local directory scan)
 ## Known Limitations (as-is)
 
 - **Rollback file-level inverse operations**: v1 executes inverse operations in the organize domain only; anything else is recorded as `skipped` (never silently dropped).
-- **confirm learns only, does not archive**: `confirm` writes the confirmation into parse memory but does not trigger archiving of that file — the top v2 gap; re-run `import` after confirming.
+- **confirm-and-archive**: `confirm`/`correct` (CLI and WebUI alike) writes the confirmation into parse memory and hardlinks the source file into the library in the same step (D17 naming + D21 seed preservation + D21 target-slot guard); if the file is gone the audit records the reason honestly and learning is unaffected.
 - **Settings are not persisted**: changes in the WebUI Settings page apply to the current process only; after restart, values fall back to `.env` / `autoanime.toml`.
 - **Docker on real hardware**: the compose file has an automated structural self-check (`tests/unit/test_compose.py`); a real `docker compose up` is left for the user's environment.
 

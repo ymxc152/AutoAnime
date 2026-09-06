@@ -186,7 +186,7 @@ docker compose up -d --build   # WebUI 在 http://127.0.0.1:3080
 ## 已知边界（如实）
 
 - **rollback 文件反操作**：v1 仅 organize 域的反操作可执行，其余记录为 `skipped`（不静默丢弃，如实上报）。
-- **confirm 只学习不归档**：`confirm` 把确认结果写入识别记忆，但不会触发该文件的归档/入库——这是 v2 的首要缺口，需在确认后重跑 `import`。
+- **确认即归档**：`confirm`/`correct`（CLI 与 WebUI 一致）在写入识别记忆的同时，以确认结果把源文件 hardlink 入库（D17 命名 + D21 原件保留 + D21 目标位守卫）；文件已不在位时如实记审计原因，学习不受影响。
 - **settings 无持久化表**：WebUI Settings 页的修改只作用于当前进程，重启后回到 `.env` / `autoanime.toml` 的值。
 - **docker 实机验证**：compose 结构有自动化自检（`tests/unit/test_compose.py`），真实 `docker compose up` 留待用户环境执行。
 

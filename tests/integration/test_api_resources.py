@@ -37,6 +37,8 @@ async def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
             monkeypatch.delenv(key, raising=False)
     instance = Settings()
     instance.database_url = f"sqlite+aiosqlite:///{(tmp_path / 'api.db').as_posix()}"
+    # library_path 必须隔离：默认相对路径会把确认归档/导入落进仓库工作目录
+    instance.library_path = tmp_path / "library"
     instance.reference_enabled = False  # 单测离线：alias 回填外呼关闭
     instance.api_sse_heartbeat_s = 0.2
     return instance
@@ -561,3 +563,56 @@ async def test_rollback_of_episode_row_learns_from_file_field(client) -> None:
     assert await governance.is_bypassed(
         "Bleach.S04E02.1080p.DSNP.WEB-DL.AAC2.0.H.264-MWeb.mkv"
     ) is True
+
+
+async def test_pending_confirm_archives_source_file(client) -> None:
+    """确认归档通路（报告 §6.1 v2 首要补齐项）：confirm 以确认结果 hardlink
+    入库（D17 命名 + D21 原件保留），resolution 携带 archive 结果，import
+    重跑被 already-archived 幂等桶放行。"""
+    c, settings = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+
+    # 真实源文件（parent_path 还原路径；库与下载同盘 tmp 内 hardlink 成立）
+    downloads = Path(settings.library_path).parent / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    raw_name = "Frieren.S01E05.Baha.1080p.mkv"
+    src = downloads / raw_name
+    src.write_bytes(b"frieren-e05")
+
+    row = PendingQueue(
+        raw_name=raw_name,
+        context={
+            "title": "Sousou no Frieren",
+            "season": 1,
+            "episode": 5,
+            "segment": "episode",
+            "fansub": "Baha",
+            "parent_path": str(downloads),
+        },
+        stage="import",
+        reason="l3:medium",
+    )
+    await app_state.storage.add(row)
+    assert row.id is not None
+
+    resp = await c.post(
+        f"/api/pending/{row.id}/confirm",
+        json={"title": "葬送的芙莉莲", "season": 1, "episode": 5},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    archive = body["resolution"]["archive"]
+    assert archive["archived"] is True
+    assert archive["strategy"] == "hardlink"
+    assert "葬送的芙莉莲" in archive["dst"]
+
+    # 库文件落位 + 做种原件保留（D21）
+    archived = Path(archive["dst"])
+    assert archived.exists()
+    assert src.exists()
+    assert archived.samefile(src)  # hardlink 同 inode
+
+    # 审计与 import 同口径：episode.organized（instruction["file"]=源文件名）
+    resp = await c.get("/api/audit", params={"action": "episode.organized"})
+    rows = resp.json()["items"]
+    assert any(item["instruction"]["file"] == raw_name for item in rows)
