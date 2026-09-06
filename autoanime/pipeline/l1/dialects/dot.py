@@ -83,6 +83,14 @@ def _parse_text(text: str) -> L1Draft | None:
     spans = _structural_spans(base)
     if not spans:
         return None  # no structural landmark at all: not dialect-A shaped
+    # 全部结构锚点都藏在方括号内部（"[BD] [1080p] [AV1]" 合集形态）：region
+    # 会退化成 bracket 文本（title="1080p"），不是 dot 形态，交其他 dialect。
+    first_in_bracket = any(
+        span.start < spans[0].start < span.end
+        for span in find_anchors_of_kind(base, AnchorKind.BRACKET)
+    )
+    if first_in_bracket:
+        return None
 
     season = extract_season(base)
     episode = extract_episode(base)
