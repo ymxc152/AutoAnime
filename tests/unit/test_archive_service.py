@@ -465,15 +465,16 @@ async def _make_offset_rig(
         quarantine_path=Path("quarantine"),
     )
     governance = MemoryGovernance(storage)
+    bus = BusRecorder()
     service = ArchiveService(
         store,
         Orchestrator(recognizer=ScriptedRecognizer(mapping), l2_enabled=False, audit_sink=governance),
         FakeGateway(content_dir),
         settings=settings,
         governance=governance,
-        bus=BusRecorder(),
+        bus=bus,
     )
-    return Rig(store, storage, service, BusRecorder(), Path("."), season.id, saved, episode)
+    return Rig(store, storage, service, bus, Path("."), season.id, saved, episode)
 
 
 def _random_hash() -> str:
@@ -502,6 +503,14 @@ async def test_mismatch_reattach_when_episode_ids_offset_from_numbers(
     assert e3.file_path is not None and "错位番" in e3.file_path
     refreshed = await rig.storage.get(ReleaseRecord, rig.release.id)
     assert refreshed is not None and refreshed.episode_id == e3.id
+    # R3 实测缺陷回归：期望集（内容已改挂他集）回 MISSING + 缺口事件，
+    # 不停留在无文件的 DOWNLOADED（挡住回补）
+    e1 = await rig.episode_row(1)
+    assert e1.state == EpisodeState.MISSING
+    assert any(
+        event.message == "episode.gap" and event.payload.get("reason") == "mismatch_reattach"
+        for event in rig.bus.events
+    )
 
 
 async def test_mismatch_budget_counts_expected_episode_releases_when_ids_offset(

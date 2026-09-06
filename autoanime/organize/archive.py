@@ -205,6 +205,7 @@ class ArchiveService:
             self._state(target) is EpisodeState.MISSING
         ):
             # A 语义（文件级改挂）：同番其他集仍缺 → 直接归档到该集，零重下
+            expected_episode_id = release.episode_id
             await self._archive_episode(
                 video, release=release,
                 episode=target, season=season, series=series,
@@ -224,11 +225,45 @@ class ArchiveService:
                     "to_episode": target.number,
                 },
             )
+            # 期望集解除占用（R3 验收实测缺陷）：其下载内容已改挂他集，
+            # 原集若停留在 DOWNLOADED 是无文件谎报，且该状态会挡住回补
+            # 重下——回 MISSING 等 RSS 自然命中（与 C 分支回缺同语义）。
+            await self._release_expected_episode(expected_episode_id, season)
             return
         await self._handle_mismatch(
             video, release=release, expected=expected, season=season,
             series=series, result=result, title_match=title_match,
             target=target, report=report,
+        )
+
+    async def _release_expected_episode(self, episode_id: int | None, season: Season) -> None:
+        """改挂后把原期望集回 MISSING（DOWNLOADED → MISSING 合法转移，D14）。
+
+        仅在原集确处 DOWNLOADED（下载完成但内容已改挂他集）时回缺并发
+        episode.gap；其余状态（MISSING/ORGANIZED 等）不动，转移被拒时记
+        note 不 crash。
+        """
+        if episode_id is None:
+            return
+        context_row = await self._store.episode_context(episode_id)
+        if context_row is None:
+            return
+        episode = context_row[0]
+        if self._state(episode) is not EpisodeState.DOWNLOADED:
+            return
+        try:
+            await self._store.transition_episode(episode.id, EpisodeState.MISSING)
+        except TransitionError as exc:
+            logger.warning("expected episode cannot return to MISSING: %s", exc)
+            return
+        await self._publish(
+            EventCategory.NOTIFY,
+            "episode.gap",
+            {
+                "season_id": season.id,
+                "gap": [episode.number],
+                "reason": "mismatch_reattach",
+            },
         )
 
     async def _route_by_episode_state(
@@ -524,6 +559,7 @@ class ArchiveService:
                     "branch": decision.branch,
                 },
             )
+            await self._release_expected_episode(expected_episode_id, season)
             return
         # B / C：隔离
         quarantine_dir = Path(self._settings.quarantine_path) / release.torrent_hash[:12]
