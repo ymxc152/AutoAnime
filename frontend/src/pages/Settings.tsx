@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
-import { api, ApiError } from '../api'
+import { api, ApiError, getApiToken, setApiToken } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings } from '../strings'
 import {
@@ -40,6 +40,10 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // API Token 本端注入(A3):setApiToken 此前零调用,后端开 token 认证时 WebUI 无入口配置。
+  // 与 sse.ts buildEventsUrl 同一 localStorage key(autoanime-api-token)
+  const [tokenDraft, setTokenDraft] = useState<string>(() => getApiToken())
+  const [tokenNotice, setTokenNotice] = useState<string | null>(null)
   // reference_order 编辑草稿:onChange 只更新草稿保真原文(末尾逗号不被回显抹掉),
   // blur/保存时才 split/trim/filter 写回 edit(回归 A1:打字无法追加第二个参考源)。
   // 本页服务端基线只在 save() 后变化(无其他 reload 路径),草稿在 save 成功时显式重置。
@@ -128,6 +132,22 @@ export function SettingsPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  /** 保存/清除 API Token(写 localStorage,即时生效需刷新);留空保存 = 清除 */
+  const saveToken = (): void => {
+    const token = tokenDraft.trim()
+    setApiToken(token)
+    setTokenDraft(token)
+    setTokenNotice(
+      token === '' ? strings.settings.apiTokenClearedNotice : strings.settings.apiTokenSavedNotice,
+    )
+  }
+
+  const clearToken = (): void => {
+    setApiToken('')
+    setTokenDraft('')
+    setTokenNotice(strings.settings.apiTokenClearedNotice)
   }
 
   return (
@@ -233,6 +253,38 @@ export function SettingsPage() {
             <Badge tone={base.has_api_token ? 'success' : 'neutral'} mark>
               {base.has_api_token ? strings.settings.configured : strings.settings.notConfigured}
             </Badge>
+          </SettingRow>
+          <SettingRow
+            label={strings.settings.apiTokenInput}
+            description={strings.settings.apiTokenHint}
+            htmlFor="settings-api-token"
+          >
+            <div className="flex flex-col gap-1.5">
+              <Input
+                id="settings-api-token"
+                type="password"
+                value={tokenDraft}
+                onChange={(e) => {
+                  setTokenDraft(e.target.value)
+                  setTokenNotice(null)
+                }}
+                autoComplete="off"
+                className="data-text"
+              />
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={saveToken}>
+                  {strings.settings.apiTokenSave}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={clearToken}>
+                  {strings.settings.apiTokenClear}
+                </Button>
+              </div>
+              {tokenNotice !== null && (
+                <p role="status" className="text-xs text-success">
+                  {tokenNotice}
+                </p>
+              )}
+            </div>
           </SettingRow>
           <SettingRow label={strings.settings.llmApiKey} description={strings.settings.secretHint}>
             <Badge tone={base.has_llm_api_key ? 'success' : 'neutral'} mark>

@@ -29,7 +29,7 @@ describe('LibraryPage', () => {
     expect(poster.getAttribute('loading')).toBe('lazy')
   })
 
-  it('海报加载失败时降级为首字占位块', async () => {
+  it('海报加载失败时降级为首字占位块(404 无海报与 401 token 未授权同路:onError 统一降级)', async () => {
     renderPage(<LibraryPage />)
     await screen.findByText('葬送的芙莉莲')
     const img = screen.getAllByAltText('')[0] as HTMLImageElement

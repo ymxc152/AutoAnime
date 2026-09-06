@@ -44,7 +44,12 @@ function seriesStats(series: SeriesDto): {
   }
 }
 
-/** 海报:本地库 poster 优先(后端代理);缺失/401 时降级为首字占位块 */
+/**
+ * 海报:本地库 poster 优先(后端代理)。<img> 无法携带 X-API-Token 头,后端开启
+ * token 认证时此端点会 401;无论 404(无海报)还是 401(未授权),浏览器对
+ * <img> 的非成功响应都触发 onError → 统一降级为首字占位块,不额外弹提示
+ * (README 已知边界有记录,见 A3 审查项)。
+ */
 function SeriesPoster({ seriesId, title }: { seriesId: number; title: string }) {
   const [failed, setFailed] = useState(false)
   if (failed) {

@@ -98,4 +98,24 @@ describe('SettingsPage', () => {
     expect(screen.getByText('已配置')).toBeInTheDocument()
     expect(screen.getByText('未配置')).toBeInTheDocument()
   })
+
+  it('回归 A3:API Token 本端注入——保存写入 localStorage 并提示刷新,清除移除', async () => {
+    const user = userEvent.setup()
+    localStorage.removeItem('autoanime-api-token')
+    renderPage(<SettingsPage />)
+    const tokenInput = await screen.findByLabelText('API Token(本端注入)')
+    expect(tokenInput).toHaveAttribute('type', 'password')
+    expect(tokenInput).toHaveValue('')
+    await user.type(tokenInput, 'sk-test-123')
+    await user.click(screen.getByRole('button', { name: '保存 Token' }))
+    expect(await screen.findByText('已保存,刷新页面后生效')).toBeInTheDocument()
+    // 与 client.ts/sse.ts 同 key:请求头与 SSE query 都从这里读
+    expect(localStorage.getItem('autoanime-api-token')).toBe('sk-test-123')
+    // 清除:localStorage 移除,提示刷新生效
+    await user.click(screen.getByRole('button', { name: '清除 Token' }))
+    expect(await screen.findByText('已清除,刷新页面后生效')).toBeInTheDocument()
+    expect(localStorage.getItem('autoanime-api-token')).toBeNull()
+    // 收尾不污染同文件其他用例
+    localStorage.removeItem('autoanime-api-token')
+  })
 })
