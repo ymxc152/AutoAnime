@@ -68,6 +68,30 @@ def _pending_rows(db: Path) -> list[tuple[str, str, str, str, str]]:
 # ---------------------------------------------------------------- 端到端冒烟
 
 
+def test_import_writes_parse_events_rows(env: dict[str, Path]) -> None:
+    """回归（R1 验收）：import 每个文件落一行 parse_events（E1 报表写侧）。
+
+    修复前 parse_events 无任何生产写入路径，report 的 llm_call_rate 与
+    archived_events 分母恒为 0；修复后由 orchestrator 的 metrics_sink 落库。
+    """
+    source = _make_tree(env["root"], {HIGH_NAME: b"high", "Frieren - 01.mkv": b"m1"})
+    _run_cli("import", str(source), "--dry-run")
+    _run_cli("import", str(source))
+
+    with sqlite3.connect(env["db"]) as conn:
+        rows = conn.execute(
+            "SELECT event_date, level, llm_called, outcome, latency_ms"
+            " FROM parse_events ORDER BY id"
+        ).fetchall()
+    # dry-run 不落库；实跑每个扫描文件一行（HIGH 归档 + MEDIUM 入队）。
+    assert len(rows) == 2
+    levels = {row[1] for row in rows}
+    outcomes = {row[3] for row in rows}
+    assert levels == {2, 3}  # HIGH=3，MEDIUM=2
+    assert "archive" in outcomes
+    assert all(row[4] is not None and row[4] >= 0 for row in rows)
+
+
 def test_import_archives_high_and_enqueues_medium(env: dict[str, Path]) -> None:
     """1 个 HIGH 名归档 + 2 个 MEDIUM 名入队；原文件保留（D21 hardlink 语义）。"""
     source = _make_tree(

@@ -38,6 +38,7 @@ Arbiter audit rows (R8) are persisted through the narrow
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, cast
@@ -85,6 +86,13 @@ ROUTE_L3 = "l3"
 #: ``audit_log.entity`` for arbiter verdict rows (R8 batch persistence).
 AUDIT_ENTITY_ARBITER = "arbiter"
 
+#: ``parse_events.level`` 的置信档位整数映射（E1 报表口径；无结果 = 0）。
+_LEVEL_INT: dict[Confidence, int] = {
+    Confidence.LOW: 1,
+    Confidence.MEDIUM: 2,
+    Confidence.HIGH: 3,
+}
+
 __all__ = [
     "AUDIT_ENTITY_ARBITER",
     "ROUTE_ARCHIVE",
@@ -92,6 +100,7 @@ __all__ = [
     "ROUTE_MEMORY",
     "ArbiterAuditSink",
     "Orchestrator",
+    "ParseEventSink",
     "RouteOutcome",
 ]
 
@@ -111,6 +120,27 @@ class ArbiterAuditSink(Protocol):
         entity: str,
         action: str,
         instruction: dict[str, object] | None = None,
+    ) -> object: ...
+
+
+class ParseEventSink(Protocol):
+    """Narrow metrics persistence contract for per-pass ``parse_events`` rows.
+
+    ``MemoryGovernance.record_parse_event`` satisfies this structurally. The
+    orchestrator emits one row per full pipeline pass (single-file and batch
+    entries alike) so the E1 report's llm_call_rate / by_outcome denominators
+    reflect real traffic; a sink failure never breaks the parse pass.
+    """
+
+    async def record_parse_event(
+        self,
+        *,
+        raw_name_hash: str,
+        level: int,
+        llm_called: bool,
+        outcome: str,
+        latency_ms: int | None = None,
+        confidence: str | None = None,
     ) -> object: ...
 
 
@@ -180,6 +210,7 @@ class Orchestrator:
         llm_cache_store: LlmCacheStore | None = None,
         reference_chain: ReferenceChain | None = None,
         audit_sink: ArbiterAuditSink | None = None,
+        metrics_sink: ParseEventSink | None = None,
     ) -> None:
         self._recognizer = recognizer if recognizer is not None else LocalRecognizer()
         self._memory_store = memory_store
@@ -191,6 +222,7 @@ class Orchestrator:
         self._llm_cache_store = llm_cache_store
         self._reference_chain = reference_chain
         self._audit_sink = audit_sink
+        self._metrics_sink = metrics_sink
 
     async def parse(
         self,
@@ -218,6 +250,18 @@ class Orchestrator:
         （``unparsed``）不短路——继续走既有管线，对齐结论随 RouteOutcome
         返回，交 organize 服务做错配恢复（A/B/C）。
         """
+        started = time.monotonic()
+        outcome = await self._process_inner(raw, context, expected=expected)
+        await self._emit_parse_event(raw, outcome, started)
+        return outcome
+
+    async def _process_inner(
+        self,
+        raw: RawName,
+        context: ParseContext | None = None,
+        *,
+        expected: ExpectedContext | None = None,
+    ) -> RouteOutcome:
         operation_id = uuid4().hex
         result = await self._recognizer.parse(raw, context)
         alignment_verdict: str | None = None
@@ -600,7 +644,9 @@ class Orchestrator:
         outcomes: list[RouteOutcome | None] = [None] * total
         stages: dict[int, _L2Stage] = {}
         candidates: list[int] = []
+        started: dict[int, float] = {}
         for position, raw in enumerate(raws):
+            started[position] = time.monotonic()
             context = contexts[position] if contexts is not None else None
             operation_id = uuid4().hex
             result = await self._recognizer.parse(raw, context)
@@ -677,8 +723,9 @@ class Orchestrator:
                 )
 
         filled: list[RouteOutcome] = []
-        for outcome in outcomes:
+        for position, outcome in enumerate(outcomes):
             assert outcome is not None, "every input item must produce an outcome"
+            await self._emit_parse_event(raws[position], outcome, started[position])
             filled.append(outcome)
         return filled
 
@@ -789,6 +836,33 @@ class Orchestrator:
             for season in seasons
             if isinstance(season, int) and not isinstance(season, bool)
         )
+
+    async def _emit_parse_event(
+        self, raw: RawName, outcome: RouteOutcome, started: float
+    ) -> None:
+        """Emit one ``parse_events`` row for a finished pass（E1 报表写侧）。
+
+        口径：``level`` = 置信档位整数（HIGH=3/MEDIUM=2/LOW=1/无结果=0）；
+        ``llm_called`` = L3 段参与并产出 draft（``l3_applied``，缓存回放
+        计入 L3 参与）；``outcome`` = 路由。写入失败只记日志，绝不向上抛
+        ——识别主流程永不因指标旁路受阻。
+        """
+        sink = self._metrics_sink
+        if sink is None:
+            return
+        result = outcome.result
+        level = _LEVEL_INT.get(result.level, 0) if result is not None else 0
+        try:
+            await sink.record_parse_event(
+                raw_name_hash=pattern_hash(raw.name),
+                level=level,
+                llm_called=outcome.l3_applied,
+                outcome=outcome.route,
+                latency_ms=max(int((time.monotonic() - started) * 1000), 0),
+                confidence=f"{result.confidence:.4f}" if result is not None else None,
+            )
+        except Exception:
+            logger.warning("parse event emit failed", exc_info=True)
 
     async def _record_simple_audit(
         self,
