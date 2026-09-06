@@ -14,6 +14,11 @@ L3 是**单模型配置**，没有多模型回退链：`AUTOANIME_LLM_ENABLED` +
 `AUTOANIME_LLM_ENABLED=false` 则 L3 整段关闭——这是设计好的优雅降级，
 不是故障。
 
+**传输失败的日志会写明具体原因**（超时 / HTTP 状态 / 网络错误，已脱敏），
+可据此区分「额度尽」和「超时」。**推理型模型（如 deepseek-v4-flash）默认
+响应慢**，`AUTOANIME_LLM_TIMEOUT_S=60` 可能不够（实测同一 prompt 19s～
+60s+ 波动）：日志出现 `ReadTimeout` 时把它调大到 180 再试，不必急着换模型。
+
 ## 为什么 MEDIUM 要人工确认？
 
 仲裁器只自动归档「完全可信」的结果（如 L1 HIGH 直通，或 title+season

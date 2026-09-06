@@ -175,8 +175,8 @@ Subscription (Mikan RSS polling)        Import (local directory scan)
 
 ## Testing & Quality
 
-- **1058 backend offline tests** (`uv run pytest -q`, fully offline) + **67 frontend tests** (`cd frontend && npm test`), all passing.
-- **Three rounds of real-data acceptance**: round 1 fixed 4 issues; rounds 2–3 fixed 10 more, including two major defects (episode id vs episode number mix-up, upgrade target-slot overwrite).
+- **1065 backend offline tests** (`uv run pytest -q`, fully offline) + **67 frontend tests** (`cd frontend && npm test`), all passing.
+- **Five rounds of real-data acceptance**: round 1 fixed 4 issues; rounds 2–3 fixed 10 more, including two major defects (episode id vs episode number mix-up, upgrade target-slot overwrite); round 4 switched to brand-new naming styles (CJK bracket fansub packs / LoliHouse loose files / simplified+traditional twins) and fixed 4 more; round 5 re-imported the same batch — all memory-routed, zero LLM calls.
 - **WebUI tested in a real browser**: all 8 pages exercised for interactions and the SSE event stream (which surfaced and fixed SSE wiring/subscription defects).
 - Upgrade triggers/scoring are deterministic code, never inside the AI boundary; every recognition decision lands in the audit log — explainable and traceable.
 
