@@ -99,8 +99,8 @@ class PendingConfirmIn(BaseModel):
     """确认待确认项：字段缺省时回退到行内 context 草稿。"""
 
     title: str | None = None
-    season: int | None = None
-    episode: int | None = None
+    season: int | None = Field(default=None, ge=0)
+    episode: int | None = Field(default=None, ge=0)
     segment: str | None = None
     fansub: str | None = None
 
@@ -497,8 +497,8 @@ class ConfirmNameIn(BaseModel):
 
     name: str = Field(min_length=1, max_length=1000)
     title: str | None = None
-    season: int | None = None
-    episode: int | None = None
+    season: int | None = Field(default=None, ge=0)
+    episode: int | None = Field(default=None, ge=0)
     segment: str | None = None
     fansub: str | None = None
 

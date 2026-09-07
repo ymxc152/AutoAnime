@@ -193,10 +193,58 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class _ReadOnlyMemoryStore:
+    """dry-run 记忆读侧：查询透传真实 ``StorageMemoryStore``，写侧不落库。
+
+    ``--dry-run`` / reparse 预览的「零 DB 写入」契约：L2 命中照常参与
+    结果融合（读侧不变，预览结果与真实执行一致），但 ``record_hit`` /
+    ``record_correction`` 为 no-op——hit_count 与 memory-hit audit 均不写。
+    """
+
+    def __init__(self, inner: StorageMemoryStore) -> None:
+        self._inner = inner
+
+    async def find_parse_memory(self, key_level: int, key_hash: str) -> Any | None:
+        return await self._inner.find_parse_memory(key_level, key_hash)
+
+    async def find_alias_key(self, title_shape_norm: str) -> str | None:
+        return await self._inner.find_alias_key(title_shape_norm)
+
+    async def find_alias_row(self, title_shape_norm: str) -> tuple[str, str | None] | None:
+        return await self._inner.find_alias_row(title_shape_norm)
+
+    async def has_bypass(self, pattern_hash: str) -> bool:
+        return await self._inner.has_bypass(pattern_hash)
+
+    async def record_hit(self, parse_memory: Any, *, operation_id: str | None = None) -> None:
+        return None
+
+    async def record_correction(self, parse_memory: Any) -> None:
+        return None
+
+
+class _ReadOnlyLlmCacheStore:
+    """dry-run LLM 缓存读侧：命中照常返回（预览与真实执行一致），写侧不落库。
+
+    「零 DB 写入」契约同样约束 LLM 缓存：预览真实调用 L3 LLM，但结果
+    不写入 ``llm_cache``（不为真实执行「预热」未确认的结果）。
+    """
+
+    def __init__(self, inner: StorageLlmCacheStore) -> None:
+        self._inner = inner
+
+    async def get(self, pattern_hash: str) -> Any | None:
+        return await self._inner.get(pattern_hash)
+
+    async def put(self, cache: Any) -> None:
+        return None
+
+
 async def _build_orchestrator(
     settings: Settings,
     *,
     metrics: bool = True,
+    dry_run: bool = False,
 ) -> tuple[Orchestrator, SqliteStorage | None, object | None]:
     """Wire the full L1 -> L2 -> L3 -> arbiter pipeline.
 
@@ -206,6 +254,10 @@ async def _build_orchestrator(
     ``llm_enabled`` and the endpoint config are complete). The third element
     is the transport instance (if any) so the caller can release its HTTP
     client; an unusable storage degrades L2 and L3 caching together.
+
+    ``dry_run``：预览装配。L2/L3 照常接线（LLM 调用与返回结果不变），但
+    记忆写侧换只读实现、arbiter audit 不接、指标旁路强制关闭——预览不落库
+    （parse_events / audit / hit_count 均不写）。
     """
     registry = Registry()
     registered = register_providers(registry, settings)
@@ -254,16 +306,23 @@ async def _build_orchestrator(
     )
     return (
         Orchestrator(
-            memory_store=StorageMemoryStore(storage, audit_governance=governance),
+            memory_store=(
+                _ReadOnlyMemoryStore(StorageMemoryStore(storage, audit_governance=governance))
+                if dry_run
+                else StorageMemoryStore(storage, audit_governance=governance)
+            ),
             l2_enabled=settings.l2_enabled,
             l3_enabled=settings.llm_enabled,
             l3_recognizer=l3_recognizer,
             llm_transport=llm_transport,
-            llm_cache_store=StorageLlmCacheStore(storage),
+            llm_cache_store=(
+                _ReadOnlyLlmCacheStore(StorageLlmCacheStore(storage)) if dry_run
+                else StorageLlmCacheStore(storage)
+            ),
             reference_chain=reference_chain,
-            audit_sink=governance,
+            audit_sink=None if dry_run else governance,
             # --dry-run 的「不落库」契约也约束指标旁路：parse_events 不写。
-            metrics_sink=governance if metrics else None,
+            metrics_sink=governance if (metrics and not dry_run) else None,
         ),
         storage,
         transport_obj,
@@ -1052,7 +1111,7 @@ async def _import(args: argparse.Namespace) -> int:
     settings = load_settings()
     total_seen, videos = _scan_video_files(root)
     orchestrator, storage, transport_obj = await _build_orchestrator(
-        settings, metrics=not args.dry_run
+        settings, metrics=not args.dry_run, dry_run=bool(args.dry_run)
     )
     own_storage = False
     if storage is None:

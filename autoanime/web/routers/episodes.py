@@ -48,6 +48,44 @@ def _state_of(row: Episode) -> EpisodeState:
     return EpisodeState(row.state.value if hasattr(row.state, "value") else row.state)
 
 
+async def _ensure_organizable(store: LoopStore, episode_id: int) -> None:
+    """搬移前状态机预检（重读最新 episode 行）：→ ORGANIZED 不再合法即拒绝。
+
+    与入口处用请求时读到的状态做的早退互补：这里在执行搬移前重读一次，
+    收窄「并发窗口内状态已变化」导致的搬移后落库失败（缺陷 1 主修复）。
+    预检失败不动文件。
+    """
+    latest = await store.get_episode(episode_id)
+    if latest is None:
+        raise HTTPException(status_code=409, detail=f"episode {episode_id} not found")
+    state = _state_of(latest)
+    if state is not EpisodeState.ORGANIZED and not state.can_transition(EpisodeState.ORGANIZED):
+        raise HTTPException(
+            status_code=409,
+            detail=f"episode {episode_id} in state {state.value} cannot be (re)organized",
+        )
+
+
+def _undo_transfer(plan: mover.TransferPlan) -> bool:
+    """回滚 ``execute_transfer``：删除本次新建的目标位文件，恢复搬移前文件系统。
+
+    reparse 的 ``plan_transfer`` 从不替换既有文件（``allow_replace_existing``
+    恒 False），故目标位文件必为本次新建，逐个 unlink 即为完整回滚；源文件
+    由 hardlink/copy 语义天然保留（D21），无需复原。任一删除失败返回 False，
+    调用方据此升级为文件指针补偿。
+    """
+    ok = True
+    for move in plan.moves:
+        dst = plan.dst_dir / move.dst_name
+        try:
+            if dst.exists():
+                dst.unlink()
+        except OSError:
+            ok = False
+            logger.warning("reparse rollback cleanup failed for %s", dst, exc_info=True)
+    return ok
+
+
 @router.post("/{episode_id}/reparse", response_model=EpisodeReparseOut)
 async def reparse_episode(
     episode_id: int,
@@ -131,7 +169,7 @@ async def _reparse(
     from autoanime.cli import _parse_result_to_json
 
     orchestrator, orch_storage, transport = await build_full_orchestrator(
-        settings, metrics=not body.dry_run
+        settings, metrics=not body.dry_run, dry_run=body.dry_run
     )
     try:
         outcome = await orchestrator.process(
@@ -192,6 +230,10 @@ async def _reparse(
             # 预览：只报告将执行的归档动作，不移动文件。
             action["action"] = "archive"
         else:
+            # 搬移前状态机预检（重读最新 episode 行）：并发窗口内 → ORGANIZED
+            # 已不再合法时在此拒绝，不动文件，避免搬移落库失败后留下
+            # 「文件已移、指针失效」的不可恢复中间态（缺陷 1 主修复）。
+            await _ensure_organizable(store, episode.id)
             executed = await asyncio.to_thread(mover.execute_transfer, plan)
             if executed.error is not None or not executed.dst_paths:
                 raise HTTPException(
@@ -206,7 +248,24 @@ async def _reparse(
                     target=EpisodeState.ORGANIZED,
                     file_path=str(executed.dst_paths[0]),
                 )
-            except TransitionError as exc:  # pragma: no cover - 前置已守卫
+            except TransitionError as exc:
+                # 防御路径：预检只收窄并发窗口、不消除并发。尽力回滚搬移恢复
+                # 搬移前文件系统；回滚失败则把文件指针补偿到已落库的目标位，
+                # 确保不留下「文件已移、指针失效」的不可恢复卡死。
+                if not await asyncio.to_thread(_undo_transfer, plan):
+                    logger.critical(
+                        "reparse rollback failed for episode %s; "
+                        "compensating file_path to %s",
+                        episode.id,
+                        executed.dst_paths[0],
+                        exc_info=True,
+                    )
+                    try:
+                        await store.set_episode_file(
+                            episode.id, file_path=str(executed.dst_paths[0])
+                        )
+                    except Exception:  # noqa: BLE001 — 补偿尽力而为
+                        logger.critical("reparse file_path compensation failed", exc_info=True)
                 raise HTTPException(status_code=409, detail=str(exc)) from None
             action["action"] = "archive"
             action["dst"] = str(executed.dst_paths[0])

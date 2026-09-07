@@ -469,3 +469,31 @@ def test_import_dst_exists_skip_counts_as_skipped_not_failed(env: dict[str, Path
     assert second["skipped"] == 2  # already-archived + dst-exists-same-content
     reasons = {Path(str(i["file"])).name: i["reason"] for i in second["items"]}
     assert reasons["Bocchi.the.Rock.S01E01.1080p.renamed.mkv"] == "dst-exists-same-content"
+
+
+class _RecordingCacheStore:
+    """记录 put 调用的假 LLM 缓存，验证 dry-run 只读包装。"""
+
+    def __init__(self) -> None:
+        self.puts: list[object] = []
+        self.store: dict[str, object] = {}
+
+    async def get(self, pattern_hash: str):
+        return self.store.get(pattern_hash)
+
+    async def put(self, cache) -> None:
+        self.puts.append(cache)
+
+
+async def test_dry_run_llm_cache_store_is_read_only() -> None:
+    """「零 DB 写入」契约同样约束 LLM 缓存：get 透传、put no-op。"""
+    from autoanime.cli import _ReadOnlyLlmCacheStore
+
+    inner = _RecordingCacheStore()
+    ro = _ReadOnlyLlmCacheStore(inner)  # type: ignore[arg-type]
+    assert await ro.get("hash-x") is None
+    sentinel = object()
+    inner.store["hash-x"] = sentinel
+    assert await ro.get("hash-x") is sentinel  # 读侧透传
+    await ro.put(sentinel)  # type: ignore[arg-type]
+    assert inner.puts == []  # 写侧不落库

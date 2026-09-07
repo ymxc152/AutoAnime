@@ -321,7 +321,7 @@ async def _run_import_task(
                 raise RuntimeError(f"library root not preparable: {exc}") from exc
 
         orchestrator, storage, transport = await build_full_orchestrator(
-            settings, metrics=not dry_run
+            settings, metrics=not dry_run, dry_run=dry_run
         )
         owns_storage = storage is None
         if storage is None:

@@ -33,10 +33,11 @@ import pytest
 from autoanime import cli
 from autoanime.cli import main as cli_main
 from autoanime.config import Settings
-from autoanime.core.enums import Actor, EpisodeState, SeasonState
-from autoanime.core.models import AuditLog, ParseEvents, PendingQueue, Season
+from autoanime.core.enums import Actor, EpisodeState, MemoryStatus, SeasonState
+from autoanime.core.models import AuditLog, ParseEvents, ParseMemory, PendingQueue, Season
 from autoanime.memory.store import SqliteStorage
-from autoanime.scheduler.store import LoopStore
+from autoanime.pipeline.l2.keys import KEY_LEVEL_SERIES, key_hash, level1_key
+from autoanime.scheduler.store import LoopStore, TransitionError
 from autoanime.web.app import create_app
 
 
@@ -283,7 +284,8 @@ async def test_confirm_name_equivalent_to_cli_confirm(tmp_path: Path, monkeypatc
 
 
 async def _seed_organized_episode(
-    c: httpx.AsyncClient, settings: Settings, *, with_file: bool = True
+    c: httpx.AsyncClient, settings: Settings, *, with_file: bool = True,
+    name: str = "Show S01E01 1080p.mkv",
 ) -> tuple[int, Path, int]:
     resp = await c.post(
         "/api/subscriptions",
@@ -296,7 +298,7 @@ async def _seed_organized_episode(
     assert resp.status_code == 200, resp.text
     tree = resp.json()
     episode = tree["seasons"][0]["episodes"][0]
-    src = settings.download_path / "Show S01E01 1080p.mkv"
+    src = settings.download_path / name
     if with_file:
         src.write_bytes(b"0" * 64)
     app_state = _app_state(c)
@@ -369,6 +371,98 @@ async def test_reparse_422_extra_field(client) -> None:
         "/api/episodes/1/reparse", json={"dry_run": True, "extra": 1}
     )
     assert resp.status_code == 422  # extra=forbid
+
+
+async def test_reparse_dry_run_writes_no_db_rows(client) -> None:
+    """缺陷 2：dry-run 预览零落库——命中 L2 记忆也不递增 hit_count、不写 audit。"""
+    c, settings = client
+    episode_id, _src, _sid = await _seed_organized_episode(
+        c, settings, name="Frieren - 01.mkv"
+    )
+    app_state = _app_state(c)
+    # 预置系列级记忆：dry-run 的 L2 会命中（fuse → HIGH → arbitration）。
+    await app_state.storage.add(
+        ParseMemory(
+            key_level=KEY_LEVEL_SERIES,
+            key_hash=key_hash(level1_key("Frieren")),
+            result={
+                "title": "葬送的芙莉莲",
+                "season": 1,
+                "episode": 1,
+                "segment": "episode",
+                "fansub": None,
+            },
+            status=MemoryStatus.ACTIVE,
+            hit_count=0,
+            corrected_count=0,
+        )
+    )
+    resp = await c.post(f"/api/episodes/{episode_id}/reparse", json={"dry_run": True})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # L2 命中照常参与预览（返回结果不被破坏）：season 由记忆行补全。
+    assert body["parsed"]["season"] == 1
+    assert body["parsed"]["evidence"].get("season") == "memory"
+    # 零 DB 写入：hit_count 未递增、无 arbiter / parse_memory audit 行。
+    row = await app_state.storage.find_parse_memory(
+        KEY_LEVEL_SERIES, key_hash(level1_key("Frieren"))
+    )
+    assert row is not None and row.hit_count == 0
+    audits = await app_state.storage.list(AuditLog)
+    assert not [a for a in audits if a.entity == "arbiter"]
+    assert not [a for a in audits if a.entity == "parse_memory"]
+
+
+async def test_reparse_rolls_back_when_archive_update_transition_fails(
+    client, monkeypatch
+) -> None:
+    """缺陷 1 防御路径：落库状态机拒绝时回滚搬移、指针不被污染、409 如实。"""
+    c, settings = client
+    episode_id, src, _sid = await _seed_organized_episode(c, settings)
+
+    async def _broken_update(
+        self, episode_id, *, target, file_path=None,
+        quality_score=None, upgraded_count_delta=0,
+    ):
+        # 模拟并发窗口内落库被状态机拒绝（如另一并发把集置成不可归档态）。
+        raise TransitionError(f"episode {episode_id}: DOWNLOADING -> organized illegal")
+
+    monkeypatch.setattr(LoopStore, "update_episode_archive_state", _broken_update)
+    resp = await c.post(f"/api/episodes/{episode_id}/reparse", json={"dry_run": False})
+    assert resp.status_code == 409
+    # 补偿：目标位文件已回滚，episode.file_path 仍是原指针，未被污染。
+    assert src.exists()
+    assert not list(settings.library_path.rglob("*.mkv"))
+    app_state = _app_state(c)
+    store = LoopStore(app_state.storage)
+    ep = await store.get_episode(episode_id)
+    assert ep is not None
+    assert ep.file_path == str(src)
+
+
+async def test_reparse_preexec_guard_rejects_changed_state(client, monkeypatch) -> None:
+    """缺陷 1 主修复：搬移前预检重读最新状态，并发改态后拒绝且不动文件。"""
+    c, settings = client
+    episode_id, src, _sid = await _seed_organized_episode(c, settings)
+    real_get = LoopStore.get_episode
+    calls = {"n": 0}
+
+    async def _state_flips_after_router(_self, _episode_id: int):
+        calls["n"] += 1
+        row = await real_get(_self, _episode_id)
+        assert row is not None
+        # 第二次读取（搬移前预检）模拟并发把集改成不可归档态。
+        if calls["n"] == 2:
+            row.state = EpisodeState.IGNORED
+        return row
+
+    monkeypatch.setattr(LoopStore, "get_episode", _state_flips_after_router)
+    resp = await c.post(f"/api/episodes/{episode_id}/reparse", json={"dry_run": False})
+    assert resp.status_code == 409
+    assert "cannot be (re)organized" in resp.json()["detail"]
+    # 预检失败未搬移文件。
+    assert src.exists()
+    assert not list(settings.library_path.rglob("*.mkv"))
 
 
 # ---------------------------------------------------------------------------
