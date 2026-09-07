@@ -71,4 +71,3 @@ PYTHONIOENCODING=utf-8 .venv/Scripts/python -m pytest tests/test_manual_whitelis
 - **7 个全链路失败**：全部是 `Movie`/`電影`/`TVSP` 剧场版/特别篇/里番，程序本身不支持电影/无集号文件，属于既有设计范围。
 - **14 条"未匹配出剧集"警告**：同上，多为无集号文件。
 - **Windows GBK 控制台编码**：部分子进程测试在 GBK 终端下偶发失败，已在 `PYTHONIOENCODING=utf-8` 下验证通过。
-

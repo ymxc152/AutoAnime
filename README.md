@@ -172,6 +172,16 @@ docker compose up -d --build   # WebUI 在 http://127.0.0.1:3080
 | `autoanime/api/` | `python -m autoanime.api serve` 启动入口 |
 | `frontend/` | React 19 + Tailwind 4 + xyflow 的 WebUI（8 页面，Vite 构建） |
 
+### 文档地图
+
+| 主题 | 文档 |
+| --- | --- |
+| 长文架构参考 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| 部署与验收 | [`docs/DEPLOY.md`](docs/DEPLOY.md) |
+| 常见问题 | [`docs/FAQ.md`](docs/FAQ.md) |
+| 当前产品化 backlog | [`docs/11_WebUI产品化缺口执行计划.md`](docs/11_WebUI产品化缺口执行计划.md) |
+| 历史文档索引 | [`docs/archive/README.md`](docs/archive/README.md) |
+
 ## 测试与质量
 
 - **1093 个后端离线测试**（`uv run pytest -q`，全程不触网）+ **93 个前端测试**（`cd frontend && npm test`），全部通过。

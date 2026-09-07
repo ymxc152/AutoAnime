@@ -14,7 +14,6 @@ venv/
 .coverage
 dist/
 build/
-docs/plans/
 *.aam.bak.*
 Thumbs.db
 Desktop.ini
