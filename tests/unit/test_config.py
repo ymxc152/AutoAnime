@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,11 @@ def test_l2_enabled_reads_toml(tmp_path: Path) -> None:
     assert load_settings(path).l2_enabled is False
 
 
-def test_l3_fields_defaults() -> None:
+def test_l3_fields_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 本机可能常驻 AUTOANIME_LLM_*（真源在 .env/shell）；默认值断言须隔离 env。
+    for key in list(os.environ):
+        if key.startswith("AUTOANIME_"):
+            monkeypatch.delenv(key, raising=False)
     settings = load_settings(Path("does-not-exist.toml"))
 
     assert settings.llm_enabled is False
@@ -82,7 +87,10 @@ def test_l3_fields_read_toml(tmp_path: Path) -> None:
     assert settings.reference_qps == 0.5
 
 
-def test_llm_api_key_stays_out_of_toml(tmp_path: Path) -> None:
+def test_llm_api_key_stays_out_of_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("AUTOANIME_"):
+            monkeypatch.delenv(key, raising=False)
     path = tmp_path / "autoanime.toml"
     path.write_text('llm_api_key = "sk-should-be-ignored"\n', encoding="utf-8")
 

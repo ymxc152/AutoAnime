@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -179,3 +180,152 @@ async def test_rebuild_noop_without_scheduler() -> None:
     state = _state()
     assert await rebuild_running_scheduler(state, Settings()) == []
     assert getattr(state, "scheduler", None) is None
+
+
+# ---------------------------------------------------------------------------
+# update_settings（12-D 修复：immediate 装配固化字段 / log_level / null 清除）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def settings_store() -> Any:
+    store = SqliteStorage("sqlite+aiosqlite:///:memory:")
+    await store.create_all()
+    try:
+        yield store
+    finally:
+        await store.close()
+
+
+def _router_state(
+    store: SqliteStorage, reference_chain: Any = None
+) -> SimpleNamespace:
+    """仿 request.app.state：无 scheduler（API-only 语义，rebuild no-op）。"""
+    return SimpleNamespace(
+        reference_chain=reference_chain,
+        scheduler=None,
+        loop_components=None,
+        storage=store,
+        bus=None,
+    )
+
+
+async def _call_update(
+    settings: Settings,
+    store: SqliteStorage,
+    payload: dict[str, Any],
+    *,
+    state: SimpleNamespace | None = None,
+) -> Any:
+    from autoanime.memory.governance import MemoryGovernance
+    from autoanime.web.routers.settings import update_settings
+    from autoanime.web.schemas import SettingsUpdateIn
+
+    state = state or _router_state(store)
+    # SimpleNamespace 模拟 starlette Request（update_settings 只读 request.app.state）。
+    request = cast(Any, SimpleNamespace(app=SimpleNamespace(state=state)))
+    return await update_settings(
+        SettingsUpdateIn(**payload),
+        request,
+        settings,
+        store,
+        MemoryGovernance(store),
+    )
+
+
+async def test_reference_field_put_rebuilds_reference_chain(
+    settings_store: SqliteStorage,
+) -> None:
+    # 缺陷 1：reference 字段仅 setattr 不够——ReferenceChain 构造即冻结
+    # order/enabled；PUT 后须重建并重赋 app.state.reference_chain。
+    settings = Settings(reference_enabled=False)
+    state = _router_state(settings_store, reference_chain=None)
+    out = await _call_update(
+        settings, settings_store, {"reference_enabled": True}, state=state
+    )
+    assert out.applied["reference_enabled"] == "immediate"
+    assert settings.reference_enabled is True
+    # 重建后 app.state.reference_chain 挂上新链（reference_enabled=True → 非 None）
+    assert state.reference_chain is not None
+
+
+async def test_orchestrator_field_put_triggers_scheduler_rebuild(
+    settings_store: SqliteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 缺陷 1：orchestrator/recognizer 装配期固化字段（llm_model 等）PUT 后
+    # 须触发 scheduler loop 重建（与 _SCHEDULER_FIELDS 同路），使 loop 内
+    # 用新 Settings 重组。
+    calls: list[tuple[Any, Settings]] = []
+
+    async def fake_rebuild(state: Any, settings: Settings) -> list[str]:
+        calls.append((state, settings))
+        return []
+
+    monkeypatch.setattr(
+        "autoanime.web.routers.settings.rebuild_running_scheduler", fake_rebuild
+    )
+    settings = Settings()
+    state = _router_state(settings_store)
+    out = await _call_update(
+        settings, settings_store, {"llm_model": "test-model"}, state=state
+    )
+    assert out.applied["llm_model"] == "immediate"
+    assert settings.llm_model == "test-model"
+    assert len(calls) == 1
+
+    # 非装配固化字段（dry_run 运行期动态读取）不触发重建
+    calls.clear()
+    await _call_update(settings, settings_store, {"dry_run": True}, state=state)
+    assert calls == []
+
+
+async def test_immediate_nullable_field_null_clears_override(
+    settings_store: SqliteStorage,
+) -> None:
+    # 缺陷 3：非密钥可空字段（immediate 档）显式 null = 清除覆盖项——
+    # 删 DB 行 + 运行时回落 None（对齐密钥 null 清除）。
+    await settings_store.put_app_setting("llm_model", '"old-model"')
+    settings = Settings(llm_model="old-model")
+    state = _router_state(settings_store)
+    out = await _call_update(settings, settings_store, {"llm_model": None}, state=state)
+    assert out.applied["llm_model"] == "immediate"
+    assert settings.llm_model is None
+    assert await settings_store.list_app_settings() == {}
+
+
+async def test_restart_nullable_field_null_clears_override(
+    settings_store: SqliteStorage,
+) -> None:
+    # 缺陷 3：restart 档可空字段（llm_base_url）显式 null 清除 DB 行；
+    # 运行时同步回落 None 使 GET 立即显示「无覆盖」（消费方已固化不受影响）。
+    await settings_store.put_app_setting("llm_base_url", '"http://example.invalid/v1"')
+    settings = Settings(llm_base_url="http://example.invalid/v1")
+    out = await _call_update(settings, settings_store, {"llm_base_url": None})
+    assert out.applied["llm_base_url"] == "requires_restart"
+    assert settings.llm_base_url is None
+    assert await settings_store.list_app_settings() == {}
+
+
+async def test_log_level_put_reconfigures_runtime_logging(
+    settings_store: SqliteStorage,
+) -> None:
+    # 缺陷 2：log_level PUT 对运行进程做 logging 重配置（root + uvicorn
+    # loggers），而非仅改 Settings 值。
+    root = logging.getLogger()
+    uvicorn_err = logging.getLogger("uvicorn.error")
+    old_root, old_err = root.level, uvicorn_err.level
+    root.setLevel(logging.WARNING)
+    uvicorn_err.setLevel(logging.WARNING)
+    try:
+        settings = Settings()
+        out = await _call_update(settings, settings_store, {"log_level": "DEBUG"})
+        assert out.applied["log_level"] == "immediate"
+        assert settings.log_level == "DEBUG"
+        assert root.level == logging.DEBUG
+        assert uvicorn_err.level == logging.DEBUG
+        # 无效级别：只警告不改现有级别，不使 PUT 失败
+        await _call_update(settings, settings_store, {"log_level": "NOPE"})
+        assert root.level == logging.DEBUG
+    finally:
+        root.setLevel(old_root)
+        uvicorn_err.setLevel(old_err)

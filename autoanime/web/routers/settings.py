@@ -1,7 +1,11 @@
 """Settings 配置中心（12-D）：GET/PUT /api/settings + notify-test / qbit-test。
 
 三档生效语义（docs/12 §12-D）：
-- **immediate**：进程内 ``setattr``（v1 六项沿用）+ 落库；
+- **immediate**：进程内 ``setattr`` + 落库；其中被 orchestrator/recognizer/
+  chain 装配期固化的字段（``_ORCHESTRATOR_IMMEDIATE_FIELDS``）在 setattr
+  之外还会重建 reference chain 并触发 scheduler loop 重建（与
+  ``_SCHEDULER_FIELDS`` 同路，API-only 进程 no-op）；``log_level`` 另做
+  运行期 logging 重配置（root + uvicorn loggers）；
 - **scheduler_rebuild**：``setattr`` + 落库 + 触发 scheduler loop 重建
   （``rebuild_running_scheduler``；API-only 进程无 loop，只落库下次启动
   生效）；
@@ -9,17 +13,20 @@
   lifespan/loop 装配时固化了引用，运行期替换不安全），响应里标档位。
 
 密钥纪律（强制）：GET 永不回显密钥值，只回 ``has_*`` 布尔；PUT 空串 =
-不修改、显式 null = 清除（RSS token 交互惯例）；密钥不进日志、不进
-audit 详情（audit 只记「更新了哪些 key」）。
+不修改、显式 null = 清除（RSS token 交互惯例）；非密钥可空字段
+（``_NULLABLE_CLEAR_FIELDS``）显式 null 同样清除覆盖项（回落默认/下一
+优先级）；密钥不进日志、不进 audit 详情（audit 只记「更新了哪些 key」）。
 """
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import SecretStr
 
 from autoanime.config import (
@@ -45,6 +52,8 @@ from autoanime.web.schemas import (
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # PUT 白名单三档（12-D 定稿字段归组）
@@ -119,6 +128,37 @@ _SECRET_FIELDS = frozenset(
     }
 )
 
+#: immediate 档中被 orchestrator/recognizer/chain 装配期固化的字段：仅
+#: ``setattr`` 不够——ReferenceChain / LlmFallbackRecognizer / Orchestrator
+#: 在 ``build_loop`` 时冻结了 order/enabled/model/timeout/retries/l2_enabled，
+#: PUT 后须触发 scheduler loop 重建（与 _SCHEDULER_FIELDS 同路），使 loop 内
+#: 组件用新 Settings 重组。
+_ORCHESTRATOR_IMMEDIATE_FIELDS = frozenset(
+    {
+        "l2_enabled",
+        "llm_enabled",
+        "llm_model",
+        "llm_timeout_s",
+        "llm_max_retries",
+        "reference_enabled",
+        "reference_order",
+        "reference_qps",
+    }
+)
+
+#: reference 链字段（``app.state.reference_chain`` 供 confirm/correct 回填与
+#: poster 兜底；ReferenceChain 构造即冻结 order/enabled），PUT 后须重建并
+#: 重赋 ``app.state.reference_chain``。
+_REFERENCE_CHAIN_FIELDS = frozenset(
+    {"reference_enabled", "reference_order", "reference_qps"}
+)
+
+#: 非密钥可空字段：显式 null = 清除覆盖项（删 app_settings 行，回落默认/
+#: 下一优先级），语义对齐密钥字段的 null 清除；其余非密钥 null = 不修改。
+_NULLABLE_CLEAR_FIELDS = frozenset(
+    {"llm_model", "reference_qps", "llm_base_url", "notify_telegram_chat_id"}
+)
+
 
 def _effect_for(key: str) -> SettingEffect:
     if key in _SCHEDULER_FIELDS:
@@ -126,6 +166,22 @@ def _effect_for(key: str) -> SettingEffect:
     if key in _RESTART_FIELDS:
         return "requires_restart"
     return "immediate"
+
+
+def _reconfigure_log_level(level: str) -> None:
+    """运行期重配置 logging 级别（root + uvicorn loggers），使 log_level 即时生效。
+
+    只调 level、不动 handler/格式；无效级别只记录警告并跳过（不使 PUT
+    失败，与 rebuild 失败只警告的收口一致）。
+    """
+    normalized = (level or "").upper()
+    numeric = getattr(logging, normalized, None)
+    if not isinstance(numeric, int):
+        logger.warning("invalid log_level %r; keeping current logging levels", level)
+        return
+    logging.getLogger().setLevel(numeric)
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).setLevel(numeric)
 
 
 # ---------------------------------------------------------------------------
@@ -229,11 +285,17 @@ async def update_settings(
     """白名单三档写入：setattr（前两档）+ 落库 + 调度重建钩子。
 
     密钥语义：空串 = 不修改；显式 null = 清除（删 DB 行，回落 env/toml）。
+    非密钥可空字段（``_NULLABLE_CLEAR_FIELDS``）显式 null 同样清除覆盖项；
+    其余非密钥 null = 不修改。immediate 档中被 orchestrator/recognizer/chain
+    装配固化的字段在 setattr 之外重建 reference chain + 触发 scheduler loop
+    重建（与 _SCHEDULER_FIELDS 同路）；log_level 另做运行期 logging 重配置。
     audit 只记 key 与档位，**不记任何 value**。
     """
     supplied = body.model_dump(exclude_unset=True)
     applied: dict[str, SettingEffect] = {}
     scheduler_touched = False
+    reference_chain_touched = False
+    log_level_changed = False
     for key, value in supplied.items():
         if key in _SECRET_FIELDS:
             if value is None:
@@ -246,17 +308,49 @@ async def update_settings(
                 continue  # 空串 = 不修改（前端「留空保持原值」惯例）
             value = secret_text
         elif value is None:
-            continue  # 非密钥字段 null = 不修改（保持 v1 行为）
+            if key in _NULLABLE_CLEAR_FIELDS:
+                # 非密钥可空字段显式 null = 清除覆盖项（删行回落默认/下一
+                # 优先级，对齐密钥 null 清除）。运行时同步回落 None：immediate
+                # 字段立即生效，restart 字段使 GET 立即显示「无覆盖」（消费方
+                # 已固化，运行期行为不变）。
+                await storage.put_app_setting(key, None)
+                applied[key] = _effect_for(key)
+                setattr(settings, key, None)
+                scheduler_touched = (
+                    scheduler_touched or key in _ORCHESTRATOR_IMMEDIATE_FIELDS
+                )
+                reference_chain_touched = (
+                    reference_chain_touched or key in _REFERENCE_CHAIN_FIELDS
+                )
+                continue
+            continue  # 其余非密钥 null = 不修改（保持 v1 行为）
         await storage.put_app_setting(key, encode_setting_value(value))
         applied[key] = _effect_for(key)
+        if key == "log_level":
+            log_level_changed = True
         if key in _IMMEDIATE_FIELDS or key in _SCHEDULER_FIELDS:
             setattr(settings, key, value)
-            scheduler_touched = scheduler_touched or key in _SCHEDULER_FIELDS
+            scheduler_touched = scheduler_touched or (
+                key in _SCHEDULER_FIELDS or key in _ORCHESTRATOR_IMMEDIATE_FIELDS
+            )
+            reference_chain_touched = (
+                reference_chain_touched or key in _REFERENCE_CHAIN_FIELDS
+            )
 
     warnings: list[str] = []
+    if reference_chain_touched:
+        # confirm/correct 回填链：ReferenceChain 构造即冻结 order/enabled，
+        # 重建后重赋 app.state.reference_chain（poster 的 chain_provider 动态
+        # 读取，同一替换即可让 API 进程生效）。惰性导入避免 app 导入环。
+        from autoanime.web.app import build_reference_chain
+
+        request.app.state.reference_chain = build_reference_chain(settings, storage)
+    if log_level_changed:
+        _reconfigure_log_level(settings.log_level)
     if scheduler_touched:
-        # 调度类变更：重建 loop（API-only 进程内为 no-op；重建失败只警告，
-        # 不回滚 PUT——见 rebuild_running_scheduler 的失败收口注释）。
+        # 调度类 / orchestrator 装配固化字段：重建 loop（API-only 进程内为
+        # no-op；重建失败只警告，不回滚 PUT——见 rebuild_running_scheduler
+        # 的失败收口注释）。
         warnings.extend(await rebuild_running_scheduler(request.app.state, settings))
 
     await governance.record_audit(
@@ -277,9 +371,25 @@ async def update_settings(
 # notify-test / qbit-test（按当前配置含未重启的 PUT 值试跑）
 # ---------------------------------------------------------------------------
 
+#: 试跑端点进程内冷却：防误点连发真实外呼（webhook/telegram/qbit 登录）。
+#: 时间戳存 app.state（每 app 独立），测试夹具每测新建 app 天然隔离；
+#: check→set 之间无 await，事件循环下原子。
+_TEST_ENDPOINT_COOLDOWN_S = 30.0
+
+
+def _test_call_allowed(request: Request, name: str) -> bool:
+    """冷却闸门：同一 app 内同名试跑端点在冷却期内拒绝（429）。"""
+    calls: dict[str, float] = getattr(request.app.state, "_settings_test_calls", {})
+    now = time.monotonic()
+    last = calls.get(name, 0.0)
+    calls[name] = now
+    request.app.state._settings_test_calls = calls
+    return (now - last) >= _TEST_ENDPOINT_COOLDOWN_S
+
 
 @router.post("/notify-test", response_model=NotifyTestOut)
 async def notify_test(
+    request: Request,
     settings: SettingsDep,
     storage: StorageDep,
     governance: GovernanceDep,
@@ -289,8 +399,11 @@ async def notify_test(
     用「运行时 + DB 覆盖」的合并配置构造通道——用户可能在启用通知前先
     测试（``notify_enabled`` 不阻塞手工测试）；未配置的通道直接跳过。
     外呼超时复用 ``notify_timeout_s``；异常只归因到通道明细（类型名），
-    不含 URL/token。
+    不含 URL/token。带进程内冷却（``_TEST_ENDPOINT_COOLDOWN_S``），防
+    连点造成外呼轰炸。
     """
+    if not _test_call_allowed(request, "notify-test"):
+        raise HTTPException(status_code=429, detail="试跑冷却中，请稍后再试")
     merged = _merged_settings(settings, await storage.list_app_settings())
     results: list[ChannelTestOut] = []
     event = Event(EventCategory.SYSTEM, "settings.notify_test", {"test": True})
@@ -340,6 +453,7 @@ async def notify_test(
 
 @router.post("/qbit-test", response_model=QbitTestOut)
 async def qbit_test(
+    request: Request,
     settings: SettingsDep,
     storage: StorageDep,
     governance: GovernanceDep,
@@ -348,8 +462,10 @@ async def qbit_test(
 
     同 notify-test：按「运行时 + DB 覆盖」的合并配置试连（密码改完未重启
     也能先验证）；失败原因复用 GatewayError 文案（只含异常类型与操作名，
-    不含密码）。
+    不含密码）。带进程内冷却，同 notify-test。
     """
+    if not _test_call_allowed(request, "qbit-test"):
+        raise HTTPException(status_code=429, detail="试跑冷却中，请稍后再试")
     merged = _merged_settings(settings, await storage.list_app_settings())
     gateway = QbittorrentGateway(
         merged.qbittorrent_host,

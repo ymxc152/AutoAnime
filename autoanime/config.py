@@ -148,8 +148,8 @@ class Settings(BaseSettings):
 def load_settings(path: Path | None = None, overrides: Mapping[str, str] | None = None) -> Settings:
     """env/toml → DB 覆盖合并出运行时 Settings（12-D 配置中心）。
 
-    优先级：toml → DB 覆盖（``overrides``）→ env。pydantic-settings 的
-    语义是「显式 kwargs 优先于 env」，故 DB 覆盖作为 kwargs 传入时天然
+    优先级（高 → 低）：DB 覆盖（``overrides``）> toml > env。pydantic-settings
+    的语义是「显式 kwargs 优先于 env」，故 DB 覆盖作为 kwargs 传入时天然
     压过 env；未覆盖的字段仍回落 env/toml 默认。
 
     与 ``llm_api_key`` pop 的关系（12-D 设计点）：
@@ -209,8 +209,8 @@ def apply_db_overrides(settings: Settings, rows: Mapping[str, str]) -> Settings:
 
     供 lifespan 用：storage 建好后读 ``app_settings`` 行，合并进
     create_app 持有的 Settings 实例（中间件/路由闭包引用同一对象，原地
-    改才能让全进程可见）。优先级 env/toml → DB：DB 里的 key 都是用户在
-    WebUI 显式写入的运行期项，视为最后意图，故覆盖 env。
+    改才能让全进程可见）。优先级 DB &gt; toml &gt; env：DB 里的 key 都是用户在
+    WebUI 显式写入的运行期项，视为最后意图，故覆盖 toml 与 env。
     """
     for key, value in parse_db_overrides(rows).items():
         setattr(settings, key, value)

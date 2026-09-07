@@ -299,6 +299,8 @@ async def test_notify_test_reports_per_channel(client, fake_notify_channels) -> 
     assert len(webhook.sent) == 1 and len(telegram.sent) == 1
 
     # 失败路：单通道异常只归因到该通道（error 只含异常类型名）
+    # （试跑端点有进程内冷却；重置 app.state 时间戳模拟冷却已过）
+    c._transport.app.state._settings_test_calls = {}  # type: ignore[attr-defined]
     webhook.fail = True
     resp = await c.post("/api/settings/notify-test")
     results = {item["channel"]: item for item in resp.json()["results"]}
@@ -323,6 +325,18 @@ async def test_notify_test_without_channels_returns_empty(client) -> None:
     resp = await c.post("/api/settings/notify-test")
     assert resp.status_code == 200
     assert resp.json()["results"] == []
+
+
+async def test_test_endpoints_rate_limited(client) -> None:
+    """试跑端点冷却：冷却期内连发返回 429，不触发外呼。"""
+    c, _, _ = client
+    resp = await c.post("/api/settings/notify-test")
+    assert resp.status_code == 200
+    resp = await c.post("/api/settings/notify-test")
+    assert resp.status_code == 429
+    resp = await c.post("/api/settings/qbit-test")
+    # qbit-test 与 notify-test 冷却相互独立
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
