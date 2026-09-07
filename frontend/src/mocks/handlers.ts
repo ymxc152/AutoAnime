@@ -29,6 +29,7 @@ import type {
   SettingsUpdateBody,
   SubscriptionCreateBody,
   SubscriptionDto,
+  SubscriptionUpdateBody,
 } from '../api/types'
 
 function clone<T>(value: T): T {
@@ -325,6 +326,18 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           ],
         }
         state.subscriptions.unshift(sub)
+        return delayed(clone(sub))
+      },
+      update: (id, body: SubscriptionUpdateBody) => {
+        const sub = state.subscriptions.find((s) => s.id === id)
+        if (!sub) {
+          return delayVoid().then(() => {
+            throw new ApiError(404, `subscription ${id} not found`)
+          })
+        }
+        if (body.status !== undefined) sub.status = body.status
+        if (body.fansub_pref !== undefined) sub.fansub_pref = body.fansub_pref
+        if (body.quality_pref !== undefined) sub.quality_pref = body.quality_pref
         return delayed(clone(sub))
       },
       remove: (id) => {

@@ -2,7 +2,7 @@
  * RSSSources 冒烟 + 交互(对齐后端 RssSourceCreateIn:season_id 必填):
  * 表格、启停开关、移除确认、创建校验。
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RssSourcesPage } from '../RssSources'
 import { renderPage } from '../../test/testUtils'
@@ -158,5 +158,57 @@ describe('RssSourcesPage', () => {
     // season_id 999 不在订阅季列表 → 回显原 id(旧数据兼容),不伪装成季名
     expect(screen.getByText('999')).toBeInTheDocument()
     listSpy.mockRestore()
+  })
+
+  it('编辑 RSS 源:URL 与 token 可更新,空 token 不修改旧 token', async () => {
+    const user = userEvent.setup()
+    const actualUpdate = api.rssSources.update
+    const updateSpy = vi.spyOn(api.rssSources, 'update').mockImplementationOnce(async (...args) => actualUpdate(...args))
+    renderPage(<RssSourcesPage />)
+    const row = (await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '编辑 RSS 源' }))
+    const dialog = screen.getByRole('dialog')
+    const urlInput = within(dialog).getByLabelText('地址')
+    await user.clear(urlInput)
+    await user.type(urlInput, 'https://mikanani.me/RSS/Updated')
+    await user.type(within(dialog).getByLabelText('令牌(可选)'), 'new-secret')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(updateSpy).toHaveBeenCalledWith(1, {
+      url: 'https://mikanani.me/RSS/Updated',
+      enabled: true,
+      token: 'new-secret',
+    })
+    expect(await screen.findByText('https://mikanani.me/RSS/Updated')).toBeInTheDocument()
+  })
+
+  it('编辑 RSS 源:清除 Token 显式提交 null,状态变未配置', async () => {
+    const user = userEvent.setup()
+    const actualUpdate = api.rssSources.update
+    const updateSpy = vi.spyOn(api.rssSources, 'update').mockImplementationOnce(async (...args) => actualUpdate(...args))
+    renderPage(<RssSourcesPage />)
+    const row = (await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '编辑 RSS 源' }))
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByLabelText('清除 Token'))
+    expect(within(dialog).getByLabelText('令牌(可选)')).toBeDisabled()
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(updateSpy).toHaveBeenCalledWith(1, {
+      url: 'https://mikanani.me/RSS/MyBangumi?token=***',
+      enabled: true,
+      token: null,
+    })
+    await waitFor(() => expect(within(row).getByText('无')).toBeInTheDocument())
+  })
+
+  it('编辑 RSS 源失败:错误展示在抽屉内且不关闭', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api.rssSources, 'update').mockRejectedValueOnce(new ApiError(409, 'source locked'))
+    renderPage(<RssSourcesPage />)
+    const row = (await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '编辑 RSS 源' }))
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    const alert = await within(dialog).findByRole('alert')
+    expect(alert).toHaveTextContent('source locked')
   })
 })

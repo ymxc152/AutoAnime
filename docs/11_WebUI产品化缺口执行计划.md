@@ -93,6 +93,8 @@ interface OperationGroupDto {
 
 ## 3. Phase B：订阅编辑
 
+> 状态：已完成（前端编辑抽屉 + 显式 null 清除偏好 + 回归测试）
+
 ### 目标
 
 让用户可以在 WebUI 修改订阅偏好，而不是只能删除重建。
@@ -153,15 +155,17 @@ Content-Type: application/json
 
 ### 验收
 
-- [ ] 可修改状态、字幕组偏好、质量偏好
-- [ ] 保存后无需手动刷新页面
-- [ ] 404 / 422 错误对用户可见
-- [ ] Audit Log 出现 `subscription_updated`
-- [ ] Pipeline / Logs 页可收到 SSE 事件
+- [x] 可修改状态、字幕组偏好、质量偏好
+- [x] 保存后无需手动刷新页面
+- [x] 404 / 422 错误对用户可见
+- [x] Audit Log 出现 `subscription_updated`
+- [x] Pipeline / Logs 页可收到 SSE 事件
 
 ---
 
 ## 4. Phase C：RSS 源编辑
+
+> 状态：已完成（前端编辑抽屉 + URL/Token/启停编辑 + 回归测试）
 
 ### 目标
 
@@ -229,11 +233,11 @@ Content-Type: application/json
 
 ### 验收
 
-- [ ] 可修改 RSS URL
-- [ ] 可设置 / 清除独立 token
-- [ ] 修改后列表自动刷新
-- [ ] token 字段永远不回显明文
-- [ ] Audit Log 出现 `rss_source_updated`
+- [x] 可修改 RSS URL
+- [x] 可设置 / 清除独立 token
+- [x] 修改后列表自动刷新
+- [x] token 字段永远不回显明文
+- [x] Audit Log 出现 `rss_source_updated`
 
 ---
 

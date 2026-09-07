@@ -13,12 +13,14 @@ import {
   Badge,
   Button,
   Card,
+  Drawer,
   EmptyState,
   ErrorState,
   Field,
   Input,
   PageTitle,
   ProgressBar,
+  Select,
   Skeleton,
   StatusDot,
 } from '../components'
@@ -137,12 +139,109 @@ function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
   )
 }
 
+function EditSubscriptionDrawer({
+  sub,
+  onDone,
+  onClose,
+}: {
+  sub: SubscriptionDto
+  onDone: () => void
+  onClose: () => void
+}) {
+  const [status, setStatus] = useState(sub.status)
+  const [fansub, setFansub] = useState(sub.fansub_pref ?? '')
+  const [quality, setQuality] = useState(sub.quality_pref ?? '')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (): Promise<void> => {
+    setSubmitting(true)
+    setError(null)
+    try {
+      // 空字符串显式提交为 null：编辑抽屉里“清空并保存”就是清除偏好。
+      await api.subscriptions.update(sub.id, {
+        status,
+        fansub_pref: fansub.trim() === '' ? null : fansub.trim(),
+        quality_pref: quality.trim() === '' ? null : quality.trim(),
+      })
+      onDone()
+      onClose()
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Drawer open onClose={onClose} title={strings.subscriptions.editTitle} subtitle={subscriptionTitle(sub)}>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <Field label={strings.subscriptions.status} htmlFor="subscription-edit-status">
+          <Select
+            id="subscription-edit-status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="active">{strings.subscriptions.statusActive}</option>
+            <option value="paused">{strings.subscriptions.statusPaused}</option>
+            <option value="finished">{strings.subscriptions.statusFinished}</option>
+          </Select>
+        </Field>
+        <Field
+          label={strings.subscriptions.fansubPref}
+          description={strings.subscriptions.optionalClearHint}
+          htmlFor="subscription-edit-fansub"
+        >
+          <Input
+            id="subscription-edit-fansub"
+            value={fansub}
+            onChange={(e) => setFansub(e.target.value)}
+            placeholder={strings.subscriptions.fansubPlaceholder}
+          />
+        </Field>
+        <Field
+          label={strings.subscriptions.qualityPref}
+          description={strings.subscriptions.optionalClearHint}
+          htmlFor="subscription-edit-quality"
+        >
+          <Input
+            id="subscription-edit-quality"
+            value={quality}
+            onChange={(e) => setQuality(e.target.value)}
+          />
+        </Field>
+        {error !== null && (
+          <p role="alert" className="text-xs text-danger">
+            {error}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Button type="submit" variant="primary" loading={submitting}>
+            {strings.common.save}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>
+            {strings.common.cancel}
+          </Button>
+        </div>
+      </form>
+    </Drawer>
+  )
+}
+
 function SubscriptionRow({
   sub,
+  onEdit,
   onRemove,
   removing,
 }: {
   sub: SubscriptionDto
+  onEdit: (sub: SubscriptionDto) => void
   onRemove: (id: number) => void
   removing: boolean
 }) {
@@ -154,6 +253,9 @@ function SubscriptionRow({
         <Badge tone="neutral">{sub.status}</Badge>
         <Badge>{sub.fansub_pref ?? strings.subscriptions.noFansub}</Badge>
         <span className="ml-auto">
+          <Button size="sm" variant="secondary" onClick={() => onEdit(sub)}>
+            {strings.subscriptions.edit}
+          </Button>
           <Button
             size="sm"
             variant="ghost"
@@ -208,6 +310,7 @@ export function SubscriptionsPage() {
   const { data, loading, error, reload } = useApi(fetcher)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
+  const [editingSub, setEditingSub] = useState<SubscriptionDto | null>(null)
   // 取消订阅失败不再静默(A2):复用页面级 role="alert" 错误条
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -264,6 +367,7 @@ export function SubscriptionsPage() {
               <SubscriptionRow
                 key={sub.id}
                 sub={sub}
+                onEdit={setEditingSub}
                 onRemove={(id) => void remove(id)}
                 removing={removingId === sub.id}
               />
@@ -289,6 +393,14 @@ export function SubscriptionsPage() {
         </Card>
         <AddSubscriptionForm onDone={reload} />
       </div>
+
+      {editingSub !== null && (
+        <EditSubscriptionDrawer
+          sub={editingSub}
+          onDone={reload}
+          onClose={() => setEditingSub(null)}
+        />
+      )}
     </>
   )
 }

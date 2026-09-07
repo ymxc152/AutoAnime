@@ -24,6 +24,7 @@ import type {
   SettingsUpdateBody,
   SubscriptionCreateBody,
   SubscriptionDto,
+  SubscriptionUpdateBody,
 } from './types'
 
 export const endpoints = {
@@ -74,6 +75,8 @@ export const endpoints = {
       request<Page<SubscriptionDto>>('/api/subscriptions', { query }),
     create: (body: SubscriptionCreateBody) =>
       request<SubscriptionDto>('/api/subscriptions', { method: 'POST', body }),
+    update: (id: number, body: SubscriptionUpdateBody) =>
+      request<SubscriptionDto>(`/api/subscriptions/${id}`, { method: 'PATCH', body }),
     remove: (id: number) => request<void>(`/api/subscriptions/${id}`, { method: 'DELETE' }),
   },
 

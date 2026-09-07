@@ -346,6 +346,26 @@ async def test_subscription_create_requires_title_and_delete_cascades(client) ->
     assert resp.status_code == 200
     assert resp.json()["fansub_pref"] == "LoliHouse"
 
+    # 编辑抽屉契约：status 可更新，显式 null 表示清除偏好，未提供的字段不变。
+    resp = await c.patch(
+        f"/api/subscriptions/{series_id}",
+        json={"status": "paused", "quality_pref": "1080p"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "paused"
+    assert body["fansub_pref"] == "LoliHouse"
+    assert body["quality_pref"] == "1080p"
+
+    resp = await c.patch(
+        f"/api/subscriptions/{series_id}", json={"fansub_pref": None, "quality_pref": None}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "paused"
+    assert body["fansub_pref"] is None
+    assert body["quality_pref"] is None
+
     resp = await c.delete(f"/api/subscriptions/{series_id}")
     assert resp.status_code == 204
     assert (await c.get("/api/series")).json()["total"] == 0
@@ -672,6 +692,23 @@ async def test_rss_source_crud_and_token_hygiene(client) -> None:
     resp = await c.patch(f"/api/rss_sources/{source_id}", json={"enabled": False})
     assert resp.status_code == 200
     assert resp.json()["enabled"] is False
+
+    # 编辑抽屉契约：URL / token 可更新，显式 null 清除 token，且响应永不回显明文。
+    resp = await c.patch(
+        f"/api/rss_sources/{source_id}",
+        json={"url": "https://mikanani.me/RSS/Updated", "token": "updated-secret"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["url"] == "https://mikanani.me/RSS/Updated"
+    assert body["has_token"] is True
+    assert "token" not in body
+
+    resp = await c.patch(f"/api/rss_sources/{source_id}", json={"token": None})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["has_token"] is False
+    assert "token" not in body
 
     resp = await c.delete(f"/api/rss_sources/{source_id}")
     assert resp.status_code == 204

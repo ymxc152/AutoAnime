@@ -150,7 +150,8 @@ async def update_subscription(
     governance: GovernanceDep,
     bus: BusDep,
 ) -> SubscriptionOut:
-    fields = body.model_dump(exclude_none=True)
+    # exclude_unset:显式 null 表示清除 fansub/quality 偏好；未提供的字段保持不变。
+    fields: dict[str, object] = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=422, detail="no updatable fields supplied")
     updated = await store.update_series_fields(series_id, fields)

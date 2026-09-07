@@ -262,6 +262,14 @@ export interface SubscriptionDto {
  * title_cn/title_jp/title_romaji 至少一个;episode_count 非空时预生成
  * N 条 MISSING 集(ARCHITECTURE §2)。RSS 地址关联走 /api/rss_sources。
  */
+export interface SubscriptionUpdateBody {
+  status?: string
+  /** 显式传 null = 清除偏好 */
+  fansub_pref?: string | null
+  /** 显式传 null = 清除偏好 */
+  quality_pref?: string | null
+}
+
 export interface SubscriptionCreateBody {
   title_cn?: string
   title_jp?: string

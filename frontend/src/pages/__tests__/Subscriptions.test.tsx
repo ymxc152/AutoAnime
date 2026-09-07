@@ -87,4 +87,39 @@ describe('SubscriptionsPage', () => {
     await user.click(screen.getByRole('button', { name: '订阅' }))
     expect(await screen.findByText('请填写标题')).toBeInTheDocument()
   })
+
+  it('编辑订阅:状态/字幕组可更新,清空偏好显式提交 null', async () => {
+    const user = userEvent.setup()
+    const actualUpdate = api.subscriptions.update
+    const updateSpy = vi.spyOn(api.subscriptions, 'update').mockImplementationOnce(async (...args) => actualUpdate(...args))
+    renderPage(<SubscriptionsPage />)
+    const row = (await screen.findByText('药屋少女的呢喃')).closest('div.border-b') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '编辑' }))
+    const dialog = screen.getByRole('dialog')
+    await user.selectOptions(within(dialog).getByLabelText('状态'), 'paused')
+    const fansub = within(dialog).getByPlaceholderText('如:Kamigakari')
+    await user.clear(fansub)
+    await user.type(fansub, 'LoliHouse')
+    await user.clear(within(dialog).getByLabelText('质量偏好'))
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(updateSpy).toHaveBeenCalledWith(2, {
+      status: 'paused',
+      fansub_pref: 'LoliHouse',
+      quality_pref: null,
+    })
+    await screen.findByText('paused')
+    expect(screen.getByText('LoliHouse')).toBeInTheDocument()
+  })
+
+  it('编辑订阅失败:错误展示在抽屉内且不关闭', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api.subscriptions, 'update').mockRejectedValueOnce(new ApiError(409, 'status locked'))
+    renderPage(<SubscriptionsPage />)
+    const row = (await screen.findByText('药屋少女的呢喃')).closest('div.border-b') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '编辑' }))
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    const alert = await within(screen.getByRole('dialog')).findByRole('alert')
+    expect(alert).toHaveTextContent('status locked')
+  })
 })

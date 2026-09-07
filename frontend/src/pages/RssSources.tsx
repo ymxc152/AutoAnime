@@ -11,6 +11,7 @@ import {
   Button,
   Card,
   DataTable,
+  Drawer,
   EmptyState,
   ErrorState,
   Field,
@@ -22,7 +23,7 @@ import {
   type Column,
 } from '../components'
 import { formatDateTime } from '../lib/views'
-import type { RssSourceDto, SubscriptionDto } from '../api/types'
+import type { RssSourceDto, RssSourceUpdateBody, SubscriptionDto } from '../api/types'
 
 /** 下拉选项:番名 + 季号 + season id 拼显示文案(B2:手输主键全 UI 无处可查) */
 interface SeasonOption {
@@ -148,6 +149,112 @@ function AddSourceForm({
   )
 }
 
+function EditSourceDrawer({
+  source,
+  onDone,
+  onClose,
+}: {
+  source: RssSourceDto
+  onDone: () => void
+  onClose: () => void
+}) {
+  const [url, setUrl] = useState(source.url)
+  const [token, setToken] = useState('')
+  const [clearToken, setClearToken] = useState(false)
+  const [enabled, setEnabled] = useState(source.enabled)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (): Promise<void> => {
+    if (url.trim() === '') {
+      setError(strings.rssSources.urlRequired)
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      // token 语义：undefined = 不修改；null = 清除；字符串 = 更新。
+      const body: RssSourceUpdateBody = { url: url.trim(), enabled }
+      if (clearToken) {
+        body.token = null
+      } else if (token !== '') {
+        body.token = token
+      }
+      await api.rssSources.update(source.id, body)
+      onDone()
+      onClose()
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Drawer open onClose={onClose} title={strings.rssSources.editTitle} subtitle={source.url}>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <Field label={strings.rssSources.url} htmlFor="rss-edit-url">
+          <Input
+            id="rss-edit-url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            invalid={error !== null}
+            className="data-text"
+          />
+        </Field>
+        <Field
+          label={strings.rssSources.token}
+          description={clearToken ? strings.rssSources.tokenHint : strings.rssSources.tokenUnchangedHint}
+          htmlFor="rss-edit-token"
+        >
+          <Input
+            id="rss-edit-token"
+            type="password"
+            value={clearToken ? '' : token}
+            disabled={clearToken}
+            onChange={(e) => setToken(e.target.value)}
+          />
+        </Field>
+        {source.has_token && (
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={clearToken}
+              onChange={(e) => setClearToken(e.target.checked)}
+              aria-label={strings.rssSources.clearToken}
+              className="h-3.5 w-3.5 accent-[var(--ink-primary)]"
+            />
+            {strings.rssSources.clearToken}
+          </label>
+        )}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-ink">{strings.common.enable}</span>
+          <Switch checked={enabled} onChange={setEnabled} aria-label={`${strings.common.enable} edit`} />
+        </div>
+        {error !== null && (
+          <p role="alert" className="text-xs text-danger">
+            {error}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Button type="submit" variant="primary" loading={submitting}>
+            {strings.common.save}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>
+            {strings.common.cancel}
+          </Button>
+        </div>
+      </form>
+    </Drawer>
+  )
+}
+
 export function RssSourcesPage() {
   const fetcher = useCallback(() => api.rssSources.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
@@ -156,6 +263,7 @@ export function RssSourcesPage() {
   const { data: subsData } = useApi(subsFetcher)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [editingSource, setEditingSource] = useState<RssSourceDto | null>(null)
   // 启停/移除失败不再静默(A2):复用页面级 role="alert" 错误条
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -265,9 +373,14 @@ export function RssSourcesPage() {
             </Button>
           </span>
         ) : (
-          <Button size="sm" variant="ghost" onClick={() => void remove(row.id)}>
-            {strings.common.remove}
-          </Button>
+          <>
+            <Button size="sm" variant="secondary" onClick={() => setEditingSource(row)}>
+              {strings.rssSources.editTitle}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void remove(row.id)}>
+              {strings.common.remove}
+            </Button>
+          </>
         ),
     },
   ]
@@ -304,6 +417,14 @@ export function RssSourcesPage() {
           />
         )}
       </Card>
+
+      {editingSource !== null && (
+        <EditSourceDrawer
+          source={editingSource}
+          onDone={reload}
+          onClose={() => setEditingSource(null)}
+        />
+      )}
     </>
   )
 }
