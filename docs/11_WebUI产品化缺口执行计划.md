@@ -1,8 +1,20 @@
-# WebUI 产品化缺口执行计划（待执行）
+# WebUI 产品化缺口执行计划（执行中）
 
-> 状态：**草案 / 等待执行**  
-> 基线：`task/ui-fixes @ ec2498d`，后端 1074 tests 绿，前端 85 tests 绿  
-> 目标：把 WebUI 从“只读观察 + 少量 CRUD”推进到“可日常运维的本地控制台”
+> - 状态：**执行中**
+> - 基线：`v2 @ a788197`，后端 1093 tests 绿，前端 93 tests 绿
+> - 当前进度：A 已完成；E 部分完成；B / C / D / F / G 待执行
+> - 最近更新：2026-09-07
+> - 目标：把 WebUI 从“只读观察 + 少量 CRUD”推进到“可日常运维的本地控制台”
+
+| Phase | 主题 | 状态 |
+| --- | --- | --- |
+| A | Logs 撤销入口契约修复 | 已完成 |
+| B | 订阅编辑 | 待执行 |
+| C | RSS 源编辑 | 待执行 |
+| D | WebUI 管线操作入口 | 待执行 |
+| E | API Token 设置入口 | 部分完成 |
+| F | 媒体库规模化 | 待执行 |
+| G | SSE 与数据刷新联动 | 待执行 |
 
 ## 0. 已拍板事项
 
@@ -42,7 +54,7 @@
 
 ## 2. Phase A：Logs 撤销入口契约修复
 
-> 状态：本计划创建前已修复
+> 状态：已完成（2026-09-07）
 
 ### 问题
 
@@ -71,11 +83,11 @@ interface OperationGroupDto {
 
 ### 验收
 
-- [ ] `pending_confirm` / `pending_reject` / `subscription_created` / `rss_source_created` 组不显示撤销按钮
-- [ ] `episode.organized` / `upgrade.completed` / 带 reverse 的记忆状态操作显示撤销按钮
-- [ ] 点击撤销仍保留二次确认
-- [ ] 撤销成功后 Logs 自动刷新
-- [ ] 后端 rollback 404 / 409 语义测试保留
+- [x] `pending_confirm` / `pending_reject` / `subscription_created` / `rss_source_created` 组不显示撤销按钮
+- [x] `episode.organized` / `upgrade.completed` / 带 reverse 的记忆状态操作显示撤销按钮
+- [x] 点击撤销仍保留二次确认
+- [x] 撤销成功后 Logs 自动刷新
+- [x] 后端 rollback 404 / 409 语义测试保留
 
 ---
 
@@ -341,6 +353,8 @@ GET /api/tasks/{task_id}
 
 ## 6. Phase E：API Token 设置入口
 
+> 状态：**部分完成（2026-09-07）**。已完成 Settings 本地 Token 注入 UI、localStorage 保存/清除、HTTP 与 SSE 请求带 Token、Vitest 与真服务冒烟；待完成后端启用 Token 时的三态联动验证、保存后健康校验/全局重试、401 统一提示。
+
 ### 目标
 
 用户无需手工 localStorage，即可在 WebUI 配置 API token。
@@ -577,10 +591,9 @@ GET /api/series?limit=100&offset=0&q=芙莉莲
 
 如果一次只做一个最小可合并包：
 
-1. 修 Logs rollbackable
-2. 增加订阅编辑
-3. 增加 RSS 编辑
-4. 更新计划文档
+1. 增加订阅编辑
+2. 增加 RSS 编辑
+3. 更新计划文档
 
 可以不做：
 
