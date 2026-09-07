@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from autoanime.web.routers.audit import router as audit_router
+from autoanime.web.routers.episodes import router as episodes_router
 from autoanime.web.routers.events_sse import router as events_router
 from autoanime.web.routers.metrics import router as metrics_router
 from autoanime.web.routers.organize import router as organize_router
@@ -19,6 +20,7 @@ from autoanime.web.routers.subscriptions import router as subscriptions_router
 api_router = APIRouter(prefix="/api")
 api_router.include_router(metrics_router)
 api_router.include_router(series_router)
+api_router.include_router(episodes_router)
 api_router.include_router(pending_router)
 api_router.include_router(pipeline_router)
 api_router.include_router(scheduler_router)

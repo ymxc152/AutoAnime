@@ -6,7 +6,8 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter
 
-from autoanime.web.deps import ApiStoreDep
+from autoanime.core.models import AuditLog, ParseEvents
+from autoanime.web.deps import ApiStoreDep, StorageDep
 from autoanime.web.schemas import (
     CurvePointOut,
     LevelStatsOut,
@@ -103,3 +104,20 @@ async def get_metrics(store: ApiStoreDep) -> MetricsOut:
             for item in snapshot.memory_sources
         ],
     )
+
+
+@router.get("/report")
+async def get_report(storage: StorageDep) -> dict[str, object]:
+    """CLI ``report --json`` 的等价 REST（12-F）。
+
+    聚合口径与结构完全复用 ``cli._aggregate_report``（单一事实源，不另
+    发明结构）：parse_events 按日/LLM 调用率/outcome 分布 + audit
+    by_action/by_actor + 人工介入率。只读端点：与 CLI report 相同，不走
+    create_all 建库路径（lifespan 已保证 schema 在位）。
+    """
+    # 延迟导入（同 pipeline 惯例：避免 web 聚合与 CLI 模块初始化成环）。
+    from autoanime.cli import _aggregate_report
+
+    events = await storage.list(ParseEvents)
+    audits = await storage.list(AuditLog)
+    return _aggregate_report(events, audits)

@@ -362,28 +362,77 @@ def _confirmed_file_path(
     return None
 
 
-async def _confirm(args: argparse.Namespace) -> int:
-    draft = await LocalRecognizer().parse(RawName(name=args.name))
-    title = args.title or (draft.title if draft else None)
-    if not title:
-        print("confirm: no confirmed title (L1 draft has none and --title not given)")
-        return 2
+async def synthesize_confirmation(
+    name: str,
+    *,
+    title: str | None = None,
+    season: int | None = None,
+    episode: int | None = None,
+    segment: str | None = None,
+    fansub: str | None = None,
+) -> tuple[ParseResult, str | None]:
+    """人工确认结果合成（12-F）：CLI confirm 与 WebUI confirm-name 共用入口。
+
+    字段优先级与原 ``_confirm`` 实现一致：请求覆写 > L1 草稿 > 缺省
+    （segment 兜底 EPISODE）；人工结论按定义是受信输入（HIGH / 1.0）。
+    合成不出 title（无覆写且 L1 草稿无标题）抛 ``ValueError``，由调用方
+    分别转 CLI 退出码 2 / Web 422。返回 (确认结果, L1 草稿标题)——草稿
+    标题供 ``learn_confirmation`` 的标题形状映射（draft_title）。
+    """
+    draft = await LocalRecognizer().parse(RawName(name=name))
+    resolved_title = title or (draft.title if draft else None)
+    if not resolved_title:
+        raise ValueError(
+            "confirm: no confirmed title (L1 draft has none and no override given)"
+        )
     confirmed = ParseResult(
-        title=title,
-        season=args.season if args.season is not None else (draft.season if draft else None),
-        episode=args.episode if args.episode is not None else (draft.episode if draft else None),
+        title=resolved_title,
+        season=season if season is not None else (draft.season if draft else None),
+        episode=episode if episode is not None else (draft.episode if draft else None),
         segment=(
-            Segment(args.segment)
-            if args.segment is not None
+            Segment(segment)
+            if segment is not None
             else (draft.segment if draft else Segment.EPISODE)
         ),
-        fansub=args.fansub if args.fansub is not None else (draft.fansub if draft else None),
+        fansub=fansub if fansub is not None else (draft.fansub if draft else None),
         # A user/LLM-confirmed result is by definition trusted input.
         level=Confidence.HIGH,
         confidence=1.0,
         missing_fields=(),
         evidence={},
     )
+    return confirmed, draft.title if draft else None
+
+
+def _confirm_entries_payload(outcome: Any) -> list[dict[str, object]]:
+    """学习结果 entries 的输出序列化（CLI confirm 与 12-F confirm-name 共用）。"""
+    return [
+        {
+            "key_level": entry.key_level,
+            "key_hash": entry.key_hash,
+            "title_shape": entry.title_shape,
+            "source": MemorySource(entry.source).value,
+            "status": MemoryStatus(entry.status).value,
+            "hit_count": entry.hit_count,
+            "corrected_count": entry.corrected_count,
+        }
+        for entry in outcome.entries
+    ]
+
+
+async def _confirm(args: argparse.Namespace) -> int:
+    try:
+        confirmed, draft_title = await synthesize_confirmation(
+            args.name,
+            title=args.title,
+            season=args.season,
+            episode=args.episode,
+            segment=args.segment,
+            fansub=args.fansub,
+        )
+    except ValueError as exc:
+        print(str(exc))
+        return 2
     settings = load_settings()
     async with SqliteStorage(settings.database_url) as storage:
         access = StorageMemoryAccess(storage)
@@ -395,7 +444,7 @@ async def _confirm(args: argparse.Namespace) -> int:
             source=MemorySource(args.source),
             bypass_lookup=access,
             reference_lookup=reference_chain,
-            draft_title=draft.title if draft else None,
+            draft_title=draft_title,
         )
         # 确认收尾（与 WebUI confirm 同语义）：raw_name 匹配的未决 pending 行
         # 一并 resolve——否则 CLI 确认后队列不减，重跑 import 又被
@@ -403,7 +452,7 @@ async def _confirm(args: argparse.Namespace) -> int:
         governance = MemoryGovernance(storage)
         resolved_rows = await LoopStore(storage).resolve_open_pendings_by_raw_name(
             args.name,
-            resolution={"action": "confirm", "confirmed_title": title},
+            resolution={"action": "confirm", "confirmed_title": confirmed.title},
             audit_row_for=lambda row: pending_audit_row(
                 pending=row, action=ACTION_PENDING_CONFIRM, confirmed=confirmed
             ),
@@ -446,18 +495,7 @@ async def _confirm(args: argparse.Namespace) -> int:
                 "bypassed": False,
                 "resolved_pending": len(resolved_rows),
                 "archive": archive.as_dict(),
-                "entries": [
-                    {
-                        "key_level": entry.key_level,
-                        "key_hash": entry.key_hash,
-                        "title_shape": entry.title_shape,
-                        "source": MemorySource(entry.source).value,
-                        "status": MemoryStatus(entry.status).value,
-                        "hit_count": entry.hit_count,
-                        "corrected_count": entry.corrected_count,
-                    }
-                    for entry in outcome.entries
-                ],
+                "entries": _confirm_entries_payload(outcome),
             },
             ensure_ascii=False,
         )

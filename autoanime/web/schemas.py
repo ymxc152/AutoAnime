@@ -10,7 +10,7 @@ import json
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class Page[ItemT](BaseModel):
@@ -479,3 +479,49 @@ class MetricsOut(BaseModel):
     pending_open: int
     episode_states: dict[str, int]
     memory_sources: list[MemorySourceStatsOut]
+
+
+# ---------------------------------------------------------------------------
+# Pipeline confirm-name / Episodes reparse（12-F）
+# ---------------------------------------------------------------------------
+
+
+class ConfirmNameIn(BaseModel):
+    """库外人工确认学习（12-F）：name 必填，其余字段缺省回退 L1 草稿。
+
+    字段风格与 ``PendingConfirmIn`` 一致；行为等价 CLI ``confirm``
+    （同一 store 入口：学习三件套 + pending 收尾 + hardlink 归档）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=1000)
+    title: str | None = None
+    season: int | None = None
+    episode: int | None = None
+    segment: str | None = None
+    fansub: str | None = None
+
+
+class ConfirmNameOut(BaseModel):
+    """确认结果（与 CLI confirm 的 JSON 输出同字段口径）。"""
+
+    bypassed: bool
+    resolved_pending: int
+    archive: dict[str, object]
+    entries: list[dict[str, object]]
+
+
+class EpisodeReparseIn(BaseModel):
+    """集重新识别（12-F 两步契约）：dry_run=true 预览、false 实际执行。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dry_run: bool = True
+
+
+class EpisodeReparseOut(BaseModel):
+    episode_id: int
+    dry_run: bool
+    parsed: dict[str, object] | None
+    action: dict[str, object]

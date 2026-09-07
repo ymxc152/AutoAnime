@@ -9,14 +9,33 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from autoanime.config import Settings
+from autoanime.core.enums import Actor, MemorySource
 from autoanime.core.events import Event, EventCategory
 from autoanime.core.interfaces import RawName
 from autoanime.memory.governance import MemoryGovernance
+from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.store import SqliteStorage
+from autoanime.organize import confirm_archive
+from autoanime.organize.poster import schedule_poster_fetch
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.orchestrator import Orchestrator
 from autoanime.scheduler.store import LoopStore
-from autoanime.web.deps import SettingsDep
+from autoanime.web.deps import (
+    BusDep,
+    GovernanceDep,
+    PosterServiceDep,
+    ReferenceChainDep,
+    SettingsDep,
+    StorageDep,
+)
+from autoanime.web.learning import (
+    ACTION_PENDING_CONFIRM,
+    pending_audit_row,
+)
+from autoanime.web.learning import (
+    publish as publish_audit_event,
+)
+from autoanime.web.schemas import ConfirmNameIn, ConfirmNameOut
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -91,6 +110,117 @@ async def parse_preview(
             else None
         ),
     }
+
+
+@router.post("/confirm-name", response_model=ConfirmNameOut)
+async def confirm_name(
+    body: ConfirmNameIn,
+    storage: StorageDep,
+    governance: GovernanceDep,
+    settings: SettingsDep,
+    bus: BusDep,
+    reference_chain: ReferenceChainDep,
+    poster_service: PosterServiceDep,
+) -> ConfirmNameOut:
+    """库外人工确认学习（12-F）：CLI ``confirm`` 的等价 REST 入口。
+
+    复用 CLI confirm 的同一批入口函数（不复制逻辑）：确认合成
+    ``cli.synthesize_confirmation`` → 学习三件套 ``learn_confirmation``
+    （parse_memory 两级 + alias 回填）→ 未决 pending 按 raw_name 收尾
+    ``LoopStore.resolve_open_pendings_by_raw_name`` → hardlink 归档
+    ``cli._archive_confirmed_file``（D17/D21 语义与 CLI 完全一致）。
+    文件不在位时归档如实记原因，学习不受影响；bypass 命中不归档。
+    """
+    # 延迟导入（同 import 任务：避免 web 路由聚合与 CLI 模块初始化成环）。
+    from autoanime.cli import (
+        _archive_confirmed_file,
+        _confirm_entries_payload,
+        synthesize_confirmation,
+    )
+
+    try:
+        confirmed, draft_title = await synthesize_confirmation(
+            body.name,
+            title=body.title,
+            season=body.season,
+            episode=body.episode,
+            segment=body.segment,
+            fansub=body.fansub,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    access = StorageMemoryAccess(storage)
+    outcome = await learn_confirmation(
+        access,
+        confirmed=confirmed,
+        raw_name=body.name,
+        source=MemorySource.MANUAL,
+        bypass_lookup=access,
+        reference_lookup=reference_chain,
+        draft_title=draft_title,
+    )
+    # 确认收尾（与 CLI confirm 同语义）：raw_name 匹配的未决 pending 行
+    # 一并 resolve，附 pending_confirm 审计行（actor=manual）。
+    resolved_rows = await LoopStore(storage).resolve_open_pendings_by_raw_name(
+        body.name,
+        resolution={"action": "confirm", "confirmed_title": confirmed.title},
+        audit_row_for=lambda row: pending_audit_row(
+            pending=row, action=ACTION_PENDING_CONFIRM, confirmed=confirmed
+        ),
+    )
+    archive = (
+        confirm_archive.ArchiveOutcome(archived=False, reason="bypassed")
+        if outcome.bypassed
+        else await _archive_confirmed_file(
+            confirmed,
+            raw_name=body.name,
+            resolved_rows=resolved_rows,
+            settings=settings,
+            governance=governance,
+        )
+    )
+    if archive.archived:
+        # 海报兜底（PR3+ 触发点 A）：后台 best-effort，不影响归档结果。
+        schedule_poster_fetch(
+            poster_service,
+            titles=(confirmed.title, None, None),
+            library_path=Path(settings.library_path),
+        )
+    # 端点级确认留痕（12-F）：无 pending 行（纯 parse 场景）也有
+    # pending_confirm 惯例的审计行可查；instruction["source"] 区分入口。
+    audit = await governance.record_audit(
+        operation_id=uuid4().hex,
+        entity="pending_queue",
+        action=ACTION_PENDING_CONFIRM,
+        instruction={
+            "raw_name": body.name,
+            "source": "confirm-name",
+            "resolved_pending": len(resolved_rows),
+            "confirmed": {
+                "title": confirmed.title,
+                "season": confirmed.season,
+                "episode": confirmed.episode,
+                "segment": confirmed.segment.value,
+                "fansub": confirmed.fansub,
+            },
+        },
+        actor=Actor.MANUAL,
+    )
+    await publish_audit_event(
+        bus,
+        category=EventCategory.PARSE,
+        message="pending.confirmed",
+        audit_id=audit.id,
+        raw_name=body.name,
+        title=confirmed.title,
+        bypassed=outcome.bypassed,
+    )
+    return ConfirmNameOut(
+        bypassed=outcome.bypassed,
+        resolved_pending=len(resolved_rows),
+        archive=archive.as_dict(),
+        entries=_confirm_entries_payload(outcome),
+    )
 
 
 @router.post("/import", status_code=202)
