@@ -107,8 +107,10 @@ describe('SubscriptionsPage', () => {
       fansub_pref: 'LoliHouse',
       quality_pref: null,
     })
-    await screen.findByText('paused')
-    expect(screen.getByText('LoliHouse')).toBeInTheDocument()
+    // 断言收窄到行内:抽屉 select 的 option 也含「暂停」文案,全局查询会提前命中
+    const updatedRow = (await screen.findByText('药屋少女的呢喃')).closest('div.border-b') as HTMLElement
+    await waitFor(() => expect(within(updatedRow).getByText('暂停')).toBeInTheDocument())
+    expect(within(updatedRow).getByText('LoliHouse')).toBeInTheDocument()
   })
 
   it('编辑订阅失败:错误展示在抽屉内且不关闭', async () => {

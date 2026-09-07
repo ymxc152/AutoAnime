@@ -128,7 +128,8 @@ export function SettingRow({ label, description, htmlFor, children }: SettingRow
           <p className="mt-0.5 text-xs text-ink-secondary">{description}</p>
         )}
       </div>
-      <div className="shrink-0 md:w-64">{children}</div>
+      {/* 12-A:固定 w-64 会溢出长路径/URL;改为 min(24rem,40vw),窄屏自动收窄 */}
+      <div className="shrink-0 md:w-[min(24rem,40vw)]">{children}</div>
     </div>
   )
 }

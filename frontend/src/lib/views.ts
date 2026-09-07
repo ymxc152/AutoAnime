@@ -57,6 +57,32 @@ export function mediaTypeLabel(type: MediaType): string {
   }
 }
 
+/** 订阅状态 → 中文(未知值原样返回,容忍后端新增枚举) */
+export function subscriptionStatusLabel(status: string): string {
+  switch (status) {
+    case 'active':
+      return strings.subscriptions.statusActive
+    case 'paused':
+      return strings.subscriptions.statusPaused
+    case 'finished':
+      return strings.subscriptions.statusFinished
+    default:
+      return status
+  }
+}
+
+/** 待确认 stage → 中文(未知值原样返回) */
+export function pendingStageLabel(stage: string): string {
+  const map: Record<string, string> = strings.pending.segment
+  return map[stage] ?? stage
+}
+
+/** 库内集状态 → 中文(未知值原样返回) */
+export function episodeStateLabel(state: string): string {
+  const view: StateView | undefined = episodeStateView(state as EpisodeState)
+  return view?.label ?? state
+}
+
 /** quality_score 小色标 tone:分数越高越接近满档 */
 export function qualityTone(score: number | null): Tone {
   if (score === null) return 'neutral'

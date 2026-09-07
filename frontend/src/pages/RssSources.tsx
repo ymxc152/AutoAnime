@@ -314,7 +314,8 @@ export function RssSourcesPage() {
       // 约定:URL 中内嵌的 token 随 URL 明文展示;独立 token 字段才按密钥处理。
       sticky: true,
       render: (row) => (
-        <span className="data-text block max-w-md truncate text-sm text-ink" title={row.url}>
+        // 12-A:去掉 max-w-md 硬上限,截断只发生在列宽不足时(悬停 title 看全文)
+        <span className="data-text block truncate text-sm text-ink" title={row.url}>
           {row.url}
         </span>
       ),
@@ -337,7 +338,7 @@ export function RssSourcesPage() {
       header: strings.rssSources.token,
       render: (row) => (
         <Badge tone={row.has_token ? 'success' : 'neutral'} mark>
-          {row.has_token ? '已配置' : '无'}
+          {row.has_token ? strings.settings.configured : strings.settings.notConfigured}
         </Badge>
       ),
     },

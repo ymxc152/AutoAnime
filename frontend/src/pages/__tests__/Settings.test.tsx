@@ -108,12 +108,12 @@ describe('SettingsPage', () => {
     expect(tokenInput).toHaveValue('')
     await user.type(tokenInput, 'sk-test-123')
     await user.click(screen.getByRole('button', { name: '保存 Token' }))
-    expect(await screen.findByText('已保存,即将自动刷新页面')).toBeInTheDocument()
+    expect(await screen.findByText('已保存,后续请求即时生效')).toBeInTheDocument()
     // 与 client.ts/sse.ts 同 key:请求头与 SSE query 都从这里读
     expect(localStorage.getItem('autoanime-api-token')).toBe('sk-test-123')
     // 清除:localStorage 移除,提示刷新生效
     await user.click(screen.getByRole('button', { name: '清除 Token' }))
-    expect(await screen.findByText('已清除,即将自动刷新页面')).toBeInTheDocument()
+    expect(await screen.findByText('已清除,后续请求即时生效')).toBeInTheDocument()
     expect(localStorage.getItem('autoanime-api-token')).toBeNull()
     // 收尾不污染同文件其他用例
     localStorage.removeItem('autoanime-api-token')

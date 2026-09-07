@@ -113,7 +113,7 @@ function GroupRow({
             <span className="text-xs text-ink-secondary">{strings.logs.collapseGroup}</span>
           ) : (
             <span className="text-xs text-ink-secondary">
-              {strings.logs.expandGroup.replace('{n}', String(group.rows))}
+              {t(strings.logs.expandGroup, { n: group.rows })}
             </span>
           )}
         </button>

@@ -197,7 +197,7 @@ describe('RssSourcesPage', () => {
       enabled: true,
       token: null,
     })
-    await waitFor(() => expect(within(row).getByText('无')).toBeInTheDocument())
+    await waitFor(() => expect(within(row).getByText('未配置')).toBeInTheDocument())
   })
 
   it('编辑 RSS 源失败:错误展示在抽屉内且不关闭', async () => {

@@ -9,7 +9,7 @@ import { useApi } from '../hooks/useApi'
 import { useReloadOnCategories } from '../hooks/useReloadOnEvent'
 import { strings } from '../strings'
 import { Badge, Card, EmptyState, ErrorState, PageTitle, Skeleton } from '../components'
-import { formatPercent } from '../lib/views'
+import { episodeStateLabel, formatPercent } from '../lib/views'
 import type { Metrics } from '../api/types'
 
 function MetricCard({
@@ -201,7 +201,7 @@ export function DashboardPage() {
             Object.entries(data.episode_states).map(([state, count]) => (
               <Badge key={state} mark>
                 <span className="data-text">
-                  {state} {count}
+                  {episodeStateLabel(state)} {count}
                 </span>
               </Badge>
             ))

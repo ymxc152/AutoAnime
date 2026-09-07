@@ -25,7 +25,7 @@ import {
   Skeleton,
   StatusDot,
 } from '../components'
-import { seasonStateView } from '../lib/views'
+import { mediaTypeLabel, seasonStateView, subscriptionStatusLabel } from '../lib/views'
 import type { SubscriptionDto } from '../api/types'
 
 const MIKAN_URL = 'https://mikanani.me'
@@ -250,8 +250,8 @@ function SubscriptionRow({
     <div className="flex flex-col gap-2 border-b border-line px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-ink">{subscriptionTitle(sub)}</span>
-        <Badge>{sub.media_type}</Badge>
-        <Badge tone="neutral">{sub.status}</Badge>
+        <Badge>{mediaTypeLabel(sub.media_type)}</Badge>
+        <Badge tone="neutral">{subscriptionStatusLabel(sub.status)}</Badge>
         <Badge>{sub.fansub_pref ?? strings.subscriptions.noFansub}</Badge>
         <span className="ml-auto">
           <Button size="sm" variant="secondary" onClick={() => onEdit(sub)}>

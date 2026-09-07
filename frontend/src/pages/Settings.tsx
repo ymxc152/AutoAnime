@@ -134,7 +134,7 @@ export function SettingsPage() {
     }
   }
 
-  /** 保存/清除 API Token(写 localStorage,即时生效需刷新);留空保存 = 清除 */
+  /** 保存/清除 API Token(写 localStorage);token 由 api client 每请求动态读取,即时生效无需刷新 */
   const saveToken = (): void => {
     const token = tokenDraft.trim()
     setApiToken(token)
@@ -142,7 +142,6 @@ export function SettingsPage() {
     setTokenNotice(
       token === '' ? strings.settings.apiTokenClearedNotice : strings.settings.apiTokenSavedNotice,
     )
-    window.setTimeout(() => window.location.reload(), 750)
   }
 
   const clearToken = (): void => {
@@ -234,10 +233,10 @@ export function SettingsPage() {
       <Card title={strings.settings.environmentSection}>
         <div className="divide-y divide-line">
           <SettingRow label={strings.settings.libraryPath}>
-            <span className="data-text text-sm text-ink">{base.library_path}</span>
+            <span className="data-text break-all text-sm text-ink">{base.library_path}</span>
           </SettingRow>
           <SettingRow label={strings.settings.downloadPath}>
-            <span className="data-text text-sm text-ink">{base.download_path}</span>
+            <span className="data-text break-all text-sm text-ink">{base.download_path}</span>
           </SettingRow>
           <SettingRow label={strings.settings.apiEndpoint}>
             <span className="data-text text-sm text-ink">

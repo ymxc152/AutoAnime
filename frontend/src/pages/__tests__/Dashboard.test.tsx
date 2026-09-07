@@ -43,8 +43,8 @@ describe('DashboardPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('库内集状态分布')).toBeInTheDocument()
     // episode_states 徽标
-    expect(screen.getByText(/missing 30/)).toBeInTheDocument()
-    expect(screen.getByText(/organized 87/)).toBeInTheDocument()
+    expect(screen.getByText(/缺集 30/)).toBeInTheDocument()
+    expect(screen.getByText(/已归档 87/)).toBeInTheDocument()
   })
 
   it('周曲线过滤空桶(0 调用的周不渲染)', async () => {

@@ -2,7 +2,7 @@
  * 全局 SSE 连接状态(小色标 + 文案),侧栏底部/移动顶栏共用。
  */
 import { useEventStream } from '../hooks/eventStreamContext'
-import { strings } from '../strings'
+import { strings, t } from '../strings'
 import { StatusDot, StatusMark, type Tone } from './StatusDot'
 
 export function SseStatusLine({ compact = false }: { compact?: boolean }) {
@@ -14,7 +14,7 @@ export function SseStatusLine({ compact = false }: { compact?: boolean }) {
     label = strings.sse.connected
   } else if (status === 'connecting' || status === 'reconnecting') {
     tone = 'warning'
-    label = status === 'reconnecting' ? `${strings.sse.reconnecting} ×${attempt}` : strings.sse.connecting
+    label = status === 'reconnecting' ? t(strings.sse.reconnecting, { attempt }) : strings.sse.connecting
   }
   if (compact) {
     return (

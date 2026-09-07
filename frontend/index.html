@@ -6,8 +6,13 @@
     <title>AutoAnime</title>
     <script>
       // 主题在首帧前确定,避免闪烁;不做切换动画(第一版纪律)。
+      // 未手动选择过主题时跟随系统偏好(12-A:修复系统暗色用户首屏仍浅色)。
       try {
-        if (localStorage.getItem('autoanime-theme') === 'dark') {
+        var theme = localStorage.getItem('autoanime-theme')
+        if (
+          theme === 'dark' ||
+          (theme === null && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        ) {
           document.documentElement.classList.add('dark')
         }
       } catch (e) {

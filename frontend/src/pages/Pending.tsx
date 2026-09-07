@@ -25,7 +25,7 @@ import {
   Select,
   type Column,
 } from '../components'
-import { formatDateTime } from '../lib/views'
+import { formatDateTime, pendingStageLabel } from '../lib/views'
 import type { PendingItemDto } from '../api/types'
 
 /** context 草稿值 → 展示文本(缺失显示 —) */
@@ -355,7 +355,8 @@ export function PendingPage() {
       header: strings.pending.rawName,
       sticky: true,
       render: (row) => (
-        <span className="data-text block max-w-sm truncate text-sm text-ink" title={row.raw_name}>
+        // 12-A:去掉 max-w-sm 硬上限,截断只发生在列宽不足时(悬停 title 看全文)
+        <span className="data-text block truncate text-sm text-ink" title={row.raw_name}>
           {row.raw_name}
         </span>
       ),
@@ -363,13 +364,16 @@ export function PendingPage() {
     {
       key: 'stage',
       header: strings.pending.stage,
-      render: (row) => <Badge>{row.stage}</Badge>,
+      render: (row) => <Badge>{pendingStageLabel(row.stage)}</Badge>,
     },
     {
       key: 'reason',
       header: strings.pending.reason,
       render: (row) => (
-        <span className="block max-w-xs truncate text-xs text-ink-secondary" title={row.reason ?? undefined}>
+        <span
+          className="block truncate text-xs text-ink-secondary"
+          title={row.reason ?? undefined}
+        >
           {row.reason ?? '—'}
         </span>
       ),
