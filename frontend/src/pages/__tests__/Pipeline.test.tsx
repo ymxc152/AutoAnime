@@ -5,7 +5,8 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PipelinePage } from '../Pipeline'
-import { api } from '../../api'
+import { api, ApiError } from '../../api'
+import { toast } from 'sonner'
 import { FakeEventSource, renderPage, sseMessage } from '../../test/testUtils'
 import { resetMockState } from '../../mocks/handlers'
 import type { EventSourceFactory } from '../../api/sse'
@@ -203,5 +204,61 @@ describe('PipelinePage', () => {
     fireEvent.change(screen.getByLabelText('执行范围'), { target: { value: 'rss' } })
     fireEvent.click(screen.getByRole('button', { name: '跑一轮订阅闭环' }))
     await waitFor(() => expect(runOnceSpy).toHaveBeenCalledWith({ scope: 'rss' }))
+  })
+
+  it('12-F:人工确认命名 —— 空文件名不提交;填写后按可选覆写提交并 toast 学习/归档结果', async () => {
+    const successSpy = vi.spyOn(toast, 'success')
+    const confirmNameSpy = vi.spyOn(api.pipeline, 'confirmName').mockResolvedValueOnce({
+      bypassed: false,
+      resolved_pending: 0,
+      archive: {
+        archived: true,
+        dst: '/library/Show/Season 1/Show - S01E01.1080p.mkv',
+        strategy: 'hardlink',
+      },
+      entries: [
+        { key_level: 'show', key_hash: 'h1', title_shape: 'Show', source: 'manual', status: 'active', hit_count: 0, corrected_count: 0 },
+        { key_level: 'episode', key_hash: 'h2', title_shape: 'Show', source: 'manual', status: 'active', hit_count: 0, corrected_count: 0 },
+      ],
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    // 空文件名提交被前端校验拦截,不调后端
+    fireEvent.click(screen.getByRole('button', { name: '确认并学习' }))
+    expect(confirmNameSpy).not.toHaveBeenCalled()
+    expect(await screen.findByText('请填写文件名')).toBeInTheDocument()
+    // 填写文件名 + 可选覆写(标题留空不传、季/集/段落覆写)
+    fireEvent.change(screen.getByLabelText('文件名'), { target: { value: 'Show S01E01 1080p.mkv' } })
+    fireEvent.change(screen.getByLabelText('季'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('集'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('段落类型'), { target: { value: 'episode' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认并学习' }))
+    await waitFor(() =>
+      expect(confirmNameSpy).toHaveBeenCalledWith({
+        name: 'Show S01E01 1080p.mkv',
+        season: 1,
+        episode: 1,
+        segment: 'episode',
+      }),
+    )
+    // toast = 学习结果(写入 2 条记忆) + 是否已归档(按响应字段组织)
+    await waitFor(() =>
+      expect(successSpy).toHaveBeenCalledWith(
+        '已写入识别记忆 2 条,下次同类命名直接命中 · 已归档到 /library/Show/Season 1/Show - S01E01.1080p.mkv',
+      ),
+    )
+    confirmNameSpy.mockRestore()
+    successSpy.mockRestore()
+  })
+
+  it('12-F:人工确认命名 422 展示后端原因且不关闭表单', async () => {
+    vi.spyOn(api.pipeline, 'confirmName').mockRejectedValueOnce(
+      new ApiError(422, 'name resolved to an empty title'),
+    )
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('文件名'), { target: { value: '???.mkv' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认并学习' }))
+    expect(await screen.findByText('name resolved to an empty title')).toBeInTheDocument()
   })
 })

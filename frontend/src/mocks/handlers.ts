@@ -17,11 +17,15 @@ import {
 } from './data'
 import type {
   AuditDto,
+  ConfirmNameOut,
+  EpisodeReparseOut,
   Metrics,
   OperationGroupDto,
   Page,
   PendingItemDto,
   PendingResolveOut,
+  ReportOut,
+  RssPollResult,
   RssSourceDto,
   RollbackResult,
   SeriesDto,
@@ -412,6 +416,80 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         state.rssSources = state.rssSources.filter((s) => s.id !== id)
         return delayVoid()
       },
+      // 12-F:行内立即轮询(对齐后端 404/409(disabled)语义,并刷新 last_polled_at)
+      poll: (id) => {
+        const source = state.rssSources.find((s) => s.id === id)
+        if (!source) {
+          return delayVoid().then(() => {
+            throw new ApiError(404, `rss source ${id} not found`)
+          })
+        }
+        if (!source.enabled) {
+          return delayVoid().then(() => {
+            throw new ApiError(409, `rss source ${id} is disabled`)
+          })
+        }
+        source.last_polled_at = new Date().toISOString()
+        const result: RssPollResult = {
+          source_id: source.id,
+          season_id: source.season_id,
+          skipped_not_due: false,
+          fetch_error: null,
+          entries_total: 12,
+          seen: 3,
+          rejected: 8,
+          backlog: 1,
+          picked: 2,
+          gaps: [],
+          reconciled: 0,
+          reconcile_notes: [],
+          download: { checked: 4, completed: 1, failed: 0, retried: 0, notes: [] },
+        }
+        return delayed(result)
+      },
+    },
+
+    // 12-F:集重新识别(对齐后端两步契约:dry_run=true 预览 / false 执行)
+    episodes: {
+      reparse: (id, body) => {
+        const episode = state.series
+          .flatMap((s) => s.seasons)
+          .flatMap((season) => season.episodes)
+          .find((e) => e.id === id)
+        if (!episode) {
+          return delayVoid().then(() => {
+            throw new ApiError(404, `episode ${id} not found`)
+          })
+        }
+        if (episode.file_path === null) {
+          return delayVoid().then(() => {
+            throw new ApiError(409, `episode ${id} has no file on disk to reparse`)
+          })
+        }
+        const padded = String(episode.number).padStart(2, '0')
+        const result: EpisodeReparseOut = {
+          episode_id: id,
+          dry_run: body.dry_run,
+          parsed: {
+            title: '葬送的芙莉莲',
+            season: 1,
+            episode: episode.number,
+            segment: 'episode',
+            fansub: null,
+            level: 'high',
+            confidence: 1,
+            missing_fields: [],
+            evidence: {},
+          },
+          action: {
+            dst: `/library/葬送的芙莉莲/Season 1/葬送的芙莉莲 - S01E${padded}.1080p.mkv`,
+            strategy: 'hardlink',
+            episode_state: episode.state,
+            action: 'archive',
+          },
+        }
+        return delayed(result)
+      },
     },
 
     pipeline: {
@@ -448,11 +526,75 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           summary: { total: 0, scanned: 0, archived: 0, pending: 0, failed: 0, skipped: 0 },
           error: null,
         }),
+      // 12-F:库外人工确认命名(对齐后端 ConfirmNameIn.name 必填 → 422 语义)
+      confirmName: (body) => {
+        if (body.name.trim() === '') {
+          return delayVoid().then(() => {
+            throw new ApiError(422, 'name must be a non-empty string')
+          })
+        }
+        const result: ConfirmNameOut = {
+          bypassed: false,
+          resolved_pending: 0,
+          archive: {
+            archived: true,
+            dst: '/library/葬送的芙莉莲/Season 1/葬送的芙莉莲 - S01E01.1080p.mkv',
+            strategy: 'hardlink',
+          },
+          entries: [
+            {
+              key_level: 'show',
+              key_hash: 'mock-hash-show',
+              title_shape: '葬送的芙莉莲',
+              source: 'manual',
+              status: 'active',
+              hit_count: 0,
+              corrected_count: 0,
+            },
+            {
+              key_level: 'episode',
+              key_hash: 'mock-hash-episode',
+              title_shape: '葬送的芙莉莲',
+              source: 'manual',
+              status: 'active',
+              hit_count: 0,
+              corrected_count: 0,
+            },
+          ],
+        }
+        return delayed(result)
+      },
     },
 
     scheduler: {
       // 12-F:对齐后端 SchedulerRunIn——body 可选,scope 缺省 all
       runOnce: (body = {}) => delayed({ scope: body.scope ?? ('all' as const), reports: {}, errors: [] }),
+    },
+
+    // 12-F:识别指标(GET /api/report,与 CLI report --json 同构;纯读 fixture)
+    report: {
+      get: () =>
+        delayed({
+          generated_from: { parse_events: 431, audit_log: 12 },
+          parse_events: {
+            total: 431,
+            days: [],
+            llm_called_total: 31,
+            llm_call_rate: 0.0719,
+            by_outcome: { archive: 387, low_confidence: 44 },
+          },
+          audit: {
+            total: 12,
+            by_action: { pending_confirm: 8, pending_correct: 2, organize: 2 },
+            by_actor: { auto: 10, manual: 2 },
+          },
+          manual_intervention_rate: {
+            manual_correction_events: 2,
+            archived_events: 387,
+            rate: 0.0052,
+            note: 'mock fixture',
+          },
+        } satisfies ReportOut),
     },
 
     // ---- 12-E:settings 三档生效 mock(对齐后端 settings.py 白名单/密钥语义) ----

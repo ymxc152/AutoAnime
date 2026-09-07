@@ -159,6 +159,75 @@ const LEVEL_LABELS: Record<number, string> = {
   3: strings.dashboard.levelL3,
 }
 
+/**
+ * 12-F:「识别指标」区块 —— GET /api/report(CLI report --json 同构)。
+ * 与上方指标卡互补:这里放「累计学习成效」视角(总解析/LLM 兜底/
+ * 归档事件/人工纠正),不与按周期聚合的三级管线统计重复。
+ */
+function ReportCard() {
+  const fetcher = useCallback(() => api.report.get(), [])
+  const { data, loading, error, reload } = useApi(fetcher)
+  useReloadOnCategories(reload, ['parse', 'system'])
+
+  const items: { label: string; value: string }[] =
+    data === null
+      ? []
+      : [
+          {
+            label: strings.ops12f.reportParsed,
+            value: String(data.parse_events.total),
+          },
+          {
+            label: strings.ops12f.reportLlmFallback,
+            value: String(data.parse_events.llm_called_total),
+          },
+          {
+            label: strings.ops12f.reportLlmRate,
+            value: formatPercent(data.parse_events.llm_call_rate),
+          },
+          {
+            label: strings.ops12f.reportArchived,
+            value: String(data.manual_intervention_rate.archived_events),
+          },
+          {
+            label: strings.ops12f.reportManual,
+            value: String(data.manual_intervention_rate.manual_correction_events),
+          },
+          {
+            label: strings.ops12f.reportInterventionRate,
+            value:
+              data.manual_intervention_rate.rate === null
+                ? '—'
+                : formatPercent(data.manual_intervention_rate.rate),
+          },
+        ]
+
+  return (
+    <Card title={strings.ops12f.reportTitle} description={strings.ops12f.reportHint} flush>
+      <div className="px-4 pb-3">
+        {error !== null ? (
+          <p role="alert" className="py-2 text-sm text-danger">
+            {strings.ops12f.reportLoadFailed}: {error}
+          </p>
+        ) : loading || data === null ? (
+          <Skeleton className="h-16" />
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {items.map((item) => (
+              <div key={item.label} className="flex flex-col gap-0.5">
+                <span className="text-xs text-ink-secondary">{item.label}</span>
+                <span className="data-text text-xl font-semibold tracking-tight text-ink">
+                  {item.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 export function DashboardPage() {
   const fetcher = useCallback(() => api.metrics.get(), [])
   const { data, loading, error, reload } = useApi(fetcher)
@@ -235,6 +304,9 @@ export function DashboardPage() {
           <WeeklyCurve points={data.llm_call_curve_weekly} />
         </Card>
       </div>
+
+      {/* 12-F:识别指标(GET /api/report,累计视角) */}
+      <ReportCard />
 
       <Card title={strings.dashboard.episodeStates} flush>
         <div className="flex flex-wrap gap-2 px-4 py-3">

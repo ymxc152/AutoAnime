@@ -1,9 +1,10 @@
 /*
  * Dashboard 渲染冒烟:指标卡(介入率/待确认/LLM 调用率)+ 三级统计 + 周曲线 + 集状态分布。
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import { DashboardPage } from '../Dashboard'
 import { renderPage } from '../../test/testUtils'
+import { api } from '../../api'
 import { resetMockState, setMockMetrics } from '../../mocks/handlers'
 import { mockMetrics } from '../../mocks/data'
 
@@ -66,5 +67,36 @@ describe('DashboardPage', () => {
     })
     renderPage(<DashboardPage />)
     expect(await screen.findByText('暂无数据')).toBeInTheDocument()
+  })
+
+  it('12-F:识别指标区块渲染 GET /api/report 的累计统计(与三级管线统计不重复)', async () => {
+    renderPage(<DashboardPage />)
+    expect(await screen.findByText('识别指标')).toBeInTheDocument()
+    // 等 report 异步数据落地(mock 有 120ms 延迟)
+    await screen.findByText('累计解析')
+    // 限定在识别指标卡片内断言(页面上方指标卡/三级统计有重叠数值)
+    const card = screen.getByText('识别指标').closest('section') as HTMLElement
+    // 6 个精选字段:累计解析 / LLM 兜底 / LLM 调用率 / 归档事件 / 人工纠正 / 人工介入率
+    expect(within(card).getByText('累计解析')).toBeInTheDocument()
+    expect(within(card).getByText('LLM 兜底')).toBeInTheDocument()
+    expect(within(card).getByText('LLM 调用率')).toBeInTheDocument()
+    expect(within(card).getByText('归档事件')).toBeInTheDocument()
+    expect(within(card).getByText('人工纠正')).toBeInTheDocument()
+    expect(within(card).getByText('人工介入率')).toBeInTheDocument()
+    // mock fixture 数值(parse_events.total=431 / llm_called_total=31 / rate=0.52%→0.5%)
+    expect(within(card).getByText('431')).toBeInTheDocument()
+    expect(within(card).getByText('31')).toBeInTheDocument()
+    expect(within(card).getByText('7.2%')).toBeInTheDocument()
+    expect(within(card).getByText('387')).toBeInTheDocument()
+    expect(within(card).getByText('2')).toBeInTheDocument()
+    expect(within(card).getByText('0.5%')).toBeInTheDocument()
+  })
+
+  it('12-F:识别指标加载失败时区块内展示错误,不影响其余指标卡', async () => {
+    vi.spyOn(api.report, 'get').mockRejectedValueOnce(new Error('report unavailable'))
+    renderPage(<DashboardPage />)
+    expect(await screen.findByText(/识别指标加载失败/)).toBeInTheDocument()
+    // 其余区块不受影响
+    expect(screen.getByText('人工介入率')).toBeInTheDocument()
   })
 })

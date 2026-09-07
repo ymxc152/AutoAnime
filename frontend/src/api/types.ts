@@ -543,6 +543,148 @@ export interface QbitTestOut {
   error: string | null
 }
 
+// ---------- 12-F:RSS 立即轮询 / 人工确认命名 / 集重新识别 / 识别指标 ----------
+
+/**
+ * POST /api/rss_sources/{id}/poll 响应(= 后端 rss_sources.py 内联 dict):
+ * 立即轮询单个源;download 为同一轮顺带的下载对账摘要。
+ */
+export interface RssPollResult {
+  source_id: number
+  season_id: number
+  /** 未到计划轮询时间被跳过(非错误) */
+  skipped_not_due: boolean
+  /** 源拉取失败原因(网络/超时等;轮询本身仍返回 200) */
+  fetch_error: string | null
+  entries_total: number
+  seen: number
+  rejected: number
+  backlog: number
+  /** 拾取并推送下载器的新条目数 */
+  picked: number
+  gaps: string[]
+  reconciled: number
+  reconcile_notes: string[]
+  download: {
+    checked: number
+    completed: number
+    failed: number
+    retried: number
+    notes: string[]
+  }
+}
+
+/** POST /api/pipeline/confirm-name 请求体(= 后端 ConfirmNameIn):name 必填 */
+export interface ConfirmNameBody {
+  name: string
+  title?: string
+  season?: number
+  episode?: number
+  segment?: string
+  fansub?: string
+}
+
+/** confirm-name 归档结果(= 后端 ArchiveOutcome.as_dict):未归档时 reason 必有 */
+export interface ConfirmNameArchive {
+  archived: boolean
+  dst?: string
+  strategy?: string
+  reason?: string
+}
+
+/** confirm-name 学习三件套单条(= 后端 _confirm_entries_payload 条目) */
+export interface ConfirmNameEntry {
+  key_level: string
+  key_hash: string
+  title_shape: string
+  source: string
+  status: string
+  hit_count: number
+  corrected_count: number
+}
+
+/** POST /api/pipeline/confirm-name 响应(= 后端 ConfirmNameOut) */
+export interface ConfirmNameOut {
+  bypassed: boolean
+  /** 按 raw_name 一并收尾的未决 pending 行数 */
+  resolved_pending: number
+  archive: ConfirmNameArchive
+  entries: ConfirmNameEntry[]
+}
+
+/** POST /api/episodes/{id}/reparse 请求体(= 后端 EpisodeReparseIn):true 预览 / false 执行 */
+export interface EpisodeReparseBody {
+  dry_run: boolean
+}
+
+/** reparse 的解析结果(= 后端 _parse_result_to_json,与 parse-preview result 同构) */
+export interface EpisodeReparseParsed {
+  title: string
+  season: number | null
+  episode: number | null
+  segment: string
+  fansub: string | null
+  level: string
+  confidence: number
+  missing_fields: string[]
+  evidence: Record<string, string>
+}
+
+/** reparse 的归档动作(action=skip 时带 reason,如 D21 守卫命中) */
+export interface EpisodeReparseAction {
+  /** 目标路径;无移动计划时为 null */
+  dst: string | null
+  strategy: string
+  episode_state: string
+  /** skip = 目标位守卫命中不移动;archive = 预览(将归档)/执行(已归档) */
+  action?: string
+  reason?: string
+}
+
+/** POST /api/episodes/{id}/reparse 响应(= 后端 EpisodeReparseOut) */
+export interface EpisodeReparseOut {
+  episode_id: number
+  dry_run: boolean
+  parsed: EpisodeReparseParsed | null
+  action: EpisodeReparseAction
+}
+
+/** GET /api/report 单日聚合点(= CLI report --json parse_events.days 条目) */
+export interface ReportDayPoint {
+  date: string
+  events: number
+  llm_called: number
+  llm_call_rate: number
+  by_level: Record<string, number>
+  avg_latency_ms: number | null
+}
+
+/**
+ * GET /api/report 响应(= CLI report --json 同构,单一事实源
+ * autoanime.cli._aggregate_report):累计解析事件 + 审计 + 人工介入率。
+ */
+export interface ReportOut {
+  generated_from: { parse_events: number; audit_log: number }
+  parse_events: {
+    total: number
+    days: ReportDayPoint[]
+    llm_called_total: number
+    llm_call_rate: number
+    by_outcome: Record<string, number>
+  }
+  audit: {
+    total: number
+    by_action: Record<string, number>
+    by_actor: Record<string, number>
+  }
+  manual_intervention_rate: {
+    manual_correction_events: number
+    archived_events: number
+    rate: number | null
+    note: string
+  }
+}
+
 // ---------- SSE:GET /api/events ----------
 
 /** 事件分类 = autoanime.core.events.EventCategory 透传 */

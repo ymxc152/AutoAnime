@@ -16,10 +16,11 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { FlaskConical, FolderDown, RefreshCw } from 'lucide-react'
-import { api } from '../api'
+import { toast } from 'sonner'
+import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useEventStream } from '../hooks/eventStreamContext'
-import { strings } from '../strings'
+import { strings, t } from '../strings'
 import {
   Badge,
   Button,
@@ -297,6 +298,142 @@ function ManualOperations() {
   )
 }
 
+/**
+ * 12-F:人工确认命名(POST /api/pipeline/confirm-name)。
+ * 用途:对不在待确认队列里的文件名做人工确认,结果写入识别记忆,
+ * 下次同类命名直接命中。name 必填;其余字段可选覆写(空 = 回退 L1 草稿)。
+ */
+function ConfirmNameCard() {
+  const [name, setName] = useState('')
+  const [title, setTitle] = useState('')
+  const [season, setSeason] = useState('')
+  const [episode, setEpisode] = useState('')
+  const [segment, setSegment] = useState('')
+  const [fansub, setFansub] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (): Promise<void> => {
+    if (name.trim() === '') {
+      setError(strings.ops12f.confirmNameRequired)
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      // 可选覆写:留空不传(等价后端缺省回退 L1 草稿)
+      const seasonNum = Number(season)
+      const episodeNum = Number(episode)
+      const out = await api.pipeline.confirmName({
+        name: name.trim(),
+        ...(title.trim() !== '' ? { title: title.trim() } : {}),
+        ...(season !== '' && Number.isFinite(seasonNum) ? { season: seasonNum } : {}),
+        ...(episode !== '' && Number.isFinite(episodeNum) ? { episode: episodeNum } : {}),
+        ...(segment !== '' ? { segment } : {}),
+        ...(fansub.trim() !== '' ? { fansub: fansub.trim() } : {}),
+      })
+      // 反馈 = 学习结果 + 是否已归档(按响应字段组织,不编造)
+      const archiveNote =
+        out.archive.archived && typeof out.archive.dst === 'string'
+          ? t(strings.ops12f.confirmNameArchived, { dst: out.archive.dst })
+          : t(strings.ops12f.confirmNameNotArchived, {
+              reason:
+                typeof out.archive.reason === 'string' ? out.archive.reason : strings.common.unknown,
+            })
+      toast.success(
+        `${t(strings.ops12f.confirmNameDone, { entries: out.entries.length })} · ${archiveNote}`,
+      )
+      setName('')
+      setTitle('')
+      setSeason('')
+      setEpisode('')
+      setSegment('')
+      setFansub('')
+    } catch (cause) {
+      // 422 等校验失败展示后端原因
+      setError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card title={strings.ops12f.confirmNameTitle} description={strings.ops12f.confirmNameHint} className="mb-4">
+      <form
+        className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-6 lg:items-start"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <Field
+          label={strings.ops12f.confirmNameField}
+          htmlFor="confirm-name-file"
+          className="lg:col-span-2"
+          error={error}
+        >
+          <Input
+            id="confirm-name-file"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            invalid={error !== null}
+            placeholder="Show S01E01 1080p.mkv"
+            className="data-text"
+          />
+        </Field>
+        <Field label={strings.pending.fieldTitle} htmlFor="confirm-name-title">
+          <Input
+            id="confirm-name-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={strings.ops12f.confirmNameOptionalHint}
+          />
+        </Field>
+        <Field label={strings.pending.fieldSeason} htmlFor="confirm-name-season">
+          <Input
+            id="confirm-name-season"
+            type="number"
+            value={season}
+            onChange={(e) => setSeason(e.target.value)}
+          />
+        </Field>
+        <Field label={strings.pending.fieldEpisode} htmlFor="confirm-name-episode">
+          <Input
+            id="confirm-name-episode"
+            type="number"
+            value={episode}
+            onChange={(e) => setEpisode(e.target.value)}
+          />
+        </Field>
+        <Field label={strings.pending.fieldSegment} htmlFor="confirm-name-segment">
+          <Select
+            id="confirm-name-segment"
+            value={segment}
+            onChange={(e) => setSegment(e.target.value)}
+          >
+            <option value="">{strings.ops12f.confirmNameSegmentEmpty}</option>
+            <option value="episode">{strings.pending.segment.episode}</option>
+            <option value="season_pack">{strings.pending.segment.season_pack}</option>
+            <option value="movie">{strings.pending.segment.movie}</option>
+          </Select>
+        </Field>
+        <Field label={strings.pending.fieldFansub} htmlFor="confirm-name-fansub">
+          <Input
+            id="confirm-name-fansub"
+            value={fansub}
+            onChange={(e) => setFansub(e.target.value)}
+          />
+        </Field>
+        <div className="lg:col-span-6">
+          <Button type="submit" variant="primary" loading={busy}>
+            {strings.ops12f.submitConfirmName}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  )
+}
+
 export function PipelinePage() {
   const fetcher = useCallback(() => api.metrics.get(), [])
   const { data: metrics } = useApi(fetcher)
@@ -384,6 +521,8 @@ export function PipelinePage() {
       />
 
       <ManualOperations />
+      {/* 12-F:手动操作区第三张卡 —— 库外文件名的人工确认与学习 */}
+      <ConfirmNameCard />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_280px]">
         <Card flush className="hidden overflow-hidden lg:block">

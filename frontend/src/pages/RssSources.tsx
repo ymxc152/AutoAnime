@@ -3,7 +3,8 @@
  * 数据:GET/POST/PATCH/DELETE /api/rss_sources。
  */
 import { useCallback, useMemo, useState } from 'react'
-import { Rss } from 'lucide-react'
+import { RefreshCw, Rss } from 'lucide-react'
+import { toast } from 'sonner'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
@@ -281,12 +282,16 @@ export function RssSourcesPage() {
     'rss_source.created',
     'rss_source.updated',
     'rss_source.deleted',
+    // 12-F:立即轮询完成后后端广播 rss_source.polled,列表对齐 last_polled_at
+    'rss_source.polled',
   ])
   // 季下拉数据源:GET /api/subscriptions(后端 SubscriptionOut 内嵌 seasons)
   const subsFetcher = useCallback(() => api.subscriptions.list({ limit: 200 }), [])
   const { data: subsData } = useApi(subsFetcher)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  // 12-F:行内「立即轮询」进行中的源 id(null = 空闲;防重复点击)
+  const [pollingId, setPollingId] = useState<number | null>(null)
   const [editingSource, setEditingSource] = useState<RssSourceDto | null>(null)
   // 启停/移除失败不再静默(A2):复用页面级 role="alert" 错误条
   const [actionError, setActionError] = useState<string | null>(null)
@@ -322,6 +327,39 @@ export function RssSourcesPage() {
       setActionError(cause instanceof ApiError ? cause.message : strings.rssSources.removeFailed)
     } finally {
       setBusyId(null)
+    }
+  }
+
+  // 12-F:行内立即轮询(POST /api/rss_sources/{id}/poll),按响应字段组织反馈:
+  // fetch_error 如实透出;409 区分「源停用」与「并发轮询」两种原因。
+  const poll = async (source: RssSourceDto): Promise<void> => {
+    if (pollingId !== null) return
+    setPollingId(source.id)
+    try {
+      const result = await api.rssSources.poll(source.id)
+      if (result.fetch_error !== null) {
+        toast.warning(`${strings.ops12f.pollFetchError}: ${result.fetch_error}`)
+      } else if (result.skipped_not_due) {
+        toast.info(strings.ops12f.pollSkipped)
+      } else {
+        toast.success(
+          t(strings.ops12f.pollDone, {
+            picked: result.picked,
+            completed: result.download.completed,
+          }),
+        )
+      }
+      reload()
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) {
+        toast.warning(
+          cause.message.includes('disabled') ? strings.ops12f.pollDisabled : strings.ops12f.pollConflict,
+        )
+      } else {
+        toast.error(cause instanceof ApiError ? cause.message : strings.ops12f.pollFailed)
+      }
+    } finally {
+      setPollingId(null)
     }
   }
 
@@ -413,6 +451,18 @@ export function RssSourcesPage() {
           </span>
         ) : (
           <>
+            {/* 12-F:行内立即轮询;全页同一时刻只允许一个轮询在途(后端并发互斥) */}
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={`${strings.ops12f.pollAction} ${row.url}`}
+              loading={pollingId === row.id}
+              disabled={pollingId !== null}
+              onClick={() => void poll(row)}
+            >
+              <RefreshCw aria-hidden className="h-3.5 w-3.5" />
+              {strings.ops12f.pollAction}
+            </Button>
             <Button size="sm" variant="secondary" onClick={() => setEditingSource(row)}>
               {strings.rssSources.editTitle}
             </Button>

@@ -7,6 +7,10 @@ import { request } from './client'
 import type {
   AuditDto,
   AuditQuery,
+  ConfirmNameBody,
+  ConfirmNameOut,
+  EpisodeReparseBody,
+  EpisodeReparseOut,
   Metrics,
   OperationGroupDto,
   Page,
@@ -20,7 +24,9 @@ import type {
   PendingQuery,
   PendingRejectBody,
   PendingResolveOut,
+  ReportOut,
   RollbackResult,
+  RssPollResult,
   RssSourceCreateBody,
   RssSourceDto,
   RssSourceUpdateBody,
@@ -42,6 +48,11 @@ export const endpoints = {
   /** GET /api/metrics —— Dashboard 指标(MetricsOut) */
   metrics: {
     get: () => request<Metrics>('/api/metrics'),
+  },
+
+  /** GET /api/report —— 12-F 识别指标(CLI report --json 同构,纯读) */
+  report: {
+    get: () => request<ReportOut>('/api/report'),
   },
 
   /** GET /api/series —— Library(series 列表,内嵌 season/episode 全树;无 q 过滤) */
@@ -103,6 +114,15 @@ export const endpoints = {
     update: (id: number, body: RssSourceUpdateBody) =>
       request<RssSourceDto>(`/api/rss_sources/${id}`, { method: 'PATCH', body }),
     remove: (id: number) => request<void>(`/api/rss_sources/${id}`, { method: 'DELETE' }),
+    // 12-F:行内立即轮询单个源(409 = 源停用或已有轮询进行中)
+    poll: (id: number) =>
+      request<RssPollResult>(`/api/rss_sources/${id}/poll`, { method: 'POST' }),
+  },
+
+  /** POST /api/episodes/{id}/reparse —— 12-F 集重新识别(dry_run=true 预览/false 执行) */
+  episodes: {
+    reparse: (id: number, body: EpisodeReparseBody) =>
+      request<EpisodeReparseOut>(`/api/episodes/${id}/reparse`, { method: 'POST', body }),
   },
 
   /** Pipeline D:单文件 L1 试跑 / 异步目录导入 / 任务状态 */
@@ -112,6 +132,9 @@ export const endpoints = {
     startImport: (body: PipelineImportBody) =>
       request<{ task_id: string; status: 'running' }>('/api/pipeline/import', { method: 'POST', body }),
     task: (id: string) => request<PipelineTask>(`/api/pipeline/tasks/${id}`),
+    // 12-F:库外人工确认命名(学习三件套 + pending 收尾 + 归档;422 = 校验失败)
+    confirmName: (body: ConfirmNameBody) =>
+      request<ConfirmNameOut>('/api/pipeline/confirm-name', { method: 'POST', body }),
   },
 
   /** Scheduler D:手动触发一轮订阅闭环 */

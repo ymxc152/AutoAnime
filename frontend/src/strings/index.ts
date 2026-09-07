@@ -421,6 +421,53 @@ export const strings = {
     title: '出错了',
     back: '返回',
   },
+
+  // ---- 12-F 收尾:RSS 立即轮询 / 人工确认命名 / 集重新识别 / 识别指标 ----
+  ops12f: {
+    // RssSources 行内「立即轮询」(POST /api/rss_sources/{id}/poll)
+    pollAction: '立即轮询',
+    pollDone: '轮询完成:拾取 {picked} 条新条目,本轮下载完成 {completed} 个',
+    pollSkipped: '未到计划轮询时间,本次已跳过',
+    pollFetchError: '源拉取失败',
+    pollDisabled: '源已停用,请先启用',
+    pollConflict: '已有轮询在进行,请稍后再试',
+    pollFailed: '轮询失败',
+    // Pipeline「人工确认命名」卡片(POST /api/pipeline/confirm-name)
+    confirmNameTitle: '人工确认命名',
+    confirmNameHint:
+      '对不在待确认队列里的文件名做人工确认,结果写入识别记忆,下次同类命名直接命中。',
+    confirmNameField: '文件名',
+    confirmNameRequired: '请填写文件名',
+    confirmNameOptionalHint: '留空 = 回退管线草稿',
+    confirmNameSegmentEmpty: '由管线判断',
+    submitConfirmName: '确认并学习',
+    confirmNameDone: '已写入识别记忆 {entries} 条,下次同类命名直接命中',
+    confirmNameArchived: '已归档到 {dst}',
+    confirmNameNotArchived: '未归档:{reason}',
+    // Library 集「重新识别」(POST /api/episodes/{id}/reparse 两步契约)
+    reparseAction: '重新识别',
+    reparsePreviewTitle: '重新识别预览',
+    reparsePreviewHint: '按当前文件名重跑三级识别。确认执行后将重命名并移动文件,请核对目标路径。',
+    reparseOriginal: '原文件',
+    reparseParsedTitle: '识别标题',
+    reparseSeasonEpisode: '识别季集',
+    reparseTargetPath: '目标路径',
+    reparseNoParsed: '未能解析出识别结果(目标路径仍按库内季集生成)',
+    reparseSkip: '目标位守卫命中,无需移动',
+    reparseConfirm: '确认执行',
+    reparseConfirmDialog: '确认重新识别并移动该文件?文件将按目标路径重命名移动。',
+    reparseDone: '重新识别完成,已归档到 {dst}',
+    // Dashboard「识别指标」区块(GET /api/report,CLI report --json 同构)
+    reportTitle: '识别指标',
+    reportHint: '累计统计,与 CLI report --json 同口径(区别于上方的周期指标)',
+    reportParsed: '累计解析',
+    reportLlmFallback: 'LLM 兜底',
+    reportLlmRate: 'LLM 调用率',
+    reportArchived: '归档事件',
+    reportManual: '人工纠正',
+    reportInterventionRate: '人工介入率',
+    reportLoadFailed: '识别指标加载失败',
+  },
 } as const
 
 export type Strings = typeof strings

@@ -1,10 +1,14 @@
 /*
- * Library 冒烟 + 交互:卡片网格、搜索过滤、明细抽屉(季切换)。
+ * Library 冒烟 + 交互:卡片网格、搜索过滤、明细抽屉(季切换)、
+ * 集行「重新识别」两步契约(12-F:dry-run 预览 → 确认执行)。
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { LibraryPage } from '../Library'
 import { renderPage } from '../../test/testUtils'
+import { api } from '../../api'
+import type { EpisodeReparseOut } from '../../api/types'
 import { resetMockState } from '../../mocks/handlers'
 
 describe('LibraryPage', () => {
@@ -70,6 +74,83 @@ describe('LibraryPage', () => {
     // 默认第 1 季;切到第 2 季
     await user.click(within(dialog).getByText(/第 2 季/))
     expect(within(dialog).getAllByText(/E04/).length).toBeGreaterThan(0)
+  })
+
+  it('12-F:重新识别 —— 先 dry-run 预览展示解析结果与目标路径,确认执行二次确认后移动', async () => {
+    // ConfirmHost 未挂载时 confirmDialog 退回 window.confirm,这里确认放行
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const successSpy = vi.spyOn(toast, 'success')
+    const preview: EpisodeReparseOut = {
+      episode_id: 101,
+      dry_run: true,
+      parsed: {
+        title: '葬送的芙莉莲', season: 1, episode: 1, segment: 'episode', fansub: null,
+        level: 'high', confidence: 1, missing_fields: [], evidence: {},
+      },
+      action: {
+        dst: '/library/葬送的芙莉莲/Season 1/葬送的芙莉莲 - S01E01.1080p.mkv',
+        strategy: 'hardlink',
+        episode_state: 'organized',
+        action: 'archive',
+      },
+    }
+    const executed: EpisodeReparseOut = { ...preview, dry_run: false }
+    const reparseSpy = vi
+      .spyOn(api.episodes, 'reparse')
+      .mockImplementation(async (_id, body) => (body.dry_run ? preview : executed))
+    const user = userEvent.setup()
+    renderPage(<LibraryPage />)
+    await user.click(await screen.findByText('葬送的芙莉莲'))
+    const drawer = await screen.findByRole('dialog')
+    // 第一步:点击行内「重新识别」→ dry_run=true 拉预览
+    await user.click(within(drawer).getAllByRole('button', { name: /重新识别/ })[0]!)
+    await waitFor(() => expect(reparseSpy).toHaveBeenCalledWith(101, { dry_run: true }))
+    // 预览抽屉展示「解析结果 → 将执行的动作」(原文件/识别标题/季集/目标路径)
+    const previewDrawer = (await screen.findAllByRole('dialog')).at(-1)!
+    expect(within(previewDrawer).getByText('葬送的芙莉莲 - S01E01.1080p.mkv')).toBeInTheDocument()
+    expect(within(previewDrawer).getByText('目标路径')).toBeInTheDocument()
+    expect(
+      within(previewDrawer).getByText('/library/葬送的芙莉莲/Season 1/葬送的芙莉莲 - S01E01.1080p.mkv'),
+    ).toBeInTheDocument()
+    // 第二步:danger「确认执行」→ confirmDialog 二次确认 → dry_run=false
+    await user.click(within(previewDrawer).getByRole('button', { name: '确认执行' }))
+    await waitFor(() => expect(reparseSpy).toHaveBeenCalledWith(101, { dry_run: false }))
+    await waitFor(() =>
+      expect(successSpy).toHaveBeenCalledWith(
+        '重新识别完成,已归档到 /library/葬送的芙莉莲/Season 1/葬送的芙莉莲 - S01E01.1080p.mkv',
+      ),
+    )
+    reparseSpy.mockRestore()
+    successSpy.mockRestore()
+  })
+
+  it('12-F:重新识别预览后可取消,不执行移动', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const preview: EpisodeReparseOut = {
+      episode_id: 101,
+      dry_run: true,
+      parsed: null,
+      action: {
+        dst: '/library/葬送的芙莉莲/Season 1/葬送的芙莉莲 - S01E01.1080p.mkv',
+        strategy: 'hardlink',
+        episode_state: 'organized',
+        action: 'archive',
+      },
+    }
+    const reparseSpy = vi.spyOn(api.episodes, 'reparse').mockResolvedValue(preview)
+    const user = userEvent.setup()
+    renderPage(<LibraryPage />)
+    await user.click(await screen.findByText('葬送的芙莉莲'))
+    const drawer = await screen.findByRole('dialog')
+    await user.click(within(drawer).getAllByRole('button', { name: /重新识别/ })[0]!)
+    const previewDrawer = (await screen.findAllByRole('dialog')).at(-1)!
+    // parsed 为 null 时如实提示,不编造识别结果
+    expect(await within(previewDrawer).findByText(/未能解析出识别结果/)).toBeInTheDocument()
+    // 取消:不再发起第二步调用
+    await user.click(within(previewDrawer).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.getAllByRole('dialog').length).toBe(1))
+    expect(reparseSpy).toHaveBeenCalledTimes(1)
+    reparseSpy.mockRestore()
   })
 })
 

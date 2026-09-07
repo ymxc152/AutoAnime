@@ -1,14 +1,34 @@
 /*
  * RSSSources 冒烟 + 交互(对齐后端 RssSourceCreateIn:season_id 必填):
- * 表格、启停开关、移除确认、创建校验。
+ * 表格、启停开关、移除确认、创建校验、行内立即轮询(12-F)。
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { RssSourcesPage } from '../RssSources'
 import { renderPage } from '../../test/testUtils'
 import { api, ApiError } from '../../api'
-import type { RssSourceDto } from '../../api/types'
+import type { RssPollResult, RssSourceDto } from '../../api/types'
 import { resetMockState } from '../../mocks/handlers'
+
+/** 立即轮询成功响应 fixture(字段口径对齐后端 rss_sources.py 内联 dict) */
+function pollFixture(): RssPollResult {
+  return {
+    source_id: 1,
+    season_id: 1,
+    skipped_not_due: false,
+    fetch_error: null,
+    entries_total: 12,
+    seen: 3,
+    rejected: 8,
+    backlog: 1,
+    picked: 2,
+    gaps: [],
+    reconciled: 0,
+    reconcile_notes: [],
+    download: { checked: 4, completed: 1, failed: 0, retried: 0, notes: [] },
+  }
+}
 
 describe('RssSourcesPage', () => {
   beforeEach(() => {
@@ -210,5 +230,37 @@ describe('RssSourcesPage', () => {
     await user.click(within(dialog).getByRole('button', { name: '保存' }))
     const alert = await within(dialog).findByRole('alert')
     expect(alert).toHaveTextContent('source locked')
+  })
+
+  it('12-F:立即轮询成功 → POST poll 调用,toast 展示拾取/下载摘要并刷新列表', async () => {
+    const user = userEvent.setup()
+    const successSpy = vi.spyOn(toast, 'success')
+    const pollSpy = vi.spyOn(api.rssSources, 'poll').mockResolvedValueOnce(pollFixture())
+    renderPage(<RssSourcesPage />)
+    const row = (await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: /立即轮询/ }))
+    await waitFor(() => expect(pollSpy).toHaveBeenCalledWith(1))
+    // 摘要说人话:按响应字段组织(拾取 2 条新条目 / 本轮下载完成 1 个)
+    await waitFor(() =>
+      expect(successSpy).toHaveBeenCalledWith('轮询完成:拾取 2 条新条目,本轮下载完成 1 个'),
+    )
+    pollSpy.mockRestore()
+    successSpy.mockRestore()
+  })
+
+  it('12-F:立即轮询对停用源返回 409 → toast.warning 提示先启用,不展示成功', async () => {
+    const user = userEvent.setup()
+    const warningSpy = vi.spyOn(toast, 'warning')
+    const successSpy = vi.spyOn(toast, 'success')
+    vi.spyOn(api.rssSources, 'poll').mockRejectedValueOnce(
+      new ApiError(409, 'rss source 1 is disabled'),
+    )
+    renderPage(<RssSourcesPage />)
+    const row = (await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: /立即轮询/ }))
+    await waitFor(() => expect(warningSpy).toHaveBeenCalledWith('源已停用,请先启用'))
+    expect(successSpy).not.toHaveBeenCalled()
+    warningSpy.mockRestore()
+    successSpy.mockRestore()
   })
 })
