@@ -27,6 +27,7 @@ import {
   Field,
   Input,
   PageTitle,
+  Select,
   StatusDot,
   Switch,
 } from '../components'
@@ -45,6 +46,7 @@ import type {
   ParsePreviewResponse,
   PipelineTask,
   SchedulerRunResponse,
+  SchedulerScope,
   SseEvent,
 } from '../api/types'
 
@@ -95,6 +97,9 @@ const STEP_MS = 900
 
 function ManualOperations() {
   const [parseName, setParseName] = useState('')
+  // 12-F:parse-preview 恢复 folder/parent 可选上下文输入(后端 ParsePreviewIn.folder/parent)
+  const [parseFolder, setParseFolder] = useState('')
+  const [parseParent, setParseParent] = useState('')
   const [preview, setPreview] = useState<ParsePreviewResponse | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -105,6 +110,8 @@ function ManualOperations() {
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
 
+  // 12-F:run-once scope 三选(后端 SchedulerRunIn.scope: all/rss/download),默认 all
+  const [scope, setScope] = useState<SchedulerScope>('all')
   const [schedulerResult, setSchedulerResult] = useState<SchedulerRunResponse | null>(null)
   const [schedulerBusy, setSchedulerBusy] = useState(false)
   const [schedulerError, setSchedulerError] = useState<string | null>(null)
@@ -114,7 +121,16 @@ function ManualOperations() {
     setPreviewBusy(true)
     setPreviewError(null)
     try {
-      setPreview(await api.pipeline.parsePreview({ name: parseName.trim() }))
+      // 12-F:folder/parent 传空不传(可选字段,回退纯文件名解析)
+      const folder = parseFolder.trim()
+      const parent = parseParent.trim()
+      setPreview(
+        await api.pipeline.parsePreview({
+          name: parseName.trim(),
+          ...(folder !== '' ? { folder } : {}),
+          ...(parent !== '' ? { parent } : {}),
+        }),
+      )
     } catch (cause) {
       setPreviewError(cause instanceof Error ? cause.message : strings.common.actionFailed)
     } finally {
@@ -156,7 +172,8 @@ function ManualOperations() {
     setSchedulerBusy(true)
     setSchedulerError(null)
     try {
-      setSchedulerResult(await api.scheduler.runOnce({ scope: 'all' }))
+      // 12-F:按选择传 scope(all/rss/download),默认 all
+      setSchedulerResult(await api.scheduler.runOnce({ scope }))
     } catch (cause) {
       setSchedulerError(cause instanceof Error ? cause.message : strings.common.actionFailed)
     } finally {
@@ -180,6 +197,24 @@ function ManualOperations() {
               value={parseName}
               onChange={(e) => setParseName(e.target.value)}
               placeholder="Show S01E01 1080p.mkv"
+            />
+          </Field>
+          {/* 12-F:folder = 文件所在目录名,parent = 包含该文件的完整目录路径,均可选 */}
+          <Field label={strings.pipeline.parseFolder} description={strings.pipeline.parseFolderHint} htmlFor="pipeline-parse-folder">
+            <Input
+              id="pipeline-parse-folder"
+              value={parseFolder}
+              onChange={(e) => setParseFolder(e.target.value)}
+              placeholder={strings.pipeline.parseFolderPlaceholder}
+            />
+          </Field>
+          <Field label={strings.pipeline.parseParent} description={strings.pipeline.parseParentHint} htmlFor="pipeline-parse-parent">
+            <Input
+              id="pipeline-parse-parent"
+              value={parseParent}
+              onChange={(e) => setParseParent(e.target.value)}
+              placeholder={strings.pipeline.parseParentPlaceholder}
+              className="data-text"
             />
           </Field>
           <Button type="submit" variant="secondary" loading={previewBusy}>
@@ -234,6 +269,18 @@ function ManualOperations() {
         </form>
 
         <div className="flex flex-col gap-2">
+          {/* 12-F:run-once scope 三选,默认全部(全部/仅 RSS 轮询/仅下载对账) */}
+          <Field label={strings.pipeline.schedulerScopeLabel} htmlFor="pipeline-scheduler-scope">
+            <Select
+              id="pipeline-scheduler-scope"
+              value={scope}
+              onChange={(e) => setScope(e.target.value as SchedulerScope)}
+            >
+              <option value="all">{strings.pipeline.schedulerScopeAll}</option>
+              <option value="rss">{strings.pipeline.schedulerScopeRss}</option>
+              <option value="download">{strings.pipeline.schedulerScopeDownload}</option>
+            </Select>
+          </Field>
           <Button variant="secondary" loading={schedulerBusy} onClick={() => void runOnce()}>
             <RefreshCw aria-hidden className="h-4 w-4" />
             {strings.pipeline.runOnce}

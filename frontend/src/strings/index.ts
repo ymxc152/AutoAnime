@@ -213,6 +213,10 @@ export const strings = {
     selectRow: '选择 {name}',
     clearSelection: '取消选择',
     batchPartialFailed: '{n} 条处理失败,已保留在队列中,可重试',
+    // 12-F:拒绝可填 reason(后端 PendingRejectIn.reason 可选)
+    rejectReasonLabel: '拒绝原因(可选)',
+    rejectReasonPlaceholder: '留空则不记录原因',
+    confirmReject: '确认拒绝',
   },
 
   pipeline: {
@@ -263,6 +267,17 @@ export const strings = {
     completed: '已完成',
     failed: '已失败',
     processedOfTotal: '{processed}/{total}',
+    // 12-F:parse-preview 补 folder/parent 可选上下文;run-once scope 三选
+    parseFolder: '所在目录(可选)',
+    parseFolderHint: '文件所在目录的名称,如 Season 1,辅助 L1 判断季与段落类型',
+    parseParent: '父目录路径(可选)',
+    parseParentHint: '包含该文件的完整目录路径,如 D:\\downloads\\番剧\\Show\\Season 1,确认后归档据此还原来源',
+    parseFolderPlaceholder: 'Season 1',
+    parseParentPlaceholder: 'D:\\downloads\\番剧\\Show\\Season 1',
+    schedulerScopeLabel: '执行范围',
+    schedulerScopeAll: '全部',
+    schedulerScopeRss: '仅 RSS 轮询',
+    schedulerScopeDownload: '仅下载对账',
   },
 
   logs: {
@@ -285,6 +300,10 @@ export const strings = {
     empty: '还没有审计日志。',
     filterPlaceholder: '搜索操作 ID / 对象…',
     rollbackConfirmCount: '撤销这 {n} 条操作？',
+    // 12-F:组展开明细行的行级撤销(POST /api/organize/{audit_id}/rollback 接受任意行 id)
+    rollbackRow: '撤销此条',
+    rollbackRowConfirm: '确认撤销审计行 #{id} 的操作？',
+    rollbackRowDone: '已撤销审计行 #{id}',
   },
 
   settings: {

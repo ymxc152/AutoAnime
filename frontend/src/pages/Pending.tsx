@@ -4,6 +4,8 @@
  * 后端不提供证据来源/置信度标注,抽屉不做来源徽标(优雅降级)。
  * 纠正提交 POST /api/pending/{id}/correct:title 必填——未纠正也始终
  * 带上当前 title(触发学习三件套);confirm/reject 另有两键。
+ * 12-F:confirm 抽屉内提交覆写字段(空字段不传)、reject 行内展开可填
+ * 原因(可选);快速确认仍无 body 直采。
  */
 import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
@@ -92,7 +94,15 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
           ...(form.fansub !== '' ? { fansub: form.fansub } : {}),
         })
       } else if (action === 'confirm') {
-        await api.pending.confirm(item.id)
+        // 12-F:抽屉内「确认」按表单当前值覆写(空字段不传 = 回退行内草稿,
+        // 后端 PendingConfirmIn 缺省字段回退 context);快速确认仍无 body 直采
+        await api.pending.confirm(item.id, {
+          ...(form.title !== '' ? { title: form.title } : {}),
+          ...(form.season !== '' ? { season: Number(form.season) } : {}),
+          ...(form.episode !== '' ? { episode: Number(form.episode) } : {}),
+          ...(form.segment !== '' ? { segment: form.segment } : {}),
+          ...(form.fansub !== '' ? { fansub: form.fansub } : {}),
+        })
       } else {
         await api.pending.reject(item.id)
       }
@@ -220,8 +230,11 @@ export function PendingPage() {
   const [busyId, setBusyId] = useState<number | null>(null)
   // 批量轻确认:第一次点击只切换按钮文案,第二次点击才执行
   const [batchArm, setBatchArm] = useState<'confirm' | 'reject' | null>(null)
-  // 单条拒绝同样走 arm 二次确认(B1:拒绝不可逆,零确认误触无法回退)
-  const [armRejectId, setArmRejectId] = useState<number | null>(null)
+  // 12-F:批量拒绝可选原因(留空 = 后端不记 resolution.reason)
+  const [batchRejectReason, setBatchRejectReason] = useState('')
+  // 12-F:单条拒绝改为行内展开小型输入行(非 Drawer):原因可选 + 确认拒绝/取消
+  const [rejectInputId, setRejectInputId] = useState<number | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
   const [batchBusy, setBatchBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -232,7 +245,7 @@ export function PendingPage() {
     setPage(next)
     setSelectedIds(new Set())
     setBatchArm(null)
-    setArmRejectId(null)
+    setRejectInputId(null)
   }
 
   const removeFromSelection = (id: number): void => {
@@ -243,16 +256,23 @@ export function PendingPage() {
     })
   }
 
-  /** 行内快捷确认/拒绝:确认单条不二次确认;拒绝不可逆,走 arm 二次确认(B1) */
-  const resolveOne = async (item: PendingItemDto, action: 'confirm' | 'reject'): Promise<void> => {
+  /**
+   * 行内快捷确认/拒绝:确认单条不二次确认;拒绝经行内展开输入行二次确认
+   * (12-F:拒绝不可逆,且可选填写 reason——留空 = 不传 body)。
+   */
+  const resolveOne = async (item: PendingItemDto, action: 'confirm' | 'reject', reason?: string): Promise<void> => {
     setBusyId(item.id)
     setActionError(null)
     try {
       if (action === 'confirm') {
         await api.pending.confirm(item.id)
       } else {
-        await api.pending.reject(item.id)
+        // 12-F:reason 留空 = 不传 body(与原有无原因拒绝同契约)
+        const trimmed = reason?.trim() ?? ''
+        await api.pending.reject(item.id, trimmed === '' ? undefined : { reason: trimmed })
       }
+      setRejectInputId(null)
+      setRejectReason('')
       removeFromSelection(item.id)
       if (selected?.id === item.id) setSelected(null)
       if (items.length === 1 && page > 1) {
@@ -268,13 +288,19 @@ export function PendingPage() {
     }
   }
 
-  /** 批量确认/拒绝(已过轻确认);allSettled 部分容错:只剔除成功 id,失败项保留可重试 */
-  const resolveBatch = async (action: 'confirm' | 'reject'): Promise<void> => {
+  /** 批量确认/拒绝(已过轻确认);12-F:拒绝可携带可选原因;allSettled 部分容错 */
+  const resolveBatch = async (action: 'confirm' | 'reject', reason?: string): Promise<void> => {
     const ids = [...selectedIds]
     setBatchBusy(true)
     setActionError(null)
+    // 12-F:批量拒绝原因留空 = 不传 body
+    const trimmedReason = reason?.trim() ?? ''
     const results = await Promise.allSettled(
-      ids.map((id) => (action === 'confirm' ? api.pending.confirm(id) : api.pending.reject(id))),
+      ids.map((id) =>
+        action === 'confirm'
+          ? api.pending.confirm(id)
+          : api.pending.reject(id, trimmedReason === '' ? undefined : { reason: trimmedReason }),
+      ),
     )
     const succeeded: number[] = []
     const failed: number[] = []
@@ -309,7 +335,7 @@ export function PendingPage() {
 
   const toggleOne = (id: number, checked: boolean): void => {
     setBatchArm(null)
-    setArmRejectId(null)
+    setRejectInputId(null)
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (checked) {
@@ -325,7 +351,7 @@ export function PendingPage() {
 
   const toggleAllPage = (): void => {
     setBatchArm(null)
-    setArmRejectId(null)
+    setRejectInputId(null)
     setSelectedIds((prev) => {
       const next = new Set(prev)
       for (const item of items) {
@@ -400,41 +426,71 @@ export function PendingPage() {
     {
       key: 'action',
       header: '',
+      // 12-F:单条拒绝改为行内展开小型输入行(非 Drawer):原因可选,
+      // 带「确认拒绝」与「取消」——替代原 arm 两次点击(拒绝不可逆仍需二次确认)
       render: (row) => (
-        <span className="flex items-center gap-1.5">
-          <Button
-            size="sm"
-            variant="secondary"
-            loading={busyId === row.id}
-            disabled={busyId !== null && busyId !== row.id}
-            onClick={() => void resolveOne(row, 'confirm')}
-          >
-            {strings.pending.quickConfirm}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className={armRejectId === row.id ? 'text-danger' : undefined}
-            disabled={busyId === row.id}
-            onClick={() => {
-              // 单条拒绝与批量一致走 arm 二次确认(B1):第一次点击只切换文案
-              if (armRejectId === row.id) {
-                setArmRejectId(null)
-                void resolveOne(row, 'reject')
-              } else {
-                setArmRejectId(row.id)
-              }
-            }}
-          >
-            <X aria-hidden className="h-3.5 w-3.5" />
-            {armRejectId === row.id
-              ? // strings 键本批冻结,文案按设计规范内联
-                '确认拒绝'
-              : strings.pending.rejectAction}
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => setSelected(row)}>
-            {strings.pending.correctAction}
-          </Button>
+        <span className="flex flex-col items-start gap-1.5">
+          <span className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={busyId === row.id}
+              disabled={busyId !== null && busyId !== row.id}
+              onClick={() => void resolveOne(row, 'confirm')}
+            >
+              {strings.pending.quickConfirm}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busyId === row.id}
+              onClick={() => {
+                if (rejectInputId === row.id) {
+                  setRejectInputId(null)
+                  setRejectReason('')
+                } else {
+                  setRejectInputId(row.id)
+                  setRejectReason('')
+                }
+              }}
+            >
+              <X aria-hidden className="h-3.5 w-3.5" />
+              {strings.pending.rejectAction}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setSelected(row)}>
+              {strings.pending.correctAction}
+            </Button>
+          </span>
+          {rejectInputId === row.id && (
+            <span className="flex items-center gap-1.5 rounded-sm bg-surface-2 px-2 py-1.5">
+              <Input
+                aria-label={strings.pending.rejectReasonLabel}
+                placeholder={strings.pending.rejectReasonPlaceholder}
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                className="h-7 w-48 text-xs"
+              />
+              <Button
+                size="sm"
+                variant="danger"
+                loading={busyId === row.id}
+                disabled={busyId !== null && busyId !== row.id}
+                onClick={() => void resolveOne(row, 'reject', rejectReason)}
+              >
+                {strings.pending.confirmReject}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setRejectInputId(null)
+                  setRejectReason('')
+                }}
+              >
+                {strings.common.cancel}
+              </Button>
+            </span>
+          )}
         </span>
       ),
     },
@@ -482,7 +538,8 @@ export function PendingPage() {
             disabled={batchBusy && batchArm !== 'reject'}
             onClick={() => {
               if (batchArm === 'reject') {
-                void resolveBatch('reject')
+                void resolveBatch('reject', batchRejectReason)
+                setBatchRejectReason('')
               } else {
                 setBatchArm('reject')
               }
@@ -493,6 +550,14 @@ export function PendingPage() {
               ? t(strings.pending.batchRejectAsk, { n: selectedIds.size })
               : strings.pending.batchReject}
           </Button>
+          {/* 12-F:批量拒绝旁的可选「拒绝原因」输入(留空 = 不传 reason) */}
+          <Input
+            aria-label={strings.pending.rejectReasonLabel}
+            placeholder={strings.pending.rejectReasonPlaceholder}
+            value={batchRejectReason}
+            onChange={(e) => setBatchRejectReason(e.target.value)}
+            className="h-7 w-48 text-xs"
+          />
           <Button
             size="sm"
             variant="ghost"

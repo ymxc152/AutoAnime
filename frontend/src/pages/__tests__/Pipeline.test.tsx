@@ -137,6 +137,37 @@ describe('PipelinePage', () => {
     await waitFor(() => expect(parsePreviewSpy).toHaveBeenCalledWith({ name: 'Show S01E01 1080p.mkv' }))
       })
 
+  it('单文件试跑可选填 folder/parent,填了才传、留空不传(12-F)', async () => {
+    const parsePreviewSpy = vi.spyOn(api.pipeline, 'parsePreview').mockResolvedValueOnce({
+      route: 'archive',
+      result: {
+        title: 'Show', season: 1, episode: 1, segment: 'episode', fansub: null,
+        level: 'high', confidence: 1, missing_fields: [], evidence: {},
+      },
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('单文件解析试跑'), { target: { value: 'Show S01E01 1080p.mkv' } })
+    // 只填 folder:body 带 folder 不带 parent
+    fireEvent.change(screen.getByLabelText('所在目录(可选)'), { target: { value: 'Season 1' } })
+    fireEvent.click(screen.getByRole('button', { name: '试跑解析' }))
+    await waitFor(() =>
+      expect(parsePreviewSpy).toHaveBeenCalledWith({ name: 'Show S01E01 1080p.mkv', folder: 'Season 1' }),
+    )
+    // 再填 parent:两者都传
+    fireEvent.change(screen.getByLabelText('父目录路径(可选)'), {
+      target: { value: 'D:/downloads/Show/Season 1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '试跑解析' }))
+    await waitFor(() =>
+      expect(parsePreviewSpy).toHaveBeenLastCalledWith({
+        name: 'Show S01E01 1080p.mkv',
+        folder: 'Season 1',
+        parent: 'D:/downloads/Show/Season 1',
+      }),
+    )
+  })
+
   it('异步导入展示任务进度和完成摘要', async () => {
     vi.spyOn(api.pipeline, 'startImport').mockResolvedValueOnce({ task_id: 'task-1', status: 'running' })
     vi.spyOn(api.pipeline, 'task').mockResolvedValueOnce({
@@ -160,5 +191,17 @@ describe('PipelinePage', () => {
     await screen.findByTestId('pipeline-node-归档')
     fireEvent.click(screen.getByRole('button', { name: '跑一轮订阅闭环' }))
     await waitFor(() => expect(runOnceSpy).toHaveBeenCalledWith({ scope: 'all' }))
+  })
+
+  it('run-once scope 三选:选「仅 RSS 轮询」后按 scope=rss 传参(12-F)', async () => {
+    const runOnceSpy = vi.spyOn(api.scheduler, 'runOnce').mockResolvedValueOnce({
+      scope: 'rss', reports: { rss: { picked: 0, gaps: 0, errors: [] } }, errors: [],
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    // 默认 all;切换为仅 RSS 轮询后执行
+    fireEvent.change(screen.getByLabelText('执行范围'), { target: { value: 'rss' } })
+    fireEvent.click(screen.getByRole('button', { name: '跑一轮订阅闭环' }))
+    await waitFor(() => expect(runOnceSpy).toHaveBeenCalledWith({ scope: 'rss' }))
   })
 })

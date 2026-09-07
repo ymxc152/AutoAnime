@@ -138,7 +138,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
             : state.pending
         return delayed(paginate(filtered, query.limit, query.offset))
       },
-      confirm: (id) => {
+      // 12-F:对齐后端 PendingConfirmIn | None——body 可选,提供时按非 None 字段覆写草稿
+      confirm: (id, body?) => {
         const item = state.pending.find((p) => p.id === id)
         if (!item) {
           return delayVoid().then(() => {
@@ -149,6 +150,13 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           return delayVoid().then(() => {
             throw new ApiError(409, `pending ${id} already resolved (status=${item.status})`)
           })
+        }
+        if (body !== undefined) {
+          if (body.title !== undefined) item.context.title = body.title
+          if (body.season !== undefined) item.context.season = body.season
+          if (body.episode !== undefined) item.context.episode = body.episode
+          if (body.segment !== undefined) item.context.segment = body.segment
+          if (body.fansub !== undefined) item.context.fansub = body.fansub
         }
         item.status = 'resolved'
         item.resolved_at = new Date().toISOString()
@@ -196,7 +204,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           bypassed: true,
         } satisfies PendingResolveOut)
       },
-      reject: (id) => {
+      // 12-F:对齐后端 PendingRejectIn | None——body 可选,reason 记入 resolution
+      reject: (id, body?) => {
         const item = state.pending.find((p) => p.id === id)
         if (!item) {
           return delayVoid().then(() => {
@@ -212,6 +221,9 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         item.resolved_at = new Date().toISOString()
         item.resolved_by = 'manual'
         item.resolution = { action: 'reject', confirmed_title: String(item.context.title ?? item.raw_name) }
+        if (body?.reason !== undefined) {
+          item.resolution = { ...item.resolution, reason: body.reason }
+        }
         return delayed({
           id: item.id,
           status: item.status,
@@ -438,7 +450,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
     },
 
     scheduler: {
-      runOnce: () => delayed({ scope: 'all' as const, reports: {}, errors: [] }),
+      // 12-F:对齐后端 SchedulerRunIn——body 可选,scope 缺省 all
+      runOnce: (body = {}) => delayed({ scope: body.scope ?? ('all' as const), reports: {}, errors: [] }),
     },
 
     settings: {

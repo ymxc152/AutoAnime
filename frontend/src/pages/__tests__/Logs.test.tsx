@@ -7,6 +7,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LogsPage } from '../Logs'
 import { renderPage } from '../../test/testUtils'
+import { api } from '../../api'
 import { resetMockState } from '../../mocks/handlers'
 
 describe('LogsPage', () => {
@@ -87,5 +88,33 @@ describe('LogsPage', () => {
     await user.type(screen.getByRole('searchbox'), 'pending_confirm')
     expect(screen.queryByText('op-20260905-0003')).not.toBeInTheDocument()
     expect(screen.getByText('op-20260905-0001')).toBeInTheDocument()
+  })
+
+  it('行级撤销:带 reverse 的明细行「撤销此条」→ confirmDialog 确认 → 按行 id 调 rollback(12-F)', async () => {
+    // ConfirmHost 未挂载时 confirmDialog 退回 window.confirm,这里确认放行
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const rollbackSpy = vi.spyOn(api.organize, 'rollback')
+    const user = userEvent.setup()
+    renderPage(<LogsPage />)
+    // 展开带 reverse 明细行的组(op-0003 内是 #3 demote_pending)
+    await user.click(await screen.findByText('op-20260905-0003'))
+    // 组徽标与明细行同名,取展开区里的明细行(第 2 处)
+    await waitFor(() => expect(screen.getAllByText('demote_pending').length).toBeGreaterThanOrEqual(2))
+    const entryItem = screen.getAllByText('demote_pending')[1]!.closest('li')!
+    await user.click(within(entryItem).getByRole('button', { name: '撤销此条' }))
+    // 行级撤销按该明细行的 audit 行 id(3)执行,而非组 last_audit_id
+    await waitFor(() => expect(rollbackSpy).toHaveBeenCalledWith(3))
+    // 撤销落新审计组,组列表同步刷新
+    expect(await screen.findByText('op-mock-0001')).toBeInTheDocument()
+  })
+
+  it('行级撤销:无 reverse 的明细行不显示「撤销此条」入口(12-F)', async () => {
+    const user = userEvent.setup()
+    renderPage(<LogsPage />)
+    // 展开全无 reverse 的组(op-0002 memory_hit)
+    await user.click(await screen.findByText('op-20260905-0002'))
+    await waitFor(() => expect(screen.getAllByText('memory_hit').length).toBeGreaterThanOrEqual(2))
+    const entryItem = screen.getAllByText('memory_hit')[1]!.closest('li')!
+    expect(within(entryItem).queryByRole('button', { name: '撤销此条' })).not.toBeInTheDocument()
   })
 })

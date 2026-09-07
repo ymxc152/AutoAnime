@@ -9,6 +9,7 @@ import { useCallback, useState } from 'react'
 import { Copy, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '../api'
+import { confirmDialog } from '../lib/confirm'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnEvent } from '../hooks/useReloadOnEvent'
 import { strings, t } from '../strings'
@@ -46,12 +47,44 @@ function JsonBlock({ label, value }: { label: string; value: Record<string, unkn
 }
 
 /** 单组展开后的审计明细行(懒加载) */
-function GroupEntries({ operationId }: { operationId: string }) {
+function GroupEntries({
+  operationId,
+  onRolledBack,
+}: {
+  operationId: string
+  /** 12-F:行级撤销成功后同步刷新上层组列表(撤销本身落新审计组) */
+  onRolledBack?: () => void
+}) {
   const fetcher = useCallback(
     () => api.audit.list({ operation_id: operationId, limit: 50 }),
     [operationId],
   )
-  const { data, loading, error } = useApi(fetcher)
+  const { data, loading, error, reload } = useApi(fetcher)
+  const [rollbackBusyId, setRollbackBusyId] = useState<number | null>(null)
+
+  /**
+   * 12-F:行级撤销。可撤销口径 = 该明细行自身带非空 reverse 指令
+   * (与后端一致:rollbackable 组级判定即「组内最新行 reverse 非空」;
+   * 行无 reverse 时后端 rollback 端点必回 409,故据此隐藏入口)。
+   */
+  const rollbackRow = async (entry: AuditDto): Promise<void> => {
+    if (
+      !(await confirmDialog(t(strings.logs.rollbackRowConfirm, { id: entry.id })))
+    ) {
+      return
+    }
+    setRollbackBusyId(entry.id)
+    try {
+      await api.organize.rollback(entry.id)
+      toast.success(t(strings.logs.rollbackRowDone, { id: entry.id }))
+      reload()
+      onRolledBack?.()
+    } catch (cause) {
+      toast.error(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
+    } finally {
+      setRollbackBusyId(null)
+    }
+  }
 
   if (error !== null) {
     return <p className="text-xs text-danger">{error}</p>
@@ -74,6 +107,19 @@ function GroupEntries({ operationId }: { operationId: string }) {
               {entry.actor === 'manual' ? strings.logs.actorManual : strings.logs.actorAuto}
             </Badge>
             <span className="data-text text-xs text-ink-secondary">#{entry.id}</span>
+            {Object.keys(entry.reverse).length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-1.5"
+                title={strings.logs.rollbackHint}
+                loading={rollbackBusyId === entry.id}
+                onClick={() => void rollbackRow(entry)}
+              >
+                <Undo2 aria-hidden className="h-3.5 w-3.5" />
+                {strings.logs.rollbackRow}
+              </Button>
+            )}
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <JsonBlock label={strings.logs.instruction} value={entry.instruction} />
@@ -95,6 +141,7 @@ function GroupRow({
   onCancelRollback,
   onRollback,
   rollbackMessage,
+  onRolledBack,
 }: {
   group: OperationGroupDto
   expanded: boolean
@@ -105,6 +152,8 @@ function GroupRow({
   onCancelRollback: () => void
   onRollback: (auditId: number) => void
   rollbackMessage: string | null
+  /** 12-F:透传给明细行,行级撤销成功后刷新组列表 */
+  onRolledBack?: () => void
 }) {
   // 复制操作 ID:jsdom 等环境无 clipboard API 时静默跳过,不让测试/降级环境报错。
   const copyOperationId = (): void => {
@@ -196,7 +245,7 @@ function GroupRow({
       </div>
       {expanded && (
         <div className="flex flex-col gap-3 bg-surface-2/60 px-4 py-2.5 md:pl-10">
-          <GroupEntries operationId={group.operation_id} />
+          <GroupEntries operationId={group.operation_id} onRolledBack={onRolledBack} />
         </div>
       )}
     </li>
@@ -304,6 +353,7 @@ export function LogsPage() {
                 onArmRollback={() => setConfirmRollbackId(group.operation_id)}
                 onCancelRollback={() => setConfirmRollbackId(null)}
                 onRollback={() => void rollback(group)}
+                onRolledBack={reload}
                 rollbackMessage={
                   rolledBack === group.operation_id ? strings.common.rolledBack : null
                 }

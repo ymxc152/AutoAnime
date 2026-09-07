@@ -112,6 +112,45 @@ describe('PendingPage', () => {
     await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
   })
 
+  it('抽屉「按此结果确认」按表单当前值覆写提交(12-F)', async () => {
+    const confirmSpy = vi.spyOn(api.pending, 'confirm')
+    const user = userEvent.setup()
+    renderPage(<PendingPage />)
+    const dialog = await openCorrectRow(
+      user,
+      'Sousou no Frieren S1 - 12v2 (B-Global 1920x1080 WebRip AAC).mkv',
+    )
+    // 修改集数后确认:表单当前值作为覆写 body 提交(空字段不传)
+    const episodeInput = within(dialog).getByLabelText('集')
+    await user.clear(episodeInput)
+    await user.type(episodeInput, '13')
+    await user.click(within(dialog).getByRole('button', { name: '按此结果确认' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ episode: 13, title: expect.any(String) }),
+    )
+  })
+
+  it('批量拒绝可填原因:勾选 2 条,原因随请求提交(12-F)', async () => {
+    const rejectSpy = vi.spyOn(api.pending, 'reject')
+    const user = userEvent.setup()
+    renderPage(<PendingPage />)
+    await screen.findByText(/共 4 条/)
+
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[3]!)
+    await user.click(checkboxes[4]!)
+    await user.click(screen.getByRole('button', { name: '批量拒绝' }))
+    // 批量条旁的可选原因输入
+    await user.type(screen.getByLabelText('拒绝原因(可选)'), '重复发布')
+    await user.click(screen.getByRole('button', { name: '拒绝 2 条？' }))
+    await waitFor(() => expect(screen.getByText(/共 2 条/)).toBeInTheDocument())
+    expect(rejectSpy).toHaveBeenCalledWith(expect.any(Number), { reason: '重复发布' })
+    expect(rejectSpy).toHaveBeenCalledTimes(2)
+  })
+
   it('行内快捷确认:单条无二次确认,行消失且计数更新', async () => {
     const user = userEvent.setup()
     renderPage(<PendingPage />)
@@ -126,26 +165,30 @@ describe('PendingPage', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('行内快捷拒绝:先 arm 轻确认「拒绝 1 条？」,二次点击才执行(回归 B1)', async () => {
+  it('行内拒绝:展开原因输入行,填原因后「确认拒绝」提交 reason(12-F)', async () => {
+    const rejectSpy = vi.spyOn(api.pending, 'reject')
     const user = userEvent.setup()
     renderPage(<PendingPage />)
     await screen.findByText(/共 4 条/)
     const row = screen
       .getByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]')
       .closest('tr')!
-    // 第一次点击:仅 arm,按钮文案变为「确认拒绝」,队列不变
+    // 点击拒绝:行内展开输入行(非 Drawer),未确认前队列不变
     await user.click(within(row).getByRole('button', { name: '拒绝' }))
     expect(within(row).getByRole('button', { name: '确认拒绝' })).toBeInTheDocument()
     expect(screen.getByText(/共 4 条/)).toBeInTheDocument()
-    // 第二次点击:执行,行出队
+    // 填写可选原因后确认:提交带 reason 的 body
+    await user.type(within(row).getByLabelText('拒绝原因(可选)'), '字幕组不符偏好')
     await user.click(within(row).getByRole('button', { name: '确认拒绝' }))
     await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
+    expect(rejectSpy).toHaveBeenCalledWith(expect.any(Number), { reason: '字幕组不符偏好' })
     expect(
       screen.queryByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]'),
     ).not.toBeInTheDocument()
   })
 
-  it('行内拒绝 arm 后改选其他行:arm 重置,需重新确认', async () => {
+  it('行内拒绝展开后留空原因:提交不带 body;取消则收起不执行(12-F)', async () => {
+    const rejectSpy = vi.spyOn(api.pending, 'reject')
     const user = userEvent.setup()
     renderPage(<PendingPage />)
     await screen.findByText(/共 4 条/)
@@ -153,11 +196,17 @@ describe('PendingPage', () => {
       .getByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]')
       .closest('tr')!
     await user.click(within(row).getByRole('button', { name: '拒绝' }))
-    expect(within(row).getByRole('button', { name: '确认拒绝' })).toBeInTheDocument()
-    // 勾选任意一行 → 单条 arm 重置回「拒绝」
-    const checkboxes = screen.getAllByRole('checkbox')
-    await user.click(checkboxes[1]!)
+    // 取消:收起输入行,不执行
+    await user.click(within(row).getByRole('button', { name: '取消' }))
     expect(within(row).getByRole('button', { name: '拒绝' })).toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: '确认拒绝' })).not.toBeInTheDocument()
+    expect(screen.getByText(/共 4 条/)).toBeInTheDocument()
+    expect(rejectSpy).not.toHaveBeenCalled()
+    // 再展开并留空原因确认:reason 缺省(不传 body)
+    await user.click(within(row).getByRole('button', { name: '拒绝' }))
+    await user.click(within(row).getByRole('button', { name: '确认拒绝' }))
+    await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
+    expect(rejectSpy).toHaveBeenLastCalledWith(expect.any(Number), undefined)
   })
 
   it('批量确认:勾选 2 条 → 轻确认「确认 2 条？」→ 二次点击执行', async () => {

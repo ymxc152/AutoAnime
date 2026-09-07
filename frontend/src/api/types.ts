@@ -171,6 +171,28 @@ export interface PendingCorrectBody {
   fansub?: string
 }
 
+/**
+ * 12-F:POST /api/pending/{id}/confirm 请求体(= 后端 PendingConfirmIn,
+ * body 整体可选)。字段缺省时后端回退行内 context 草稿;前端「空字段不传」
+ * 即等价于无 body 直采。快速确认(表格行按钮)保持不带 body。
+ */
+export interface PendingConfirmBody {
+  title?: string
+  season?: number
+  episode?: number
+  segment?: string
+  fansub?: string
+}
+
+/**
+ * 12-F:POST /api/pending/{id}/reject 请求体(= 后端 PendingRejectIn,
+ * body 整体可选)。reason 可选——填写时后端记入 resolution.reason
+ * (拒绝不学习、不落记忆);留空/不传 = 不填原因。
+ */
+export interface PendingRejectBody {
+  reason?: string
+}
+
 /** confirm/correct/reject 的统一响应(= 后端 PendingResolveOut) */
 export interface PendingResolveOut {
   id: number

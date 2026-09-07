@@ -14,9 +14,11 @@ import type {
   ParsePreviewResponse,
   PipelineImportBody,
   PipelineTask,
+  PendingConfirmBody,
   PendingCorrectBody,
   PendingItemDto,
   PendingQuery,
+  PendingRejectBody,
   PendingResolveOut,
   RollbackResult,
   RssSourceCreateBody,
@@ -50,12 +52,15 @@ export const endpoints = {
   /** /api/pending —— 待确认队列(确认/纠正/拒绝,响应 PendingResolveOut) */
   pending: {
     list: (query: PendingQuery = {}) => request<Page<PendingItemDto>>('/api/pending', { query }),
-    confirm: (id: number) =>
-      request<PendingResolveOut>(`/api/pending/${id}/confirm`, { method: 'POST' }),
+    // 12-F:confirm 支持可选 PendingConfirmIn 覆写字段(不传 = 直采 context 草稿,
+    // 后端 body: PendingConfirmIn | None = None);correct 已带覆写,不变。
+    confirm: (id: number, body?: PendingConfirmBody) =>
+      request<PendingResolveOut>(`/api/pending/${id}/confirm`, { method: 'POST', body }),
     correct: (id: number, body: PendingCorrectBody) =>
       request<PendingResolveOut>(`/api/pending/${id}/correct`, { method: 'POST', body }),
-    reject: (id: number) =>
-      request<PendingResolveOut>(`/api/pending/${id}/reject`, { method: 'POST' }),
+    // 12-F:reject 支持可选 reason(后端 PendingRejectIn.reason;不传 = 不填原因)
+    reject: (id: number, body?: PendingRejectBody) =>
+      request<PendingResolveOut>(`/api/pending/${id}/reject`, { method: 'POST', body }),
   },
 
   /** GET /api/audit —— Logs 明细(可按 operation_id/entity/action 过滤) */
