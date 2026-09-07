@@ -422,7 +422,7 @@ export const mockRssSources: RssSourceDto[] = [
   },
 ]
 
-// ---- settings(对齐 SettingsOut:扁平结构,密钥只回 has_*) ----
+// ---- settings(对齐 12-D SettingsOut:扁平结构,密钥只回 has_*) ----
 
 export const mockSettings: SettingsDto = {
   dry_run: false,
@@ -431,6 +431,33 @@ export const mockSettings: SettingsDto = {
   llm_model: 'deepseek-chat',
   reference_enabled: true,
   reference_order: ['bangumi', 'tmdb'],
+  llm_timeout_s: 60,
+  llm_max_retries: 2,
+  reference_qps: 2,
+  pending_backlog_alert_threshold: 20,
+  log_level: 'INFO',
+  scheduler_enabled: true,
+  rss_poll_interval_minutes: 15,
+  rss_poll_jitter_pct: 10,
+  download_poll_interval_s: 60,
+  download_max_retries: 3,
+  collected_check_days: 7,
+  downloader: 'qbittorrent',
+  qbittorrent_host: '127.0.0.1',
+  qbittorrent_port: 8080,
+  qbittorrent_username: 'admin',
+  notify_enabled: false,
+  notify_telegram_chat_id: null,
+  notify_events: ['error'],
+  upgrade_threshold: 1.2,
+  upgrade_max_per_episode: 2,
+  upgrade_copy_policy: 'allow',
+  upgrade_skip_size_gb: 0.5,
+  mismatch_backfill_budget: 3,
+  naming_title_language: 'zh',
+  rss_fetch_timeout_s: 15,
+  rss_fetch_retries: 2,
+  llm_base_url: 'https://api.deepseek.com/v1',
   library_path: '/library',
   download_path: '/downloads',
   api_host: '127.0.0.1',
@@ -440,6 +467,10 @@ export const mockSettings: SettingsDto = {
   api_sse_replay_limit: 200,
   has_api_token: false,
   has_llm_api_key: true,
+  has_tmdb_api_key: true,
+  has_qbittorrent_password: false,
+  has_notify_webhook_url: false,
+  has_notify_telegram_bot_token: false,
 }
 
 // ---- metrics(对齐 MetricsOut) ----

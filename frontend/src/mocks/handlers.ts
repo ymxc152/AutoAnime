@@ -27,6 +27,7 @@ import type {
   SeriesDto,
   SettingsDto,
   SettingsUpdateBody,
+  SettingEffect,
   SubscriptionCreateBody,
   SubscriptionDto,
   SubscriptionUpdateBody,
@@ -454,18 +455,74 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
       runOnce: (body = {}) => delayed({ scope: body.scope ?? ('all' as const), reports: {}, errors: [] }),
     },
 
+    // ---- 12-E:settings 三档生效 mock(对齐后端 settings.py 白名单/密钥语义) ----
     settings: {
       get: () => delayed(clone(state.settings)),
       update: (body: SettingsUpdateBody) => {
-        // 对齐后端白名单覆写(进程内):dry_run/l2/llm/reference
-        if (body.dry_run !== undefined) state.settings.dry_run = body.dry_run
-        if (body.l2_enabled !== undefined) state.settings.l2_enabled = body.l2_enabled
-        if (body.llm_enabled !== undefined) state.settings.llm_enabled = body.llm_enabled
-        if (body.llm_model !== undefined) state.settings.llm_model = body.llm_model
-        if (body.reference_enabled !== undefined) state.settings.reference_enabled = body.reference_enabled
-        if (body.reference_order !== undefined) state.settings.reference_order = [...body.reference_order]
-        return delayed(clone(state.settings))
+        // 三档白名单(与后端 settings.py 的 _IMMEDIATE/_SCHEDULER/_RESTART 集合一致)
+        const immediate = new Set([
+          'dry_run',
+          'l2_enabled',
+          'llm_enabled',
+          'llm_model',
+          'reference_enabled',
+          'reference_order',
+          'llm_timeout_s',
+          'llm_max_retries',
+          'reference_qps',
+          'pending_backlog_alert_threshold',
+          'log_level',
+        ])
+        const scheduler = new Set([
+          'scheduler_enabled',
+          'rss_poll_interval_minutes',
+          'rss_poll_jitter_pct',
+          'download_poll_interval_s',
+          'download_max_retries',
+          'collected_check_days',
+        ])
+        // 密钥字段 → GET has_* 字段名(值永不回显)
+        const secretHasField: Record<string, keyof SettingsDto> = {
+          llm_api_key: 'has_llm_api_key',
+          tmdb_api_key: 'has_tmdb_api_key',
+          qbittorrent_password: 'has_qbittorrent_password',
+          notify_webhook_url: 'has_notify_webhook_url',
+          notify_telegram_bot_token: 'has_notify_telegram_bot_token',
+        }
+        const effectFor = (key: string): SettingEffect =>
+          scheduler.has(key) ? 'scheduler_rebuild' : immediate.has(key) ? 'immediate' : 'requires_restart'
+        const applied: Record<string, SettingEffect> = {}
+        for (const [key, value] of Object.entries(body)) {
+          if (key in secretHasField) {
+            if (value === null) {
+              // 显式 null = 清除(删 DB 覆盖回落 env/toml)
+              ;(state.settings[secretHasField[key]!] as boolean) = false
+              applied[key] = effectFor(key)
+              continue
+            }
+            if (value === '') continue // 空串 = 不修改
+            ;(state.settings[secretHasField[key]!] as boolean) = true
+            applied[key] = effectFor(key)
+            continue
+          }
+          if (value === null) continue // 非密钥字段 null = 不修改(v1 行为)
+          ;(state.settings as unknown as Record<string, unknown>)[key] = value
+          applied[key] = effectFor(key)
+        }
+        return delayed({ ...clone(state.settings), applied, warnings: [] })
       },
+      // 12-E:notify-test —— 按 has_* 构造通道结果(未配置通道跳过)
+      notifyTest: () => {
+        const results: { channel: string; ok: boolean; error: string | null }[] = []
+        if (state.settings.has_notify_webhook_url) {
+          results.push({ channel: 'webhook', ok: true, error: null })
+        }
+        if (state.settings.has_notify_telegram_bot_token && state.settings.notify_telegram_chat_id) {
+          results.push({ channel: 'telegram', ok: true, error: null })
+        }
+        return delayed({ results })
+      },
+      qbitTest: () => delayed({ ok: true, version: 'v2.0.9', error: null }),
     },
   }
 }

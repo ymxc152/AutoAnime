@@ -20,3 +20,6 @@ export {
 export { Layout } from './Layout'
 export { SseStatusLine } from './SseStatusLine'
 export { Skeleton } from './Skeleton'
+// 12-E:Settings 配置中心 Tabs + 密钥「清除」勾选框
+export { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs'
+export { Checkbox } from './ui/checkbox'

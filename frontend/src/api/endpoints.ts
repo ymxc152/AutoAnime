@@ -28,8 +28,11 @@ import type {
   SchedulerScope,
   SeriesDto,
   SeriesQuery,
+  NotifyTestOut,
+  QbitTestOut,
   SettingsDto,
   SettingsUpdateBody,
+  SettingsUpdateOut,
   SubscriptionCreateBody,
   SubscriptionDto,
   SubscriptionUpdateBody,
@@ -117,9 +120,13 @@ export const endpoints = {
       request<SchedulerRunResponse>('/api/scheduler/run-once', { method: 'POST', body }),
   },
 
-  /** GET/PUT /api/settings —— 运行时设置(PUT 白名单覆写,进程内生效) */
+  /** GET/PUT /api/settings —— 配置中心(12-D 三档生效;PUT 响应带 applied/warnings) */
   settings: {
     get: () => request<SettingsDto>('/api/settings'),
-    update: (body: SettingsUpdateBody) => request<SettingsDto>('/api/settings', { method: 'PUT', body }),
+    update: (body: SettingsUpdateBody) =>
+      request<SettingsUpdateOut>('/api/settings', { method: 'PUT', body }),
+    // 12-E:测试动作按「运行时 + DB 覆盖」的合并配置试跑,不改任何配置
+    notifyTest: () => request<NotifyTestOut>('/api/settings/notify-test', { method: 'POST' }),
+    qbitTest: () => request<QbitTestOut>('/api/settings/qbit-test', { method: 'POST' }),
   },
 }

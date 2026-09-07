@@ -394,20 +394,54 @@ export interface RssSourceUpdateBody {
   enabled?: boolean
 }
 
-// ---------- Settings:GET/PUT /api/settings ----------
+// ---------- Settings:GET/PUT /api/settings + notify-test / qbit-test ----------
 
 /**
  * GET /api/settings 响应(= 后端 SettingsOut,扁平结构):
- * 密钥只回 has_* 布尔;quality/naming 段 v1 暂缺(无持久化 settings 表,
- * E4 后才有),UI 不渲染假数据。
+ * 密钥只回 has_* 布尔,值永不回显;重启生效档字段 DB 有覆盖时显示
+ * 「重启后将生效的值」(后端 GET 按 DB 覆盖优先展示)。
  */
 export interface SettingsDto {
+  // --- 运行(立即生效档) ---
   dry_run: boolean
   l2_enabled: boolean
   llm_enabled: boolean
   llm_model: string | null
   reference_enabled: boolean
   reference_order: string[]
+  llm_timeout_s: number
+  llm_max_retries: number
+  reference_qps: number | null
+  pending_backlog_alert_threshold: number
+  log_level: string
+  // --- 调度(scheduler_rebuild 档) ---
+  scheduler_enabled: boolean
+  rss_poll_interval_minutes: number
+  rss_poll_jitter_pct: number
+  download_poll_interval_s: number
+  download_max_retries: number
+  collected_check_days: number
+  // --- 下载器(requires_restart 档,密钥只回 has_*) ---
+  downloader: string
+  qbittorrent_host: string
+  qbittorrent_port: number
+  qbittorrent_username: string
+  // --- 通知(requires_restart 档) ---
+  notify_enabled: boolean
+  notify_telegram_chat_id: string | null
+  notify_events: string[]
+  // --- 洗版 / 命名 / RSS 抓取(requires_restart 档) ---
+  upgrade_threshold: number
+  upgrade_max_per_episode: number
+  upgrade_copy_policy: string
+  upgrade_skip_size_gb: number
+  mismatch_backfill_budget: number
+  naming_title_language: string
+  rss_fetch_timeout_s: number
+  rss_fetch_retries: number
+  // --- 识别(requires_restart 档:LLM 连接类) ---
+  llm_base_url: string | null
+  // --- 环境(只读) ---
   library_path: string
   download_path: string
   api_host: string
@@ -415,18 +449,98 @@ export interface SettingsDto {
   api_cors_dev_origins: string[]
   api_sse_heartbeat_s: number
   api_sse_replay_limit: number
+  // --- 密钥 has_* 布尔 ---
   has_api_token: boolean
   has_llm_api_key: boolean
+  has_tmdb_api_key: boolean
+  has_qbittorrent_password: boolean
+  has_notify_webhook_url: boolean
+  has_notify_telegram_bot_token: boolean
 }
 
-/** PUT /api/settings 请求体(= 后端 SettingsUpdateIn):白名单运行时覆写,重启后回 env/toml 值 */
+/**
+ * PUT /api/settings 请求体(= 后端 SettingsUpdateIn,39 项白名单,
+ * extra=forbid → 白名单外字段 422)。密钥字段语义:空串 = 不修改,
+ * 显式 null = 清除(删 DB 覆盖回落 env/toml);非密钥字段不传 = 不修改。
+ */
 export interface SettingsUpdateBody {
+  // 立即生效
   dry_run?: boolean
   l2_enabled?: boolean
   llm_enabled?: boolean
   llm_model?: string
   reference_enabled?: boolean
   reference_order?: string[]
+  llm_timeout_s?: number
+  llm_max_retries?: number
+  reference_qps?: number
+  pending_backlog_alert_threshold?: number
+  log_level?: string
+  // 调度类(重建 loop 生效)
+  scheduler_enabled?: boolean
+  rss_poll_interval_minutes?: number
+  rss_poll_jitter_pct?: number
+  download_poll_interval_s?: number
+  download_max_retries?: number
+  collected_check_days?: number
+  // 重启生效(连接/密钥类)
+  llm_base_url?: string
+  /** 密钥:空串 = 不修改,null = 清除 */
+  llm_api_key?: string | null
+  /** 密钥:空串 = 不修改,null = 清除 */
+  tmdb_api_key?: string | null
+  downloader?: string
+  qbittorrent_host?: string
+  qbittorrent_port?: number
+  qbittorrent_username?: string
+  /** 密钥:空串 = 不修改,null = 清除 */
+  qbittorrent_password?: string | null
+  notify_enabled?: boolean
+  /** 密钥(后端按 SecretStr 处理):空串 = 不修改,null = 清除 */
+  notify_webhook_url?: string | null
+  /** 密钥:空串 = 不修改,null = 清除 */
+  notify_telegram_bot_token?: string | null
+  notify_telegram_chat_id?: string
+  notify_events?: string[]
+  upgrade_threshold?: number
+  upgrade_max_per_episode?: number
+  upgrade_copy_policy?: string
+  upgrade_skip_size_gb?: number
+  mismatch_backfill_budget?: number
+  naming_title_language?: string
+  rss_fetch_timeout_s?: number
+  rss_fetch_retries?: number
+}
+
+/** 12-E:PUT 生效三档(后端 SettingEffect Literal 透传) */
+export type SettingEffect = 'immediate' | 'scheduler_rebuild' | 'requires_restart'
+
+/**
+ * PUT /api/settings 响应(= 后端 SettingsUpdateOut):
+ * 常规 SettingsOut 载荷 + 每个被改字段的生效档位 + 调度重建警告。
+ */
+export interface SettingsUpdateOut extends SettingsDto {
+  applied: Record<string, SettingEffect>
+  warnings: string[]
+}
+
+/** notify-test 逐通道结果(error 只含异常类型名,不含 URL/token) */
+export interface ChannelTestResult {
+  channel: string
+  ok: boolean
+  error: string | null
+}
+
+/** POST /api/settings/notify-test 响应(= 后端 NotifyTestOut) */
+export interface NotifyTestOut {
+  results: ChannelTestResult[]
+}
+
+/** POST /api/settings/qbit-test 响应(= 后端 QbitTestOut) */
+export interface QbitTestOut {
+  ok: boolean
+  version: string | null
+  error: string | null
 }
 
 // ---------- SSE:GET /api/events ----------
