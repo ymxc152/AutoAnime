@@ -310,7 +310,7 @@ export const strings = {
 
   settings: {
     title: '设置',
-    runtimeHint: 'PUT 仅覆写本进程运行时项,重启后回到 env/toml 配置',
+    runtimeHint: '配置已持久化保存;按改动类型分三档生效:立即 / 调度重建后 / 重启后,保存时逐项提示',
     unsavedLeaveConfirm: '有未保存的更改,确定离开吗?',
     runtimeSection: '运行时开关',
     dryRun: '试运行模式',
