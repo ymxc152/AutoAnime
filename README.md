@@ -25,25 +25,60 @@
 
 ## 快速开始
 
-### 1. 安装（需要 Python ≥ 3.12 与 [uv](https://docs.astral.sh/uv/)）
+### Windows：双击 `start.cmd`（推荐）
+
+前置（各装一次即可）：[uv](https://docs.astral.sh/uv/)、[Node.js ≥ 20](https://nodejs.org/)。
+
+1. 双击项目根目录 **`start.cmd`**——自动完成依赖安装（首次）、生成 `.env`、建库、拉起后端 API（默认 8000）与前端 WebUI（默认 http://localhost:5173，已连真后端），前端就绪后自动打开浏览器。
+2. 停止：关闭两个服务窗口，或双击 **`stop.cmd`**。
+
+### Linux / macOS：`./start.sh`
 
 ```bash
 git clone <仓库地址>
 cd AutoAnime
-uv sync
+chmod +x start.sh && ./start.sh   # 一键：依赖安装 + 建库 + 前后端 + 打开浏览器
 ```
 
-### 2. 初始化数据库
+`Ctrl+C` 同时停止前后端。
+
+### Docker（生产 / 常驻部署）
 
 ```bash
-uv run autoanime init-db
+cp .env.example .env             # 至少设置 AUTOANIME_API_TOKEN
+docker compose up -d --build     # WebUI 在 http://127.0.0.1:3080
 ```
 
-### 3. 配置 `.env`
+- 库/下载目录挂载在 `./library` / `./downloads`，数据库在 `./data`；**库与下载必须同盘**（hardlink 洗版依赖）。
+- CLI 在容器内执行：`docker compose exec backend uv run autoanime --help`。
+- 部署纪律与验收详见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+
+### 手动启动（调试用）
+
+前置：Python ≥ 3.12、[uv](https://docs.astral.sh/uv/)、Node.js ≥ 20。
+
+```bash
+uv sync                          # Python 依赖
+uv run autoanime init-db         # 初始化数据库（幂等）
+cd frontend && npm install       # 前端依赖（Windows 用 npm install 即可）
+```
+
+```bash
+# 终端 1：后端 API（FastAPI + SSE + 订阅调度器，单进程；默认 127.0.0.1:8000）
+uv run python -m autoanime.api serve
+
+# 终端 2：前端 WebUI（默认 http://localhost:5173）
+# VITE_USE_MOCK=0 才连真后端（/api 代理到 8000）；缺省连内置 mock
+cd frontend && VITE_USE_MOCK=0 npm run dev
+```
+
+### 配置 `.env`
 
 ```bash
 cp .env.example .env   # .env 不进 git；所有密钥只放这里
 ```
+
+Windows / Linux 启动器会自动生成；密钥按需填写。不配 LLM key = L3 关闭，低置信度自动进待确认队列，属正常降级路径。
 
 常用变量（完整清单见 `.env.example` 与 `autoanime/config.py`，均以 `AUTOANIME_` 为前缀）：
 
@@ -88,7 +123,7 @@ AUTOANIME_NOTIFY_TELEGRAM_BOT_TOKEN=
 AUTOANIME_NOTIFY_TELEGRAM_CHAT_ID=
 ```
 
-### 4. 常用命令
+### 常用命令
 
 ```bash
 uv run autoanime --help          # 全部子命令
@@ -115,24 +150,7 @@ uv run autoanime report [--json]
 uv run autoanime parse --name "[SubGroup] 示例番剧 [01][1080p].mkv"
 ```
 
-### 5. 启动 API + WebUI
-
-```bash
-# 后端 API（FastAPI + SSE + 订阅调度器，单进程；默认 127.0.0.1:8000）
-uv run python -m autoanime.api serve          # 可选 --host/--port/--dev
-
-# WebUI 前端（frontend/ 目录下）
-npm install
-npm run dev    # 开发服务器，默认连内置 mock；连真后端设 VITE_USE_MOCK=0（/api 代理到 127.0.0.1:8000）
-```
-
-生产部署用 `npm run build` 后静态托管 `dist/`（构建产物默认连真 API，需把 `/api` 反代到后端 8000 端口），或直接用一键容器化：
-
-```bash
-docker compose up -d --build   # WebUI 在 http://127.0.0.1:3080
-```
-
-容器化部署、外部依赖（qBittorrent / Mikan / LLM）与部署纪律详见 [docs/DEPLOY.md](docs/DEPLOY.md)；常见问题见 [docs/FAQ.md](docs/FAQ.md)。
+前端生产构建用 `npm run build` 后静态托管 `dist/`（构建产物默认连真 API，需把 `/api` 反代到后端 8000 端口）。容器化部署、外部依赖（qBittorrent / Mikan / LLM）与部署纪律详见 [docs/DEPLOY.md](docs/DEPLOY.md)；常见问题见 [docs/FAQ.md](docs/FAQ.md)。
 
 ## 架构一图流
 

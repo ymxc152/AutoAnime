@@ -55,3 +55,5 @@ scripts/test_nvidia_api.py
 
 # UI 审查截图(本地产物,不入库)
 scripts/ui-review/
+*.db-shm
+*.db-wal

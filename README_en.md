@@ -25,25 +25,60 @@ English | [简体中文](./README.md)
 
 ## Quick Start
 
-### 1. Install (Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/))
+### Windows: double-click `start.cmd` (recommended)
+
+Prerequisites (one-time): [uv](https://docs.astral.sh/uv/) and [Node.js ≥ 20](https://nodejs.org/).
+
+1. Double-click **`start.cmd`** in the project root — it automatically installs dependencies (first run), generates `.env`, initializes the database, starts the backend API (default 8000) and the WebUI frontend (default http://localhost:5173, wired to the real backend), and opens your browser once the frontend is ready.
+2. To stop: close the two service windows, or double-click **`stop.cmd`**.
+
+### Linux / macOS: `./start.sh`
 
 ```bash
 git clone <repo-url>
 cd AutoAnime
-uv sync
+chmod +x start.sh && ./start.sh   # one shot: deps + DB init + backend/frontend + open browser
 ```
 
-### 2. Initialize the database
+`Ctrl+C` stops both backend and frontend.
+
+### Docker (production / always-on)
 
 ```bash
-uv run autoanime init-db
+cp .env.example .env             # set AUTOANIME_API_TOKEN at minimum
+docker compose up -d --build     # WebUI at http://127.0.0.1:3080
 ```
 
-### 3. Configure `.env`
+- Library/download dirs are mounted at `./library` / `./downloads`, database at `./data`; **library and downloads must share a disk** (hardlink-based upgrades depend on it).
+- CLI runs inside the container: `docker compose exec backend uv run autoanime --help`.
+- See [docs/DEPLOY.md](docs/DEPLOY.md) for deployment rules and acceptance.
+
+### Manual start (for debugging)
+
+Prerequisites: Python ≥ 3.12, [uv](https://docs.astral.sh/uv/), Node.js ≥ 20.
+
+```bash
+uv sync                          # Python dependencies
+uv run autoanime init-db         # idempotent
+cd frontend && npm install       # frontend dependencies
+```
+
+```bash
+# Terminal 1: backend API (FastAPI + SSE + scheduler in one process; default 127.0.0.1:8000)
+uv run python -m autoanime.api serve
+
+# Terminal 2: WebUI frontend (default http://localhost:5173)
+# VITE_USE_MOCK=0 connects to the real backend (/api proxied to 8000); default is built-in mock
+cd frontend && VITE_USE_MOCK=0 npm run dev
+```
+
+### Configure `.env`
 
 ```bash
 cp .env.example .env   # .env is git-ignored; keep all secrets here
 ```
+
+The Windows / Linux launchers generate it automatically; fill in keys as needed. No LLM key = L3 off, low-confidence results go to the pending queue — designed degradation, not a failure.
 
 Common variables (full list in `.env.example` and `autoanime/config.py`; all prefixed `AUTOANIME_`):
 
@@ -88,7 +123,7 @@ AUTOANIME_NOTIFY_TELEGRAM_BOT_TOKEN=
 AUTOANIME_NOTIFY_TELEGRAM_CHAT_ID=
 ```
 
-### 4. Common commands
+### Common commands
 
 ```bash
 uv run autoanime --help          # all subcommands
@@ -115,24 +150,7 @@ uv run autoanime report [--json]
 uv run autoanime parse --name "[SubGroup] Show [01][1080p].mkv"
 ```
 
-### 5. Start the API + WebUI
-
-```bash
-# Backend API (FastAPI + SSE + scheduler in one process; default 127.0.0.1:8000)
-uv run python -m autoanime.api serve          # options: --host/--port/--dev
-
-# WebUI frontend (inside frontend/)
-npm install
-npm run dev    # dev server, built-in mock by default; set VITE_USE_MOCK=0 for the real backend (/api proxied to 127.0.0.1:8000)
-```
-
-For production, `npm run build` and statically host `dist/` (the build defaults to the real API; reverse-proxy `/api` to the backend port 8000), or use the one-command containers:
-
-```bash
-docker compose up -d --build   # WebUI at http://127.0.0.1:3080
-```
-
-See [docs/DEPLOY.md](docs/DEPLOY.md) for container deployment, external dependencies (qBittorrent / Mikan / LLM) and deployment rules; see [docs/FAQ.md](docs/FAQ.md) for FAQs.
+For frontend production, `npm run build` and statically host `dist/` (the build defaults to the real API; reverse-proxy `/api` to the backend port 8000). See [docs/DEPLOY.md](docs/DEPLOY.md) for container deployment, external dependencies (qBittorrent / Mikan / LLM) and deployment rules; see [docs/FAQ.md](docs/FAQ.md) for FAQs.
 
 ## Architecture at a Glance
 
