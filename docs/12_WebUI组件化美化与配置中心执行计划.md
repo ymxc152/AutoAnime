@@ -1,7 +1,8 @@
 # WebUI 组件化、美化与配置中心执行计划（12）
 
-> - 状态：**已拍板，实施中**
+> - 状态：**12-A…12-F 全部完成（2026-09-07）**
 > - 拍板记录（2026-09-07）：组件库 = **方案 A shadcn/ui**；美化幅度 = **方案乙 视觉重设计**（重定调色板/字体/圆角/阴影，12-C 相应上调为重设计走查）
+> - 交付：aa1d240…eed9417 共 10 commit；后端 1135 tests 绿（pytest/ruff/pyright），前端 125 tests 绿（typecheck/lint）；bundle 175→227KB gzip（+52KB，验收线 <80KB）；真服务 E2E（8 页渲染 + Settings 七 Tab + parse-preview 真实识别 + report 卡）与明暗两套截图走查通过
 > - 基线：`v2 @ 667cf59`（含一键启动器）；摸排时后端 1099 tests 绿，前端 105 tests 绿
 > - 依据：2026-09-07 三路只读审计 + Playwright 8 页截图实测（截图在 `<工作区>/scripts/ui-review/`）
 > - 前置文档：`docs/11_WebUI产品化缺口执行计划.md`（A–G 已完成，本计划是其后续迭代）
