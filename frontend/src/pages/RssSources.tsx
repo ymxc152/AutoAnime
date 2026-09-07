@@ -372,8 +372,11 @@ export function RssSourcesPage() {
       // 12-C:域名主体加粗、后缀路径弱化;解析失败回退原样。完整 URL 走 title 悬停。
       render: (row) => {
         const host = urlHost(row.url)
-        const rest = host !== '' && row.url.startsWith(host) && row.url.length > host.length
-          ? row.url.slice(host.length)
+        // 12-C:在完整 URL 中定位 host 后取其后缀路径(裸 host 前缀匹配对绝对 URL 恒空,已修);
+        // 解析失败回退原样。完整 URL 走 title 悬停。
+        const idx = row.url.indexOf(host)
+        const rest = idx >= 0 && idx + host.length < row.url.length
+          ? row.url.slice(idx + host.length)
           : ''
         return (
           // 12-A:去掉 max-w-md 硬上限,截断只发生在列宽不足时(悬停 title 看全文)

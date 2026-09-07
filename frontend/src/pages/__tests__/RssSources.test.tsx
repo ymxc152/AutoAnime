@@ -43,6 +43,15 @@ describe('RssSourcesPage', () => {
     expect(screen.getAllByRole('switch').length).toBe(3)
   })
 
+  it('12-C:URL 域名加粗、后缀路径弱化(host 定位修复后真正生效)', async () => {
+    renderPage(<RssSourcesPage />)
+    const cell = await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
+    // host 单独成节点加粗,路径后缀弱化;textContent 拼回仍是完整 URL
+    expect(within(cell).getByText('mikanani.me')).toHaveClass('font-medium')
+    expect(within(cell).getByText('/RSS/MyBangumi?token=***')).toHaveClass('text-ink-muted')
+    expect(cell.textContent).toBe('mikanani.me/RSS/MyBangumi?token=***')
+  })
+
   it('启停开关切换后调用 PATCH', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)

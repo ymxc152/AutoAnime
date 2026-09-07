@@ -152,5 +152,44 @@ describe('LibraryPage', () => {
     expect(reparseSpy).toHaveBeenCalledTimes(1)
     reparseSpy.mockRestore()
   })
+
+  it('重新识别预览进行中:所有行的「重新识别」按钮禁用(而非静默 no-op),预览弹出后恢复', async () => {
+    const preview: EpisodeReparseOut = {
+      episode_id: 101,
+      dry_run: true,
+      parsed: null,
+      action: {
+        dst: '/library/葬送的芙莉莲/Season 1/葬送的芙莉莲 - S01E01.1080p.mkv',
+        strategy: 'hardlink',
+        episode_state: 'organized',
+        action: 'archive',
+      },
+    }
+    // 用受控 Promise 让 dry-run 预览停在在途,观察其它行按钮状态
+    let resolvePreview: (value: EpisodeReparseOut) => void = () => {}
+    vi.spyOn(api.episodes, 'reparse').mockImplementation(
+      () => new Promise<EpisodeReparseOut>((resolve) => { resolvePreview = resolve }),
+    )
+    const user = userEvent.setup()
+    renderPage(<LibraryPage />)
+    await user.click(await screen.findByText('葬送的芙莉莲'))
+    const drawer = await screen.findByRole('dialog')
+    const reparseButtons = () => within(drawer).getAllByRole('button', { name: /重新识别/ })
+    await user.click(reparseButtons()[0]!)
+    // 预览在途:当前行 loading、其它行 disabled,全部不可点击
+    await waitFor(() => {
+      for (const button of reparseButtons()) {
+        expect(button).toBeDisabled()
+      }
+    })
+    // 预览返回并弹出预览抽屉后,行按钮恢复可用
+    resolvePreview(preview)
+    await waitFor(() => {
+      for (const button of reparseButtons()) {
+        expect(button).toBeEnabled()
+      }
+    })
+    vi.restoreAllMocks()
+  })
 })
 

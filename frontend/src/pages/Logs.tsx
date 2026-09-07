@@ -161,7 +161,7 @@ function GroupRow({
       const clip = navigator.clipboard
       if (clip === undefined || typeof clip.writeText !== 'function') return
       void clip.writeText(group.operation_id).then(() => {
-        toast.success('已复制')
+        toast.success(strings.common.copied)
       })
     } catch {
       // 无 clipboard:忽略
@@ -194,8 +194,8 @@ function GroupRow({
           size="sm"
           variant="ghost"
           className="h-6 px-1.5"
-          aria-label="复制操作 ID"
-          title="复制操作 ID"
+          aria-label={strings.logs.copyOperationId}
+          title={strings.logs.copyOperationId}
           onClick={copyOperationId}
         >
           <Copy aria-hidden className="h-3.5 w-3.5" />

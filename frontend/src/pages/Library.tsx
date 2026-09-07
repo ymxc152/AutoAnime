@@ -116,10 +116,13 @@ function fileBasename(path: string | null): string {
 function EpisodeRow({
   episode,
   reparseBusy,
+  reparseDisabled,
   onReparse,
 }: {
   episode: EpisodeDto
   reparseBusy: boolean
+  /** 预览在途时禁用所有行的「重新识别」(startReparse 对并发点击是静默 no-op,与其静默不如禁用) */
+  reparseDisabled: boolean
   onReparse: (episode: EpisodeDto) => void
 }) {
   const view = episodeStateView(episode.state)
@@ -140,6 +143,7 @@ function EpisodeRow({
           variant="ghost"
           aria-label={`${strings.ops12f.reparseAction} ${t(strings.library.episodeN, { n: episode.number })}`}
           loading={reparseBusy}
+          disabled={reparseDisabled}
           onClick={() => onReparse(episode)}
         >
           {strings.ops12f.reparseAction}
@@ -255,6 +259,7 @@ function SeriesDrawer({
                     key={ep.id}
                     episode={ep}
                     reparseBusy={previewingId === ep.id}
+                    reparseDisabled={previewingId !== null}
                     onReparse={(e) => void startReparse(e)}
                   />
                 ))

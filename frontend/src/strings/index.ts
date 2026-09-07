@@ -8,6 +8,7 @@ export const strings = {
   app: {
     name: 'AutoAnime',
     tagline: '本地优先的三级识别追番管线',
+    mockMode: 'Mock 数据模式',
   },
 
   nav: {
@@ -304,6 +305,7 @@ export const strings = {
     rollbackRow: '撤销此条',
     rollbackRowConfirm: '确认撤销审计行 #{id} 的操作？',
     rollbackRowDone: '已撤销审计行 #{id}',
+    copyOperationId: '复制操作 ID',
   },
 
   settings: {
@@ -415,6 +417,9 @@ export const strings = {
     connecting: '事件流连接中…',
     disconnected: '事件流已断开',
     reconnecting: '正在重连(第 {attempt} 次)…',
+    // Layout 顶部 SseBanner(与状态行文案区分:带数据可能过期提示)
+    bannerClosed: '事件流已断开,页面数据可能不是最新。',
+    bannerReconnecting: '事件流连接中断,正在重连…(第 {attempt} 次)',
   },
 
   error: {

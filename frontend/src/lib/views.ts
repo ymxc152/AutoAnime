@@ -14,6 +14,7 @@ export interface StateView {
   tone: Tone
 }
 
+/** 集状态 → 文案 + tone(未知枚举降级:label 原样、tone neutral,容忍后端新增值) */
 export function episodeStateView(state: EpisodeState): StateView {
   switch (state) {
     case 'organized':
@@ -28,9 +29,12 @@ export function episodeStateView(state: EpisodeState): StateView {
       return { label: strings.library.state.missing, tone: 'danger' }
     case 'ignored':
       return { label: strings.library.state.ignored, tone: 'neutral' }
+    default:
+      return { label: state as string, tone: 'neutral' }
   }
 }
 
+/** 季状态 → 文案 + tone(未知枚举降级:label 原样、tone neutral) */
 export function seasonStateView(state: SeasonState): StateView {
   switch (state) {
     case 'airing':
@@ -41,9 +45,12 @@ export function seasonStateView(state: SeasonState): StateView {
       return { label: strings.library.seasonState.collected, tone: 'success' }
     case 'upcoming':
       return { label: strings.library.seasonState.upcoming, tone: 'neutral' }
+    default:
+      return { label: state as string, tone: 'neutral' }
   }
 }
 
+/** 媒体类型 → 中文(未知值原样返回,容忍后端新增枚举) */
 export function mediaTypeLabel(type: MediaType): string {
   switch (type) {
     case 'tv':
@@ -54,6 +61,8 @@ export function mediaTypeLabel(type: MediaType): string {
       return strings.library.mediaType.ova
     case 'special':
       return strings.library.mediaType.special
+    default:
+      return type as string
   }
 }
 

@@ -20,7 +20,7 @@ import {
   Tv,
   Workflow,
 } from 'lucide-react'
-import { strings } from '../strings'
+import { strings, t } from '../strings'
 import { isMockMode } from '../api'
 import { useTheme } from '../hooks/useTheme'
 import { useEventStream } from '../hooks/eventStreamContext'
@@ -67,8 +67,8 @@ function SseBanner() {
       <StatusDot tone={isClosed ? 'danger' : 'warning'} size={7} />
       <span>
         {isClosed
-          ? '事件流已断开,页面数据可能不是最新。'
-          : `事件流连接中断,正在重连…(第 ${attempt} 次)`}
+          ? strings.sse.bannerClosed
+          : t(strings.sse.bannerReconnecting, { attempt })}
       </span>
     </div>
   )
@@ -131,7 +131,7 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex items-center justify-between border-t border-line px-4 py-3">
         <div className="flex flex-col gap-1">
           {isMockMode && (
-            <StatusDot tone="warning" size={7} label="Mock 数据模式" className="text-xs" />
+            <StatusDot tone="warning" size={7} label={strings.app.mockMode} className="text-xs" />
           )}
           <SseStatusLine />
         </div>
