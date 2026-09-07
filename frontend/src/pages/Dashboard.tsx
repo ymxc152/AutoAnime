@@ -46,8 +46,9 @@ function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
   // 空桶(0 调用)无信息量,过滤掉;全空时显示空态
   const active = points.filter((p) => p.llm_called > 0)
   const max = Math.max(1, ...active.map((p) => p.llm_called))
-  const spacing = 44
   const height = 72
+  // viewBox 宽度下限 280 与 min-w 匹配,避免数据点少时 SVG 被等比放大成巨图(实测修复)
+  const width = Math.max(active.length * 44, 280)
   if (active.length === 0) {
     return (
       <div className="flex flex-col items-center py-6 text-center">
@@ -58,7 +59,7 @@ function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
   }
   const pts = active.map((p, i) => ({
     ...p,
-    x: i * spacing + spacing / 2,
+    x: ((i + 0.5) * width) / active.length,
     y: height - (p.llm_called / max) * (height - 14) - 4,
   }))
   const last = pts.at(-1)
@@ -68,7 +69,7 @@ function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
   return (
     <div className="overflow-x-auto">
       <svg
-        viewBox={`0 0 ${active.length * spacing} ${height + 18}`}
+        viewBox={`0 0 ${width} ${height + 18}`}
         className="w-full min-w-[280px]"
         role="img"
         aria-label={strings.dashboard.weeklyCurve}
@@ -95,9 +96,9 @@ function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
           <g key={p.bucket}>
             {/* 透明命中区覆盖整列,细线也易 hover;<title> 为原生 tooltip */}
             <rect
-              x={p.x - spacing / 2}
+              x={p.x - width / active.length / 2}
               y={0}
-              width={spacing}
+              width={width / active.length}
               height={height + 6}
               fill="transparent"
             >
