@@ -376,6 +376,14 @@ async def test_subscription_create_requires_title_and_delete_cascades(client) ->
     assert body["fansub_pref"] is None
     assert body["quality_pref"] is None
 
+    # 编辑契约兜底：未知状态 / 显式 null 都在 schema 边界拒绝，不落 DB。
+    resp = await c.patch(
+        f"/api/subscriptions/{series_id}", json={"status": "not-a-status"}
+    )
+    assert resp.status_code == 422
+    resp = await c.patch(f"/api/subscriptions/{series_id}", json={"status": None})
+    assert resp.status_code == 422
+
     resp = await c.delete(f"/api/subscriptions/{series_id}")
     assert resp.status_code == 204
     assert (await c.get("/api/series")).json()["total"] == 0

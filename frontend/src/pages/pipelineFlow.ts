@@ -141,9 +141,12 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
     }
     case 'event': {
       const path = pathForEvent(action.event)
+      // 所有事件都递增序号：同一毫秒内的 system/notify 事件也可能没有 SSE id，
+      // 不能只用 id + ts 作为 React key。
+      const tokenSeq = state.tokenSeq + 1
       const recent = [
         {
-          key: `${action.event.id ?? state.tokenSeq}-${action.event.ts}`,
+          key: `${tokenSeq}-${action.event.ts}`,
           message: action.event.message,
           ts: action.event.ts,
           category: action.event.category,
@@ -151,9 +154,8 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         ...state.recent,
       ].slice(0, 8)
       if (path === null) {
-        return { ...state, recent }
+        return { ...state, tokenSeq, recent }
       }
-      const tokenSeq = state.tokenSeq + 1
       return {
         ...state,
         tokenSeq,

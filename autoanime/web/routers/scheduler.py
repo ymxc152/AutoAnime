@@ -31,21 +31,24 @@ async def run_once(
     if getattr(request.app.state, "scheduler_run_running", False):
         raise HTTPException(status_code=409, detail="a scheduler run is already active")
     request.app.state.scheduler_run_running = True
-    components = getattr(request.app.state, "loop_components", None)
-    owns_components = components is None
-    if components is None:
-        components = build_loop(settings, storage=storage, bus=bus)
+    components = None
+    owns_components = False
     reports: dict[str, object] = {}
     errors: list[str] = []
-    started = Event(
-        EventCategory.SYSTEM,
-        "scheduler.run.started",
-        {"scope": body.scope},
-    )
-    await bus.publish(started)
     try:
+        components = getattr(request.app.state, "loop_components", None)
+        owns_components = components is None
+        if components is None:
+            components = build_loop(settings, storage=storage, bus=bus)
+        scope = body.scope
+        started = Event(
+            EventCategory.SYSTEM,
+            "scheduler.run.started",
+            {"scope": scope},
+        )
+        await bus.publish(started)
         now = datetime.now(UTC)
-        if body.scope in {"all", "rss"}:
+        if scope in {"all", "rss"}:
             rss = await components.rss_poller.poll_all(now=now)
             reports["rss"] = {
                 "picked": rss.picked,
@@ -53,7 +56,7 @@ async def run_once(
                 "errors": list(rss.errors),
             }
             errors.extend(rss.errors)
-        if body.scope in {"all", "download"}:
+        if scope in {"all", "download"}:
             download = await components.download_poller.poll_once(now=now)
             reports["download"] = {
                 "checked": download.checked,
@@ -61,7 +64,7 @@ async def run_once(
                 "failed": download.failed,
                 "retried": download.retried,
             }
-        result = {"scope": body.scope, "reports": reports, "errors": errors}
+        result = {"scope": scope, "reports": reports, "errors": errors}
         await bus.publish(
             Event(
                 EventCategory.SYSTEM,
@@ -84,7 +87,7 @@ async def run_once(
         ) from exc
     finally:
         request.app.state.scheduler_run_running = False
-        if owns_components:
+        if owns_components and components is not None:
             await components.close()
 
 

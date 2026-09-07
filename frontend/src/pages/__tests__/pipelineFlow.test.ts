@@ -172,6 +172,19 @@ describe('flowReducer', () => {
     expect(state.recent[0]?.message).toBe('解析')
   })
 
+  it('同一毫秒的无 id 事件也生成唯一 React key', () => {
+    const ts = '2026-09-07T06:58:45.170Z'
+    const first = flowReducer(base, {
+      type: 'event',
+      event: { id: null, category: 'system', message: 'a', payload: {}, ts },
+    })
+    const second = flowReducer(first, {
+      type: 'event',
+      event: { id: null, category: 'system', message: 'b', payload: {}, ts },
+    })
+    expect(second.recent[0]?.key).not.toBe(second.recent[1]?.key)
+  })
+
   it('token 沿路径推进,抵达终点后计数 +1 并移除', () => {
     let state = flowReducer(base, {
       type: 'event',

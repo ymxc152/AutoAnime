@@ -169,13 +169,13 @@ Subscription (Mikan RSS polling)        Import (local directory scan)
 | `autoanime/gateway/` | qBittorrent / aria2 downloader interfaces, Mikan RSS fetching |
 | `autoanime/scheduler/` | RSS polling, download polling and reconcile, startup reconcile, gap detection, cadence and JST clock |
 | `autoanime/organize/` | hardlink moves, Sonarr-compatible naming, upgrade scoring, mismatch recovery, rollback |
-| `autoanime/web/` | FastAPI assembly, SSE event stream, REST routes (series / subscriptions / rss_sources / pending / organize / audit / metrics / settings / events) |
+| `autoanime/web/` | FastAPI assembly, SSE event stream, REST routes (series / subscriptions / rss_sources / pending / organize / audit / metrics / settings / pipeline / scheduler / events) |
 | `autoanime/api/` | `python -m autoanime.api serve` entry point |
 | `frontend/` | React 19 + Tailwind 4 + xyflow WebUI (8 pages, built with Vite) |
 
 ## Testing & Quality
 
-- **1093 backend offline tests** (`uv run pytest -q`, fully offline) + **93 frontend tests** (`cd frontend && npm test`), all passing.
+- **1099 backend offline tests** (`uv run pytest -q`, fully offline) + **105 frontend tests** (`cd frontend && npm test`), all passing.
 - **Five rounds of real-data acceptance**: round 1 fixed 4 issues; rounds 2–3 fixed 10 more, including two major defects (episode id vs episode number mix-up, upgrade target-slot overwrite); round 4 switched to brand-new naming styles (CJK bracket fansub packs / LoliHouse loose files / simplified+traditional twins) and fixed 4 more; round 5 re-imported the same batch — all memory-routed, zero LLM calls.
 - **WebUI tested in a real browser**: all 8 pages exercised for interactions and the SSE event stream (which surfaced and fixed SSE wiring/subscription defects).
 - Upgrade triggers/scoring are deterministic code, never inside the AI boundary; every recognition decision lands in the audit log — explainable and traceable.

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator, model_validator
 
@@ -234,9 +235,15 @@ class SubscriptionCreateIn(BaseModel):
 
 
 class SubscriptionUpdateIn(BaseModel):
-    status: str | None = None
+    status: Literal["active", "paused", "finished"] | None = None
     fansub_pref: str | None = None
     quality_pref: str | None = None
+
+    @model_validator(mode="after")
+    def _status_required_if_present(self) -> SubscriptionUpdateIn:
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status cannot be null")
+        return self
 
 
 # ---------------------------------------------------------------------------

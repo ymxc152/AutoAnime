@@ -66,4 +66,3 @@ describe('useReloadOnMessages', () => {
     expect(second).toHaveBeenCalledTimes(1)
   })
 })
-

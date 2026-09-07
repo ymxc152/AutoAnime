@@ -78,4 +78,3 @@ export function useReloadOnCategories(
   )
   useReloadOnEvent(reload, matcher, debounceMs)
 }
-

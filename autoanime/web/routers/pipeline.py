@@ -102,6 +102,12 @@ async def start_import(
 ) -> dict[str, object]:
     """异步导入：立即返回 task_id；进度/结果走任务 API 与 SSE。"""
     root = Path(body.directory)
+    if not root.is_absolute():
+        raise HTTPException(status_code=422, detail="directory must be an absolute path")
+    try:
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=422, detail=f"not a directory: {body.directory}") from None
     if not root.is_dir():
         raise HTTPException(status_code=422, detail=f"not a directory: {body.directory}")
     tasks = _task_registry(request)

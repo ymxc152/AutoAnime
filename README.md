@@ -168,7 +168,7 @@ docker compose up -d --build   # WebUI 在 http://127.0.0.1:3080
 | `autoanime/gateway/` | qBittorrent / aria2 下载器接口、Mikan RSS 拉取 |
 | `autoanime/scheduler/` | RSS 轮询、下载轮询与补扫、启动对账、缺集检测、节拍与 JST 时钟 |
 | `autoanime/organize/` | hardlink 搬移、Sonarr 兼容命名、洗版评分、错配恢复、回滚 |
-| `autoanime/web/` | FastAPI 装配、SSE 事件流、REST 路由（series / subscriptions / rss_sources / pending / organize / audit / metrics / settings / events） |
+| `autoanime/web/` | FastAPI 装配、SSE 事件流、REST 路由（series / subscriptions / rss_sources / pending / organize / audit / metrics / settings / pipeline / scheduler / events） |
 | `autoanime/api/` | `python -m autoanime.api serve` 启动入口 |
 | `frontend/` | React 19 + Tailwind 4 + xyflow 的 WebUI（8 页面，Vite 构建） |
 
@@ -184,7 +184,7 @@ docker compose up -d --build   # WebUI 在 http://127.0.0.1:3080
 
 ## 测试与质量
 
-- **1093 个后端离线测试**（`uv run pytest -q`，全程不触网）+ **93 个前端测试**（`cd frontend && npm test`），全部通过。
+- **1099 个后端离线测试**（`uv run pytest -q`，全程不触网）+ **105 个前端测试**（`cd frontend && npm test`），全部通过。
 - **五轮真实数据验收**：第一轮修复 4 项；第二、三轮累计修复 10 项（含 episode id 与集号混用、洗版目标位覆盖两个重大缺陷）；第四轮换用全新命名风格（中文方括号字幕组包 / LoliHouse 散文件 / 简繁内嵌同番）修复 4 项；第五轮同批重导全量走记忆路由零 LLM 外呼。
 - **WebUI 浏览器实测**：8 页面逐一验证交互与 SSE 事件流（并由此发现并修复了 SSE 装配与订阅缺陷）。
 - 洗版触发/评分是确定性代码，不进 AI 边界；识别决策全部落审计日志（audit_log），可解释可回溯。

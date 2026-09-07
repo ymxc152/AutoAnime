@@ -80,5 +80,52 @@ async def test_scheduler_run_once_offline_reports_degraded_sources(client) -> No
     assert body["reports"]["download"]["checked"] == 0
 
 
+async def test_pipeline_import_rejects_relative_and_missing_directories(
+    client: httpx.AsyncClient, settings: Settings
+) -> None:
+    resp = await client.post("/api/pipeline/import", json={"directory": "downloads"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "directory must be an absolute path"
+
+    missing = settings.download_path / "missing"
+    resp = await client.post("/api/pipeline/import", json={"directory": str(missing)})
+    assert resp.status_code == 422
+    assert resp.json()["detail"].startswith("not a directory:")
 
 
+async def test_pipeline_import_empty_directory_completes_without_work(
+    client: httpx.AsyncClient, settings: Settings, tmp_path: Path
+) -> None:
+    empty = settings.download_path / "empty"
+    empty.mkdir()
+    resp = await client.post(
+        "/api/pipeline/import", json={"directory": str(empty), "dry_run": True}
+    )
+    assert resp.status_code == 202, resp.text
+    task = (await client.get(f"/api/pipeline/tasks/{resp.json()['task_id']}")).json()
+    assert task["status"] == "completed", task
+    assert task["summary"] == {
+        "total": 0,
+        "scanned": 0,
+        "archived": 0,
+        "pending": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+
+
+async def test_scheduler_lock_released_when_loop_build_fails(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_build(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("loop bootstrap failed")
+
+    monkeypatch.setattr("autoanime.web.routers.scheduler.build_loop", fail_build)
+    first = await client.post("/api/scheduler/run-once", json={"scope": "all"})
+    assert first.status_code == 500
+    assert "scheduler run failed" in first.json()["detail"]
+
+    # 构建失败也必须释放互斥锁；第二次应仍是 500，而不是永久 409。
+    second = await client.post("/api/scheduler/run-once", json={"scope": "all"})
+    assert second.status_code == 500
+    assert second.json()["detail"] != "a scheduler run is already active"

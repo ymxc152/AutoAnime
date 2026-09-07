@@ -142,6 +142,7 @@ export function SettingsPage() {
     setTokenNotice(
       token === '' ? strings.settings.apiTokenClearedNotice : strings.settings.apiTokenSavedNotice,
     )
+    window.setTimeout(() => window.location.reload(), 750)
   }
 
   const clearToken = (): void => {
