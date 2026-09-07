@@ -8,6 +8,7 @@
 import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
+import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
 import { strings, t } from '../strings'
 import {
   Badge,
@@ -196,6 +197,11 @@ export function PendingPage() {
     [page],
   )
   const { data, loading, error, reload } = useApi(fetcher)
+  useReloadOnMessages(reload, [
+    'pending.confirmed',
+    'pending.corrected',
+    'pending.rejected',
+  ])
   const [selected, setSelected] = useState<PendingItemDto | null>(null)
   // 多选(跨页保留已勾选 id;操作成功后剔除)
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set())

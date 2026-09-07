@@ -4,7 +4,7 @@
  * SSE 驱动文件流:事件到达后沿路径逐段点亮边(xyflow animated edge),
  * 侧栏展示最近事件流。流量模型见 pipelineFlow.ts(纯 reducer)。
  */
-import { useCallback, useEffect, useMemo, useReducer } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -19,7 +19,16 @@ import { api } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useEventStream } from '../hooks/eventStreamContext'
 import { strings } from '../strings'
-import { Badge, Button, Card, PageTitle, StatusDot } from '../components'
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  PageTitle,
+  StatusDot,
+  Switch,
+} from '../components'
 import {
   activeEdgesOf,
   flowReducer,
@@ -31,7 +40,12 @@ import {
   type PipelineNodeData,
   type PipelineNodeId,
 } from './pipelineFlow'
-import type { SseEvent } from '../api/types'
+import type {
+  ParsePreviewResponse,
+  PipelineTask,
+  SchedulerRunResponse,
+  SseEvent,
+} from '../api/types'
 
 function PipelineNodeView({ data }: NodeProps<Node<PipelineNodeData>>) {
   const rate = data.entered > 0 ? Math.round((data.passed / data.entered) * 100) : null
@@ -76,6 +90,160 @@ const categoryTone: Record<
 }
 
 const STEP_MS = 900
+
+
+function ManualOperations() {
+  const [parseName, setParseName] = useState('')
+  const [preview, setPreview] = useState<ParsePreviewResponse | null>(null)
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+
+  const [directory, setDirectory] = useState('')
+  const [dryRun, setDryRun] = useState(true)
+  const [task, setTask] = useState<PipelineTask | null>(null)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+
+  const [schedulerResult, setSchedulerResult] = useState<SchedulerRunResponse | null>(null)
+  const [schedulerBusy, setSchedulerBusy] = useState(false)
+  const [schedulerError, setSchedulerError] = useState<string | null>(null)
+
+  const submitPreview = async (): Promise<void> => {
+    if (parseName.trim() === '') return
+    setPreviewBusy(true)
+    setPreviewError(null)
+    try {
+      setPreview(await api.pipeline.parsePreview({ name: parseName.trim() }))
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : strings.common.actionFailed)
+    } finally {
+      setPreviewBusy(false)
+    }
+  }
+
+  const waitForTask = async (taskId: string): Promise<void> => {
+    for (let round = 0; round < 600; round += 1) {
+      const current = await api.pipeline.task(taskId)
+      setTask(current)
+      if (current.status !== 'running') {
+        if (current.status === 'failed') throw new Error(current.error ?? strings.common.actionFailed)
+        return
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 500))
+    }
+    throw new Error(strings.common.actionFailed)
+  }
+
+  const submitImport = async (): Promise<void> => {
+    if (directory.trim() === '') return
+    setImportBusy(true)
+    setImportError(null)
+    try {
+      const started = await api.pipeline.startImport({
+        directory: directory.trim(),
+        dry_run: dryRun,
+      })
+      await waitForTask(started.task_id)
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : strings.common.actionFailed)
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  const runOnce = async (): Promise<void> => {
+    setSchedulerBusy(true)
+    setSchedulerError(null)
+    try {
+      setSchedulerResult(await api.scheduler.runOnce({ scope: 'all' }))
+    } catch (cause) {
+      setSchedulerError(cause instanceof Error ? cause.message : strings.common.actionFailed)
+    } finally {
+      setSchedulerBusy(false)
+    }
+  }
+
+  return (
+    <Card title={strings.pipeline.manualSection} className="mb-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submitPreview()
+          }}
+        >
+          <Field label={strings.pipeline.parseName} description={strings.pipeline.parseNameHint} htmlFor="pipeline-parse-name">
+            <Input
+              id="pipeline-parse-name"
+              value={parseName}
+              onChange={(e) => setParseName(e.target.value)}
+              placeholder="Show S01E01 1080p.mkv"
+            />
+          </Field>
+          <Button type="submit" variant="secondary" loading={previewBusy}>
+            {strings.pipeline.parsePreview}
+          </Button>
+          {previewError !== null && <p role="alert" className="text-xs text-danger">{previewError}</p>}
+          {preview !== null && (
+            <pre className="data-text overflow-x-auto rounded-sm bg-surface-2 px-2 py-1.5 text-xs">
+              {typeof preview === 'string' ? preview : JSON.stringify(preview.result, null, 2)}
+            </pre>
+          )}
+        </form>
+
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submitImport()
+          }}
+        >
+          <Field label={strings.pipeline.importDirectory} htmlFor="pipeline-import-directory">
+            <Input
+              id="pipeline-import-directory"
+              value={directory}
+              onChange={(e) => setDirectory(e.target.value)}
+              className="data-text"
+            />
+          </Field>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm text-ink">{strings.pipeline.dryRun}</span>
+            <Switch checked={dryRun} onChange={setDryRun} aria-label={strings.pipeline.dryRun} />
+          </div>
+          <Button type="submit" variant="primary" loading={importBusy}>
+            {strings.pipeline.startImport}
+          </Button>
+          {importError !== null && <p role="alert" className="text-xs text-danger">{importError}</p>}
+          {task !== null && (
+            <p className="text-xs text-ink-secondary data-text">
+              {task.status === 'running'
+                ? strings.pipeline.running
+                : task.status === 'completed'
+                  ? strings.pipeline.completed
+                  : strings.pipeline.failed}
+              {task.summary !== null &&
+                ` · ${task.summary.archived}/${task.summary.scanned}`}
+              {task.error !== null && ` · ${task.error}`}
+            </p>
+          )}
+        </form>
+
+        <div className="flex flex-col gap-2">
+          <Button variant="secondary" loading={schedulerBusy} onClick={() => void runOnce()}>
+            {strings.pipeline.runOnce}
+          </Button>
+          {schedulerError !== null && <p role="alert" className="text-xs text-danger">{schedulerError}</p>}
+          {schedulerResult !== null && (
+            <pre className="data-text overflow-x-auto rounded-sm bg-surface-2 px-2 py-1.5 text-xs">
+              {JSON.stringify(schedulerResult, null, 2)}
+            </pre>
+          )}
+        </div>
+      </div>
+    </Card>
+  )
+}
 
 export function PipelinePage() {
   const fetcher = useCallback(() => api.metrics.get(), [])
@@ -162,6 +330,8 @@ export function PipelinePage() {
           </>
         }
       />
+
+      <ManualOperations />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_280px]">
         <Card flush className="hidden overflow-hidden lg:block">

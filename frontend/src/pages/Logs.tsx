@@ -8,6 +8,7 @@
 import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
+import { useReloadOnEvent } from '../hooks/useReloadOnEvent'
 import { strings, t } from '../strings'
 import {
   Badge,
@@ -170,6 +171,7 @@ function GroupRow({
 export function LogsPage() {
   const fetcher = useCallback(() => api.auditOperations.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
+  useReloadOnEvent(reload)
   const [filter, setFilter] = useState('')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [rollingBackId, setRollingBackId] = useState<string | null>(null)

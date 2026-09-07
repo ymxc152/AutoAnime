@@ -2,9 +2,10 @@
  * Library —— series 卡片网格 + season/episode 明细抽屉 + quality_score 徽标。
  * 数据:GET /api/series(契约假设:series 资源内嵌 seasons[].episodes[] 全树)。
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useApi } from '../hooks/useApi'
+import { useReloadOnCategories } from '../hooks/useReloadOnEvent'
 import { strings, t } from '../strings'
 import {
   Badge,
@@ -14,6 +15,7 @@ import {
   ErrorState,
   Input,
   PageTitle,
+  Pagination,
   Skeleton,
   StatusDot,
 } from '../components'
@@ -164,24 +166,37 @@ function SeriesDrawer({ series, onClose }: { series: SeriesDto; onClose: () => v
   )
 }
 
+const LIBRARY_PAGE_SIZE = 24
+
 export function LibraryPage() {
+  const [searchInput, setSearchInput] = useState('')
   const [query, setQuery] = useState('')
-  // 后端 GET /api/series 不支持标题过滤:一次拉全量(后端统一分页上限 200),搜索在前端做
-  const fetcher = useCallback(() => api.series.list({ limit: 200 }), [])
+  const [page, setPage] = useState(1)
+
+  // Debounce 输入：250ms 静默后才发起后端搜索，避免请求风暴。
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery(searchInput.trim())
+      setPage(1)
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [searchInput])
+
+  const fetcher = useCallback(
+    () =>
+      api.series.list({
+        limit: LIBRARY_PAGE_SIZE,
+        offset: (page - 1) * LIBRARY_PAGE_SIZE,
+        ...(query === '' ? {} : { q: query }),
+      }),
+    [page, query],
+  )
   const { data, loading, error, reload } = useApi(fetcher)
+  useReloadOnCategories(reload, ['organize', 'system'])
   const [selected, setSelected] = useState<SeriesDto | null>(null)
 
-  const seriesList = useMemo(() => {
-    const all = data?.items ?? []
-    if (query === '') return all
-    const needle = query.toLowerCase()
-    return all.filter(
-      (series) =>
-        (series.title_cn ?? '').toLowerCase().includes(needle) ||
-        (series.title_jp ?? '').toLowerCase().includes(needle) ||
-        (series.title_romaji ?? '').toLowerCase().includes(needle),
-    )
-  }, [data, query])
+  // 后端已完成 q 过滤与分页；前端只渲染当前页。
+  const seriesList = useMemo(() => data?.items ?? [], [data])
 
   return (
     <>
@@ -190,8 +205,8 @@ export function LibraryPage() {
         actions={
           <Input
             type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder={strings.library.searchPlaceholder}
             aria-label={strings.library.searchPlaceholder}
             className="w-56"
@@ -255,6 +270,15 @@ export function LibraryPage() {
             )
           })}
         </div>
+      )}
+
+      {data !== null && data.total > LIBRARY_PAGE_SIZE && (
+        <Pagination
+          page={page}
+          pageSize={LIBRARY_PAGE_SIZE}
+          total={data.total}
+          onPageChange={setPage}
+        />
       )}
 
       {data !== null && (

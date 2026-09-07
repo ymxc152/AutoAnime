@@ -126,7 +126,10 @@ export interface SeriesDto {
 }
 
 /** 后端 GET /api/series 不支持标题过滤(q),搜索在前端做 */
-export type SeriesQuery = PageQuery
+export type SeriesQuery = PageQuery & {
+  /** 后端标题关键词:cn/jp/romaji 任一命中 */
+  q?: string
+}
 
 // ---------- Pending:GET /api/pending,POST /{id}/confirm|correct|reject ----------
 
@@ -279,6 +282,65 @@ export interface SubscriptionCreateBody {
   episode_count?: number | null
   fansub_pref?: string | null
   quality_pref?: string | null
+}
+
+// ---------- Pipeline / Scheduler:D/E 操作入口 ----------
+
+export interface ParsePreviewBody {
+  name: string
+  folder?: string | null
+  parent?: string | null
+}
+
+export interface ParsePreviewResponse {
+  route: string
+  result: {
+    title: string
+    season: number | null
+    episode: number | null
+    segment: string
+    fansub: string | null
+    level: string
+    confidence: number
+    missing_fields: string[]
+    evidence: Record<string, string>
+  } | null
+}
+
+export interface PipelineImportBody {
+  directory: string
+  dry_run: boolean
+}
+
+export type PipelineTaskStatus = 'running' | 'completed' | 'failed'
+
+export interface PipelineTask {
+  task_id: string
+  kind: 'import'
+  status: PipelineTaskStatus
+  directory: string
+  dry_run: boolean
+  created_at: string
+  finished_at: string | null
+  processed: number
+  total: number | null
+  summary: {
+    total: number
+    scanned: number
+    archived: number
+    pending: number
+    failed: number
+    skipped: number
+  } | null
+  error: string | null
+}
+
+export type SchedulerScope = 'all' | 'rss' | 'download'
+
+export interface SchedulerRunResponse {
+  scope: SchedulerScope
+  reports: Record<string, Record<string, unknown>>
+  errors: string[]
 }
 
 // ---------- RSS Sources:GET/POST/PATCH/DELETE /api/rss_sources ----------

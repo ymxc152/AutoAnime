@@ -95,6 +95,16 @@ async def test_subscription_create_and_series_tree(client) -> None:
     resp = await c.get("/api/series/9999")
     assert resp.status_code == 404
 
+    # Phase F：后端标题搜索 + 分页 total；q 空白等同不过滤。
+    resp = await c.get("/api/series", params={"q": "葬送"})
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+    resp = await c.get("/api/series", params={"q": "不存在的番名"})
+    assert resp.json()["total"] == 0
+    resp = await c.get("/api/series", params={"limit": 1, "offset": 1})
+    page = resp.json()
+    assert page["total"] == 1 and page["items"] == []
+
 
 async def test_series_poster_serves_local_library_file(client) -> None:
     """海报解析:本地库 {library}/{标题目录}/poster.jpg 优先直读。"""

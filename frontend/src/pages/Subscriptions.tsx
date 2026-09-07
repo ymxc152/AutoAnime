@@ -8,6 +8,7 @@
 import { useCallback, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
+import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
 import { strings, t } from '../strings'
 import {
   Badge,
@@ -308,6 +309,12 @@ function SubscriptionRow({
 export function SubscriptionsPage() {
   const fetcher = useCallback(() => api.subscriptions.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
+  useReloadOnMessages(reload, [
+    'subscription.created',
+    'subscription.updated',
+    'subscription.deleted',
+    'episode.gap',
+  ])
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [editingSub, setEditingSub] = useState<SubscriptionDto | null>(null)

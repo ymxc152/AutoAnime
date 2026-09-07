@@ -67,7 +67,9 @@ def create_app(
         app.state.governance = MemoryGovernance(storage)
         app.state.bus = InMemoryEventBus()
         app.state.reference_chain = build_reference_chain(settings, storage)
+        # Pipeline 后台任务只存活于当前进程；任务结果不做持久化契约。
         # 海报兜底下载（PR3+）：chain 经 provider 惰性取，测试可整体替换。
+        app.state.pipeline_tasks = {}
         app.state.poster_service = PosterService(
             storage=storage,
             settings=settings,

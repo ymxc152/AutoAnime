@@ -10,6 +10,10 @@ import type {
   Metrics,
   OperationGroupDto,
   Page,
+  ParsePreviewBody,
+  ParsePreviewResponse,
+  PipelineImportBody,
+  PipelineTask,
   PendingCorrectBody,
   PendingItemDto,
   PendingQuery,
@@ -18,6 +22,8 @@ import type {
   RssSourceCreateBody,
   RssSourceDto,
   RssSourceUpdateBody,
+  SchedulerRunResponse,
+  SchedulerScope,
   SeriesDto,
   SeriesQuery,
   SettingsDto,
@@ -89,6 +95,21 @@ export const endpoints = {
     update: (id: number, body: RssSourceUpdateBody) =>
       request<RssSourceDto>(`/api/rss_sources/${id}`, { method: 'PATCH', body }),
     remove: (id: number) => request<void>(`/api/rss_sources/${id}`, { method: 'DELETE' }),
+  },
+
+  /** Pipeline D:单文件 L1 试跑 / 异步目录导入 / 任务状态 */
+  pipeline: {
+    parsePreview: (body: ParsePreviewBody) =>
+      request<ParsePreviewResponse>('/api/pipeline/parse-preview', { method: 'POST', body }),
+    startImport: (body: PipelineImportBody) =>
+      request<{ task_id: string; status: 'running' }>('/api/pipeline/import', { method: 'POST', body }),
+    task: (id: string) => request<PipelineTask>(`/api/pipeline/tasks/${id}`),
+  },
+
+  /** Scheduler D:手动触发一轮订阅闭环 */
+  scheduler: {
+    runOnce: (body: { scope?: SchedulerScope } = {}) =>
+      request<SchedulerRunResponse>('/api/scheduler/run-once', { method: 'POST', body }),
   },
 
   /** GET/PUT /api/settings —— 运行时设置(PUT 白名单覆写,进程内生效) */

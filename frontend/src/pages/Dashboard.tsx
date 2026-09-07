@@ -6,6 +6,7 @@
 import { useCallback } from 'react'
 import { api } from '../api'
 import { useApi } from '../hooks/useApi'
+import { useReloadOnCategories } from '../hooks/useReloadOnEvent'
 import { strings } from '../strings'
 import { Badge, Card, EmptyState, ErrorState, PageTitle, Skeleton } from '../components'
 import { formatPercent } from '../lib/views'
@@ -121,6 +122,7 @@ const LEVEL_LABELS: Record<number, string> = {
 export function DashboardPage() {
   const fetcher = useCallback(() => api.metrics.get(), [])
   const { data, loading, error, reload } = useApi(fetcher)
+  useReloadOnCategories(reload, ['parse', 'organize', 'notify', 'system'])
 
   if (error !== null) {
     return (

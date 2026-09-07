@@ -5,6 +5,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
+import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
 import { strings, t } from '../strings'
 import {
   Badge,
@@ -258,6 +259,11 @@ function EditSourceDrawer({
 export function RssSourcesPage() {
   const fetcher = useCallback(() => api.rssSources.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
+  useReloadOnMessages(reload, [
+    'rss_source.created',
+    'rss_source.updated',
+    'rss_source.deleted',
+  ])
   // 季下拉数据源:GET /api/subscriptions(后端 SubscriptionOut 内嵌 seasons)
   const subsFetcher = useCallback(() => api.subscriptions.list({ limit: 200 }), [])
   const { data: subsData } = useApi(subsFetcher)

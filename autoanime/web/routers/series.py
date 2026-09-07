@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from autoanime.core.models import Episode, Season, Series
@@ -62,8 +63,14 @@ async def _build_tree(store: ApiStoreDep, series_rows: list[Series]) -> list[Ser
 
 
 @router.get("", response_model=Page[SeriesOut])
-async def list_series(store: ApiStoreDep, pagination: PaginationDep) -> Page[SeriesOut]:
-    rows, total = await store.list_series_page(pagination.limit, pagination.offset)
+async def list_series(
+    store: ApiStoreDep,
+    pagination: PaginationDep,
+    q: Annotated[str | None, Query(max_length=200, description="标题关键词")] = None,
+) -> Page[SeriesOut]:
+    rows, total = await store.list_series_page(
+        limit=pagination.limit, offset=pagination.offset, q=q
+    )
     items = await _build_tree(store, rows)
     return Page(total=total, limit=pagination.limit, offset=pagination.offset, items=items)
 

@@ -91,6 +91,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     } catch {
       /* 非 JSON 错误体,保留 statusText */
     }
+    if (response.status === 401) {
+      // 统一认证错误文案：任何页面拿到 ApiError.status=401 都能给出同一可操作提示。
+      throw new ApiError(401, 'API Token 无效或缺失：请在设置页检查 Token')
+    }
     throw new ApiError(response.status, detail)
   }
 

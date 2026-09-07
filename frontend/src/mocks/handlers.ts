@@ -112,7 +112,19 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
     },
 
     series: {
-      list: (query = {}) => delayed(paginate(state.series, query.limit, query.offset)),
+      list: (query = {}) => {
+        const needle = (query.q ?? '').toLowerCase()
+        const filtered =
+          needle === ''
+            ? state.series
+            : state.series.filter(
+                (series) =>
+                  (series.title_cn ?? '').toLowerCase().includes(needle) ||
+                  (series.title_jp ?? '').toLowerCase().includes(needle) ||
+                  (series.title_romaji ?? '').toLowerCase().includes(needle),
+              )
+        return delayed(paginate(filtered, query.limit, query.offset))
+      },
       // 海报 URL 构造与真实端点一致(mock 不拦截 <img>,由 vite proxy/MSW 之外处理)
       posterUrl: (id: number) => `/api/series/${id}/poster`,
     },
@@ -387,6 +399,46 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         state.rssSources = state.rssSources.filter((s) => s.id !== id)
         return delayVoid()
       },
+    },
+
+    pipeline: {
+      parsePreview: (_body) =>
+        delayed({
+          route: 'archive',
+          result: {
+            title: _body.name,
+            season: 1,
+            episode: 1,
+            segment: 'episode',
+            fansub: null,
+            level: 'high',
+            confidence: 1,
+            missing_fields: [],
+            evidence: {},
+          },
+        }),
+      startImport: (_body) => {
+        const id = `task-${state.nextId++}`
+        return delayed({ task_id: id, status: 'running' as const })
+      },
+      task: (id) =>
+        delayed({
+          task_id: id,
+          kind: 'import' as const,
+          status: 'completed' as const,
+          directory: '',
+          dry_run: true,
+          created_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          processed: 0,
+          total: 0,
+          summary: { total: 0, scanned: 0, archived: 0, pending: 0, failed: 0, skipped: 0 },
+          error: null,
+        }),
+    },
+
+    scheduler: {
+      runOnce: () => delayed({ scope: 'all' as const, reports: {}, errors: [] }),
     },
 
     settings: {

@@ -2,9 +2,10 @@
  * Pipeline 页渲染冒烟 + SSE(mock 事件源)驱动的文件流动画集成:
  * 事件注入 → 最近事件列表更新 → token 推进 → organize 节点计数累加。
  */
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PipelinePage } from '../Pipeline'
+import { api } from '../../api'
 import { FakeEventSource, renderPage, sseMessage } from '../../test/testUtils'
 import { resetMockState } from '../../mocks/handlers'
 import type { EventSourceFactory } from '../../api/sse'
@@ -119,5 +120,45 @@ describe('PipelinePage', () => {
     expect(screen.getAllByText('仲裁').length).toBeGreaterThan(0)
     // 步骤列表传 li 序号 1..7(序号徽标)
     expect(screen.getByText('7')).toBeInTheDocument()
+  })
+
+  it('手动解析试跑调用 pipeline API 并展示结果', async () => {
+    const parsePreviewSpy = vi.spyOn(api.pipeline, 'parsePreview').mockResolvedValueOnce({
+      route: 'archive',
+      result: {
+        title: 'Show', season: 1, episode: 1, segment: 'episode', fansub: null,
+        level: 'high', confidence: 1, missing_fields: [], evidence: {},
+      },
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('单文件解析试跑'), { target: { value: 'Show S01E01 1080p.mkv' } })
+    fireEvent.click(screen.getByRole('button', { name: '试跑解析' }))
+    await waitFor(() => expect(parsePreviewSpy).toHaveBeenCalledWith({ name: 'Show S01E01 1080p.mkv' }))
+      })
+
+  it('异步导入展示任务进度和完成摘要', async () => {
+    vi.spyOn(api.pipeline, 'startImport').mockResolvedValueOnce({ task_id: 'task-1', status: 'running' })
+    vi.spyOn(api.pipeline, 'task').mockResolvedValueOnce({
+      task_id: 'task-1', kind: 'import', status: 'completed', directory: 'D:/downloads',
+      dry_run: true, created_at: '', finished_at: '', processed: 1, total: 1,
+      summary: { total: 1, scanned: 1, archived: 1, pending: 0, failed: 0, skipped: 0 },
+      error: null,
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('导入目录'), { target: { value: 'D:/downloads' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
+    expect(await screen.findByText(/已完成 · 1\/1/)).toBeInTheDocument()
+  })
+
+  it('手动跑一轮订阅闭环展示后端报告', async () => {
+    const runOnceSpy = vi.spyOn(api.scheduler, 'runOnce').mockResolvedValueOnce({
+      scope: 'all', reports: { rss: { picked: 0, gaps: 0, errors: [] } }, errors: [],
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.click(screen.getByRole('button', { name: '跑一轮订阅闭环' }))
+    await waitFor(() => expect(runOnceSpy).toHaveBeenCalledWith({ scope: 'all' }))
   })
 })

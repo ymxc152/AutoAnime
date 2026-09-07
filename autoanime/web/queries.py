@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import BigInteger, delete, func, select
+from sqlalchemy import BigInteger, delete, func, or_, select
 
 from autoanime.core.enums import MemoryStatus, PendingStatus, ResolvedBy
 from autoanime.core.models import (
@@ -67,12 +67,25 @@ class ApiStore:
 
     # --- Library：series/season/episode 树 ---------------------------------
 
-    async def list_series_page(self, limit: int, offset: int) -> tuple[list[Series], int]:
+    async def list_series_page(
+        self, *, limit: int, offset: int, q: str | None = None
+    ) -> tuple[list[Series], int]:
         async with self._storage.transaction() as session:
-            total = (await session.execute(select(func.count()).select_from(Series))).scalar_one()
+            stmt = select(Series)
+            count_stmt = select(func.count()).select_from(Series)
+            needle = q.strip() if q is not None else ''
+            if needle:
+                condition = or_(
+                    Series.title_cn.ilike(f"%{needle}%"),
+                    Series.title_jp.ilike(f"%{needle}%"),
+                    Series.title_romaji.ilike(f"%{needle}%"),
+                )
+                stmt = stmt.where(condition)
+                count_stmt = count_stmt.where(condition)
+            total = (await session.execute(count_stmt)).scalar_one()
             rows = (
                 (await session.execute(
-                    select(Series).order_by(Series.id).limit(limit).offset(offset)
+                    stmt.order_by(Series.id).limit(limit).offset(offset)
                 )).scalars().all()
             )
         return list(rows), int(total)

@@ -243,6 +243,8 @@ Content-Type: application/json
 
 ## 5. Phase D：WebUI 管线操作入口
 
+> 状态：已完成首版（L1 试跑 / 异步导入 / 手动 run-once / 任务查询 + SSE）
+
 ### 目标
 
 让 WebUI 不只是观察器，也能承担常用运维动作。
@@ -345,17 +347,19 @@ GET /api/tasks/{task_id}
 
 ### 验收
 
-- [ ] 单文件解析试跑成功
-- [ ] 手动订阅循环成功
-- [ ] dry-run 导入不移动文件
-- [ ] 长任务不会阻塞 UI
-- [ ] 重复触发有明确提示
-- [ ] 失败原因可见
-- [ ] Logs / Pipeline / SSE 状态一致
+- [x] 单文件解析试跑成功
+- [x] 手动订阅循环成功
+- [x] dry-run 导入不移动文件
+- [x] 长任务不会阻塞 UI
+- [x] 重复触发有明确提示
+- [x] 失败原因可见
+- [x] Logs / Pipeline / SSE 状态一致
 
 ---
 
 ## 6. Phase E：API Token 设置入口
+
+> 状态：已完成（本端注入、401 统一文案、保存后自动刷新、后端 token 联动测试）
 
 > 状态：**部分完成（2026-09-07）**。已完成 Settings 本地 Token 注入 UI、localStorage 保存/清除、HTTP 与 SSE 请求带 Token、Vitest 与真服务冒烟；待完成后端启用 Token 时的三态联动验证、保存后健康校验/全局重试、401 统一提示。
 
@@ -400,14 +404,16 @@ Settings 页新增“本机连接”卡片：
 
 ### 验收
 
-- [ ] 正确 token 后 API 正常
-- [ ] 错误 token 显示 401
-- [ ] 清除 token 后 401 恢复
-- [ ] token 不出现在日志 / API GET 响应
+- [x] 正确 token 后 API 正常
+- [x] 错误 token 显示 401
+- [x] 清除 token 后 401 恢复
+- [x] token 不出现在日志 / API GET 响应
 
 ---
 
 ## 7. Phase F：媒体库规模化
+
+> 状态：已完成首版（后端 q 搜索 + 分页 + 前端 debounce）
 
 ### 目标
 
@@ -463,15 +469,17 @@ GET /api/series?limit=100&offset=0&q=芙莉莲
 
 ### 验收
 
-- [ ] `limit > 200` 仍返回 422，前端不再发送
-- [ ] 后端搜索命中三种标题
-- [ ] 分页 total 正确
-- [ ] 搜索不再一次渲染全部 series
-- [ ] 输入过程中无请求风暴
+- [x] `limit > 200` 仍返回 422，前端不再发送
+- [x] 后端搜索命中三种标题
+- [x] 分页 total 正确
+- [x] 搜索不再一次渲染全部 series
+- [x] 输入过程中无请求风暴
 
 ---
 
 ## 8. Phase G：SSE 与数据刷新联动
+
+> 状态：已完成首版（useReloadOnEvent + 去重 + 隐藏页合并刷新）
 
 ### 目标
 
@@ -516,10 +524,10 @@ GET /api/series?limit=100&offset=0&q=芙莉莲
 
 ### 验收
 
-- [ ] Pending 操作后 Dashboard 自动更新
-- [ ] RSS 操作后 Subscriptions 页 RSS 数量自动更新
-- [ ] 导入完成后 Library 自动出现新集
-- [ ] 不会因连续事件造成请求风暴
+- [x] Pending 操作后 Dashboard 自动更新
+- [x] RSS 操作后 Subscriptions 页 RSS 数量自动更新
+- [x] 导入完成后 Library 自动出现新集
+- [x] 不会因连续事件造成请求风暴
 
 ---
 

@@ -85,7 +85,7 @@ async def _get_subscription(store: ApiStore, series_id: int) -> SubscriptionOut:
 async def list_subscriptions(
     store: ApiStoreDep, pagination: PaginationDep
 ) -> Page[SubscriptionOut]:
-    rows, total = await store.list_series_page(pagination.limit, pagination.offset)
+    rows, total = await store.list_series_page(limit=pagination.limit, offset=pagination.offset)
     items = await _subscription_out(store, rows)
     return Page(total=total, limit=pagination.limit, offset=pagination.offset, items=items)
 
