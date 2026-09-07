@@ -122,13 +122,13 @@ export const endpoints = {
   /** POST /api/episodes/{id}/reparse —— 12-F 集重新识别(dry_run=true 预览/false 执行) */
   episodes: {
     reparse: (id: number, body: EpisodeReparseBody) =>
-      request<EpisodeReparseOut>(`/api/episodes/${id}/reparse`, { method: 'POST', body }),
+      request<EpisodeReparseOut>(`/api/episodes/${id}/reparse`, { method: 'POST', body, timeoutMs: 300_000 }),
   },
 
   /** Pipeline D:单文件 L1 试跑 / 异步目录导入 / 任务状态 */
   pipeline: {
     parsePreview: (body: ParsePreviewBody) =>
-      request<ParsePreviewResponse>('/api/pipeline/parse-preview', { method: 'POST', body }),
+      request<ParsePreviewResponse>('/api/pipeline/parse-preview', { method: 'POST', body, timeoutMs: 300_000 }),
     startImport: (body: PipelineImportBody) =>
       request<{ task_id: string; status: 'running' }>('/api/pipeline/import', { method: 'POST', body }),
     task: (id: string) => request<PipelineTask>(`/api/pipeline/tasks/${id}`),

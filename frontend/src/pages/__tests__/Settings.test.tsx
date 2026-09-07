@@ -84,6 +84,36 @@ describe('SettingsPage', () => {
     })
   })
 
+  it('dirty 逐值比对:改回原值/密钥删空/取消清除勾选不再算脏', async () => {
+    const user = userEvent.setup()
+    renderPage(<SettingsPage />)
+    await screen.findByRole('switch', { name: '试运行模式' })
+    // 开关拨开再拨回原位(基线 dry_run=false)→ 运行圆点消失、保存按钮回禁用
+    await user.click(screen.getByRole('switch', { name: '试运行模式' }))
+    expect(screen.getByLabelText('运行有未保存更改')).toBeInTheDocument()
+    await user.click(screen.getByRole('switch', { name: '试运行模式' }))
+    expect(screen.queryByLabelText('运行有未保存更改')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    // 文本改回原值(基线 llm_model='deepseek-chat')→ 不脏
+    await gotoTab(user, '识别')
+    const model = await screen.findByLabelText('模型')
+    await user.clear(model)
+    await user.type(model, 'deepseek-chat')
+    expect(screen.queryByLabelText('识别有未保存更改')).not.toBeInTheDocument()
+    // 密钥输入后删空 → 不脏(空串 = 无输入意图)
+    const keyInput = screen.getByLabelText('LLM API Key')
+    await user.type(keyInput, 'sk-x')
+    expect(screen.getByLabelText('识别有未保存更改')).toBeInTheDocument()
+    await user.clear(keyInput)
+    expect(screen.queryByLabelText('识别有未保存更改')).not.toBeInTheDocument()
+    // 勾选清除 → 脏;取消勾选 → 不脏
+    await user.click(screen.getByLabelText('清除已配置值:LLM API Key'))
+    expect(screen.getByLabelText('识别有未保存更改')).toBeInTheDocument()
+    await user.click(screen.getByLabelText('清除已配置值:LLM API Key'))
+    expect(screen.queryByLabelText('识别有未保存更改')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+  })
+
   it('保存后 applied 逐字段 toast:immediate 分支(开关)', async () => {
     const user = userEvent.setup()
     renderPage(<SettingsPage />)

@@ -48,14 +48,45 @@ function buildQuery(params: Record<string, QueryValue>): string {
   return qs ? `?${qs}` : ''
 }
 
+/** 默认请求超时:后端常规接口远低于此值;长调用(parse-preview/reparse)按调用点覆盖 */
+export const DEFAULT_TIMEOUT_MS = 120_000
+
+interface ComposedSignal {
+  signal: AbortSignal
+  /** 请求结束(成功/失败)后必须调用,清理定时器与外部 signal 监听 */
+  dispose: () => void
+}
+
+/** 把外部 signal(若有)与超时定时器合流到一个 controller:任一触发即中断请求 */
+function composeAbortSignal(external: AbortSignal | undefined, timeoutMs: number): ComposedSignal {
+  const controller = new AbortController()
+  const timeoutReason = new DOMException(`请求超时(${Math.round(timeoutMs / 1000)}s)`, 'TimeoutError')
+  const timer = setTimeout(() => controller.abort(timeoutReason), timeoutMs)
+  const onExternalAbort = (): void => controller.abort(external?.reason)
+  if (external !== undefined) {
+    if (external.aborted) onExternalAbort()
+    else external.addEventListener('abort', onExternalAbort, { once: true })
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer)
+      external?.removeEventListener('abort', onExternalAbort)
+    },
+  }
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   query?: Record<string, QueryValue>
   signal?: AbortSignal
+  /** 单请求超时覆盖(ms);默认 DEFAULT_TIMEOUT_MS(120s),长调用传 300_000 */
+  timeoutMs?: number
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const headers: Record<string, string> = { Accept: 'application/json' }
   const token = getApiToken()
   if (token) {
@@ -65,19 +96,25 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers['Content-Type'] = 'application/json'
   }
 
+  const composed = composeAbortSignal(options.signal, timeoutMs)
   let response: Response
   try {
     response = await fetch(path + buildQuery(options.query ?? {}), {
       method: options.method ?? 'GET',
       headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-      signal: options.signal,
+      signal: composed.signal,
     })
   } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+      throw new ApiError(0, `请求超时:后端 ${Math.round(timeoutMs / 1000)}s 内未响应`)
+    }
     if (cause instanceof DOMException && cause.name === 'AbortError') {
       throw cause
     }
     throw new ApiError(0, '网络不可达:后端未启动或连接失败')
+  } finally {
+    composed.dispose()
   }
 
   if (!response.ok) {

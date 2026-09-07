@@ -155,6 +155,44 @@ const FLOAT_KEYS: ReadonlySet<string> = new Set([
   'upgrade_skip_size_gb',
 ])
 
+// ---- 草稿字段按类型分组(dirty 逐值比对与 buildPayload 共用;顺序无关) ----
+const BOOL_KEYS = [
+  'dry_run',
+  'l2_enabled',
+  'llm_enabled',
+  'reference_enabled',
+  'scheduler_enabled',
+  'notify_enabled',
+] as const
+const TEXT_KEYS = [
+  'log_level',
+  'llm_model',
+  'llm_base_url',
+  'downloader',
+  'qbittorrent_host',
+  'qbittorrent_username',
+  'notify_telegram_chat_id',
+  'upgrade_copy_policy',
+  'naming_title_language',
+] as const
+const NUM_KEYS = [
+  'llm_timeout_s',
+  'llm_max_retries',
+  'reference_qps',
+  'pending_backlog_alert_threshold',
+  'rss_poll_interval_minutes',
+  'rss_poll_jitter_pct',
+  'download_poll_interval_s',
+  'download_max_retries',
+  'collected_check_days',
+  'qbittorrent_port',
+  'upgrade_threshold',
+  'upgrade_max_per_episode',
+  'upgrade_skip_size_gb',
+  'mismatch_backfill_budget',
+] as const
+const SECRET_KEYS = ['llm_api_key', 'qbittorrent_password', 'notify_webhook_url', 'notify_telegram_bot_token'] as const
+
 /** applied 字段 → 展示标签(逐字段生效 toast 用) */
 const FIELD_LABELS: Record<string, string> = {
   dry_run: strings.settings.dryRun,
@@ -277,13 +315,40 @@ export function SettingsPage() {
     setEdit((prev) => ({ ...prev, ...partial }))
   }
 
-  // ---- dirty 追踪(载入前 data 为 null,按空数组兜底;真正使用时数据已就绪) ----
+  // ---- dirty 追踪(载入前 data 为 null,视为无脏态;真正使用时数据已就绪) ----
   const baseOrder = (savedSnapshot ?? data)?.reference_order ?? []
   const canonicalOrder = (edit.reference_order ?? baseOrder).join(',')
-  // orderDraft 只覆盖「已敲字未 blur」的脏态;blur 后 edit.reference_order 键在
-  // dirtyKeySet 里接管(草稿归一化后与 canonical 相等,orderDirty 会漏判)
-  const dirtyKeySet = new Set([...Object.keys(edit), ...Object.keys(clearSecrets)])
+  // orderDraft 只覆盖「已敲字未 blur」的脏态;blur 后 edit.reference_order 逐值比对接管
   const orderDirty = orderDraft !== null && orderDraft !== canonicalOrder
+  // dirty 与基线(savedSnapshot ?? data)逐值比对:文本改回原值/开关拨回原位/
+  // 密钥输入后删空/勾选清除后取消,都不再误报;密钥「清除」勾选本身即清除意图,
+  // 勾选态恒为脏,取消勾选自动清脏。
+  const baseline = savedSnapshot ?? data
+  const dirtyKeySet = new Set<string>()
+  if (baseline !== null) {
+    for (const key of BOOL_KEYS) {
+      if (edit[key] !== undefined && edit[key] !== baseline[key]) dirtyKeySet.add(key)
+    }
+    for (const key of TEXT_KEYS) {
+      if (edit[key] !== undefined && edit[key] !== (baseline[key] ?? '')) dirtyKeySet.add(key)
+    }
+    for (const key of NUM_KEYS) {
+      const draft = edit[key]
+      if (draft === undefined) continue
+      const value = baseline[key]
+      const baseStr = value === null || value === undefined ? '' : String(value)
+      if (draft !== baseStr) dirtyKeySet.add(key)
+    }
+    for (const key of SECRET_KEYS) {
+      // 密钥输入草稿:空串 = 无输入意图,不算脏;非空 = 将提交明文
+      if (edit[key] !== undefined && edit[key] !== '') dirtyKeySet.add(key)
+      // 清除勾选:勾选本身即清除意图
+      if (clearSecrets[key] === true) dirtyKeySet.add(key)
+    }
+    if (edit.reference_order !== undefined) {
+      if (edit.reference_order.join(',') !== baseOrder.join(',')) dirtyKeySet.add('reference_order')
+    }
+  }
   const tabDirty = (tab: TabKey): boolean =>
     tab === 'identify'
       ? TAB_FIELD_KEYS.identify.some((key) => dirtyKeySet.has(key)) || orderDirty
@@ -387,50 +452,15 @@ export function SettingsPage() {
   /** 草稿 → PUT body(白名单 39 项子集;密钥空串不进 body、勾选清除提交 null) */
   const buildPayload = (): SettingsUpdateBody => {
     const body: SettingsUpdateBody = {}
-    const boolKeys = [
-      'dry_run',
-      'l2_enabled',
-      'llm_enabled',
-      'reference_enabled',
-      'scheduler_enabled',
-      'notify_enabled',
-    ] as const
-    for (const key of boolKeys) {
+    for (const key of BOOL_KEYS) {
       const value = edit[key]
       if (value !== undefined) body[key] = value
     }
-    const textKeys = [
-      'log_level',
-      'llm_model',
-      'llm_base_url',
-      'downloader',
-      'qbittorrent_host',
-      'qbittorrent_username',
-      'notify_telegram_chat_id',
-      'upgrade_copy_policy',
-      'naming_title_language',
-    ] as const
-    for (const key of textKeys) {
+    for (const key of TEXT_KEYS) {
       const value = edit[key]
       if (value !== undefined) body[key] = value
     }
-    const numKeys = [
-      'llm_timeout_s',
-      'llm_max_retries',
-      'reference_qps',
-      'pending_backlog_alert_threshold',
-      'rss_poll_interval_minutes',
-      'rss_poll_jitter_pct',
-      'download_poll_interval_s',
-      'download_max_retries',
-      'collected_check_days',
-      'qbittorrent_port',
-      'upgrade_threshold',
-      'upgrade_max_per_episode',
-      'upgrade_skip_size_gb',
-      'mismatch_backfill_budget',
-    ] as const
-    for (const key of numKeys) {
+    for (const key of NUM_KEYS) {
       const raw = edit[key]
       if (raw !== undefined && raw !== '') {
         const parsed = Number(raw)
@@ -438,8 +468,7 @@ export function SettingsPage() {
       }
     }
     // 密钥:清除勾选优先(提交 null);否则非空输入才提交;留空 = 不修改
-    const secretKeys = ['llm_api_key', 'qbittorrent_password', 'notify_webhook_url', 'notify_telegram_bot_token'] as const
-    for (const key of secretKeys) {
+    for (const key of SECRET_KEYS) {
       if (clearSecrets[key]) body[key] = null
       else if (edit[key] !== undefined && edit[key] !== '') body[key] = edit[key]
     }

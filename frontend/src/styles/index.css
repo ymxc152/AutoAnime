@@ -57,7 +57,7 @@
   --color-card-foreground: var(--ink-text);
   --color-popover: var(--ink-surface);
   --color-popover-foreground: var(--ink-text);
-  --color-primary-foreground: #ffffff;
+  --color-primary-foreground: var(--ink-primary-foreground);
   --color-secondary: var(--ink-surface-2);
   --color-secondary-foreground: var(--ink-text);
   --color-muted: var(--ink-surface-2);
@@ -65,7 +65,7 @@
   --color-accent: var(--ink-surface-2);
   --color-accent-foreground: var(--ink-text);
   --color-destructive: var(--ink-danger);
-  --color-destructive-foreground: #ffffff;
+  --color-destructive-foreground: var(--ink-destructive-foreground);
   --color-border: var(--ink-border);
   --color-input: var(--ink-border);
   --color-ring: var(--ink-primary);
@@ -74,6 +74,22 @@
 
 /* 类名驱动的暗色变体(.dark 挂在 <html> 上) */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * 按钮/色块前景 token:浅色主题白字;暗色主题主色提亮(#8f7ff0)、危险色提亮
+ * (#f2666b)后白字对比不足(约 3.2:1 / 2.8:1,WCAG AA 正文需 4.5:1),
+ * 改用近黑的紫墨/红墨色:对暗色主色对比约 5.4:1,对暗色危险色约 5.8:1。
+ * 变量定义在本文件(而非 tokens.css):只服务 shadcn 桥接层,不进 Soft Ink 主 token 表。
+ */
+:root {
+  --ink-primary-foreground: #ffffff;
+  --ink-destructive-foreground: #ffffff;
+}
+
+.dark {
+  --ink-primary-foreground: #1a1530;
+  --ink-destructive-foreground: #2b1113;
+}
 
 @layer base {
   html {
