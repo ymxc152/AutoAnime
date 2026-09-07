@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 
+from pydantic import SecretStr
+
 from autoanime.config import Settings
 from autoanime.core.interfaces import LlmTransport, MetadataReference, Registry
 from autoanime.memory.reference_cache import (
@@ -97,13 +99,16 @@ def register_reference_providers(
     *,
     cache_store: ReferenceCacheStore | None = None,
     reference_qps: float | None = None,
+    tmdb_api_key: SecretStr | None = None,
 ) -> None:
     """把 Bangumi/TMDB 参考源实例注册进显式 Registry。
 
     注册名与 ``reference_order`` 默认链序（``["bangumi", "tmdb"]``）一致。
     每次调用创建新实例（频控状态等实例状态随装配边界重置）；重复注册
-    同名插件按 Registry 语义覆盖。TMDB 未配置 ``AUTOANIME_TMDB_API_KEY``
-    时仍注册其实例（``lookup`` 直接 miss，链继续问下一个 provider）。
+    同名插件按 Registry 语义覆盖。``tmdb_api_key`` 是 Settings 层的密钥
+    （12-D DB 覆盖可写）；None 时 TmdbReference 内部回落读
+    ``AUTOANIME_TMDB_API_KEY`` env——两者都缺时仍注册实例（``lookup``
+    直接 miss，链继续问下一个 provider）。
 
     ``cache_store`` 提供时（PR6 P2），每个实例包一层 ``CachedReference``：
     chain（PR5 定稿契约）无需改动即拿到带剧目级缓存 + 频控的实例；缺省
@@ -113,7 +118,7 @@ def register_reference_providers(
     """
     providers: list[tuple[str, MetadataReference]] = [
         ("bangumi", BangumiReference()),
-        ("tmdb", TmdbReference()),
+        ("tmdb", TmdbReference(api_key=tmdb_api_key)),
     ]
     for name, instance in providers:
         wrapped: MetadataReference = instance

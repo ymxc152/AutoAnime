@@ -87,6 +87,7 @@ def wired_providers(monkeypatch: pytest.MonkeyPatch):
         *,
         cache_store: object = None,
         reference_qps: float | None = None,
+        tmdb_api_key: object = None,
     ) -> None:
         registered["cache_store"] = cache_store
         registered["reference_qps"] = reference_qps

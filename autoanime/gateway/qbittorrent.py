@@ -123,6 +123,21 @@ class QbittorrentGateway:
         await self._call("auth_log_in", logon)
         return True
 
+    async def version(self) -> str:
+        """登录 + 读服务端版本（12-D qbit-test 端点用；失败抛 GatewayError）。"""
+        await self.ping()
+        client: Any = self._get_client()
+
+        def _read() -> str:
+            # qbittorrent-api 的版本是同步属性（属性访问即发 HTTP），必须
+            # 留在 to_thread 内执行；新旧字段名双兜底。
+            value = getattr(client, "qbittorrent_version", None) or getattr(
+                client, "app_version", None
+            )
+            return str(value or "")
+
+        return await self._call("qbittorrent_version", _read)
+
     # --- submission ---------------------------------------------------------
 
     async def add_torrent_bytes(self, data: bytes, *, save_path: str | None = None) -> str:

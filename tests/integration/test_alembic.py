@@ -17,6 +17,7 @@ def test_alembic_upgrade_and_downgrade(tmp_path: Path) -> None:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "series" in tables
     assert "parse_events" in tables
+    assert "app_settings" in tables  # 12-D 配置中心覆盖项表
 
     command.downgrade(config, "base")
     with sqlite3.connect(db_path) as connection:

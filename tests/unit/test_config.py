@@ -132,3 +132,101 @@ def test_api_fields_read_toml(tmp_path: Path) -> None:
     ]
     assert settings.api_sse_heartbeat_s == 15.0
     assert settings.api_sse_replay_limit == 10
+
+
+# ---------------------------------------------------------------------------
+# 12-D 配置中心：app_settings DB 覆盖合并（env/toml → DB）
+# ---------------------------------------------------------------------------
+
+
+def test_load_settings_applies_db_overrides() -> None:
+    settings = load_settings(
+        Path("does-not-exist.toml"),
+        overrides={
+            "llm_timeout_s": "5.0",
+            "rss_poll_interval_minutes": "45",
+            "reference_order": '["tmdb", "bangumi"]',
+        },
+    )
+
+    assert settings.llm_timeout_s == 5.0
+    assert settings.rss_poll_interval_minutes == 45
+    assert settings.reference_order == ["tmdb", "bangumi"]
+
+
+def test_load_settings_db_overrides_win_over_toml(tmp_path: Path) -> None:
+    path = tmp_path / "autoanime.toml"
+    path.write_text("llm_timeout_s = 5.0\n", encoding="utf-8")
+
+    settings = load_settings(path, overrides={"llm_timeout_s": "7.5"})
+
+    # 优先级：toml → DB 覆盖（DB 是用户在 WebUI 的最后意图）。
+    assert settings.llm_timeout_s == 7.5
+
+
+def test_load_settings_unoverridden_fields_still_read_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "autoanime.toml"
+    # DB 覆盖以 kwargs 传入、env 优先级最低；本例 DB 未覆盖 llm_timeout_s，
+    # 未被 kwargs/toml 提供的字段仍回落 env（pydantic-settings 语义不变）。
+    monkeypatch.setenv("AUTOANIME_LLM_TIMEOUT_S", "9.0")
+
+    settings = load_settings(path, overrides={"log_level": '"DEBUG"'})
+
+    assert settings.llm_timeout_s == 9.0
+    assert settings.log_level == "DEBUG"
+
+
+def test_load_settings_db_can_set_llm_api_key_but_toml_cannot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AUTOANIME_LLM_API_KEY", raising=False)
+    path = tmp_path / "autoanime.toml"
+    path.write_text('llm_api_key = "sk-should-be-ignored"\n', encoding="utf-8")
+
+    # toml 里的 llm_api_key 仍被 pop 忽略（v2「secrets 不进 toml」不变）；
+    # DB 覆盖在 pop 之后合并，WebUI 写入的密钥会生效（12-D 设计点）。
+    settings = load_settings(path)
+    assert settings.llm_api_key is None
+
+    settings = load_settings(path, overrides={"llm_api_key": '"sk-from-db"'})
+    assert settings.llm_api_key is not None
+    assert settings.llm_api_key.get_secret_value() == "sk-from-db"
+
+
+def test_parse_db_overrides_skips_unknown_and_invalid_keys() -> None:
+    from autoanime.config import parse_db_overrides
+
+    parsed = parse_db_overrides(
+        {
+            "llm_timeout_s": "5.0",
+            "not_a_settings_field": '"x"',  # 未知 key
+            "rss_poll_interval_minutes": '"not-an-int"',  # 类型不匹配
+        }
+    )
+
+    assert parsed == {"llm_timeout_s": 5.0}
+
+
+def test_apply_db_overrides_mutates_instance_in_place() -> None:
+    from autoanime.config import apply_db_overrides
+
+    settings = load_settings(Path("does-not-exist.toml"))
+    merged = apply_db_overrides(settings, {"dry_run": "false"})
+
+    assert merged is settings
+    assert settings.dry_run is False
+
+
+def test_encode_setting_value_roundtrip() -> None:
+    from autoanime.config import encode_setting_value, parse_db_overrides
+
+    for key, value in (
+        ("dry_run", False),
+        ("rss_poll_interval_minutes", 45),
+        ("reference_qps", 0.5),
+        ("notify_events", ["episode.organized", "upgrade.completed"]),
+        ("llm_base_url", "https://example.invalid/v1"),
+    ):
+        assert parse_db_overrides({key: encode_setting_value(value)}) == {key: value}

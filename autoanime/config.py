@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+import logging
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from pydantic import SecretStr
+from pydantic import SecretStr, TypeAdapter, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -27,6 +32,10 @@ class Settings(BaseSettings):
     # 缓存包装层的每 provider token bucket 速率（QPS）；None = 不启用包装层
     # 频控（P1 adapter 内部 HTTP 层已有默认 1 QPS 节流兜底）。
     reference_qps: float | None = None
+    # TMDB v3 api_key（12-D 可写配置）：Settings 层默认 None（provider 内部
+    # 回落读 env AUTOANIME_TMDB_API_KEY）；DB 覆盖后以 DB 为准。GET 永不
+    # 回显，只给 has_tmdb_api_key 布尔（web/routers/settings.py）。
+    tmdb_api_key: SecretStr | None = None
     # L3 机会主义合批阈值（ARCHITECTURE 9.3b，E1）：库存队列自然堆积
     # ≥ batch_min_size 个「同目录+同字幕组」文件才打包，单批上限
     # batch_max_size；订阅场景单文件快路径永不凑批（入口语义，非配置）。
@@ -136,11 +145,73 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTOANIME_", extra="ignore")
 
 
-def load_settings(path: Path | None = None) -> Settings:
+def load_settings(path: Path | None = None, overrides: Mapping[str, str] | None = None) -> Settings:
+    """env/toml → DB 覆盖合并出运行时 Settings（12-D 配置中心）。
+
+    优先级：toml → DB 覆盖（``overrides``）→ env。pydantic-settings 的
+    语义是「显式 kwargs 优先于 env」，故 DB 覆盖作为 kwargs 传入时天然
+    压过 env；未覆盖的字段仍回落 env/toml 默认。
+
+    与 ``llm_api_key`` pop 的关系（12-D 设计点）：
+    - toml 里的 ``llm_api_key`` 仍被 pop 忽略——v2「secrets 不进 toml」的
+      纪律不变（toml 是可进版本库的文件）；
+    - DB 覆盖在 pop **之后**合并，所以 WebUI 写入库的 ``llm_api_key`` /
+      ``tmdb_api_key`` 会生效。DB 是本地 SQLite（与 ``.env`` 同级安全），
+      明文可接受（docs/12 §风险 3），且 GET 永不回显、不进日志/audit。
+    """
     config_path = path or Path("autoanime.toml")
     data: dict[str, Any] = {}
     if config_path.exists():
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    # Secrets are intentionally restricted to environment variables.
+    # Secrets are intentionally restricted to environment variables (or the
+    # app_settings DB overrides applied below -- never the toml file).
     data.pop("llm_api_key", None)
+    if overrides:
+        data.update(parse_db_overrides(overrides))
     return Settings(**data)
+
+
+def encode_setting_value(value: Any) -> str:
+    """app_settings 覆盖项统一 JSON 序列化（bool/int/float/str/list[str]）。
+
+    ``None`` 不该出现在这里：显式清除 = 删行（store.put_app_setting(None)），
+    回落 env/toml 默认，而不是存一个 null 值。
+    """
+    return json.dumps(value, ensure_ascii=False)
+
+
+def parse_db_overrides(rows: Mapping[str, str]) -> dict[str, Any]:
+    """app_settings 行 → 字段值：按 Settings 注解逐项校验，非法行跳过。
+
+    DB 里的 key 只可能来自 settings 路由 PUT 白名单，但为防手工改库/后续
+    版本字段更名，未知 key 与类型不匹配的行记日志跳过——不让一条脏行
+    拖垮启动。
+    """
+    out: dict[str, Any] = {}
+    for key, raw in rows.items():
+        field = Settings.model_fields.get(key)
+        if field is None:
+            logger.warning("app_settings: ignoring unknown key %r", key)
+            continue
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        try:
+            out[key] = TypeAdapter(field.annotation).validate_python(value)
+        except ValidationError:
+            logger.warning("app_settings: ignoring invalid value for %r", key)
+    return out
+
+
+def apply_db_overrides(settings: Settings, rows: Mapping[str, str]) -> Settings:
+    """把 DB 覆盖合并进**已构造**的运行时 Settings（原地 setattr）。
+
+    供 lifespan 用：storage 建好后读 ``app_settings`` 行，合并进
+    create_app 持有的 Settings 实例（中间件/路由闭包引用同一对象，原地
+    改才能让全进程可见）。优先级 env/toml → DB：DB 里的 key 都是用户在
+    WebUI 显式写入的运行期项，视为最后意图，故覆盖 env。
+    """
+    for key, value in parse_db_overrides(rows).items():
+        setattr(settings, key, value)
+    return settings

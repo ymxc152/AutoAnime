@@ -287,14 +287,54 @@ class RssSourceUpdateIn(BaseModel):
 
 
 class SettingsOut(BaseModel):
-    """运行时可见项（密钥一律不回显，只给 has_* 布尔）。"""
+    """运行时可见项（密钥一律不回显，只给 has_* 布尔）。
 
+    重启生效档（requires_restart）字段在 DB 有覆盖时显示「重启后将生效
+    的值」（12-D：这类字段 PUT 只落库不进运行时实例，GET 按待生效值
+    展示，配合 PUT 响应的 requires_restart 提示）；其余字段即当前
+    运行时值。
+    """
+
+    # --- 运行（识别/参考源/日志，v1 六项 + 12-D 立即生效档） ---
     dry_run: bool
     l2_enabled: bool
     llm_enabled: bool
     llm_model: str | None
     reference_enabled: bool
     reference_order: list[str]
+    llm_timeout_s: float
+    llm_max_retries: int
+    reference_qps: float | None
+    pending_backlog_alert_threshold: int
+    log_level: str
+    # --- 调度（scheduler_rebuild 档：PUT 后重建 loop 生效） ---
+    scheduler_enabled: bool
+    rss_poll_interval_minutes: int
+    rss_poll_jitter_pct: int
+    download_poll_interval_s: int
+    download_max_retries: int
+    collected_check_days: int
+    # --- 下载器（requires_restart 档，密钥只回 has_*） ---
+    downloader: str
+    qbittorrent_host: str
+    qbittorrent_port: int
+    qbittorrent_username: str
+    # --- 通知（requires_restart 档） ---
+    notify_enabled: bool
+    notify_telegram_chat_id: str | None
+    notify_events: list[str]
+    # --- 洗版 / 命名 / RSS 抓取（requires_restart 档） ---
+    upgrade_threshold: float
+    upgrade_max_per_episode: int
+    upgrade_copy_policy: str
+    upgrade_skip_size_gb: float
+    mismatch_backfill_budget: int
+    naming_title_language: str
+    rss_fetch_timeout_s: float
+    rss_fetch_retries: int
+    # --- 识别（requires_restart 档：LLM 连接类） ---
+    llm_base_url: str | None
+    # --- 环境（只读，v1 保持） ---
     library_path: str
     download_path: str
     api_host: str
@@ -302,19 +342,98 @@ class SettingsOut(BaseModel):
     api_cors_dev_origins: list[str]
     api_sse_heartbeat_s: float
     api_sse_replay_limit: int
+    # --- 密钥 has_* 布尔 ---
     has_api_token: bool
     has_llm_api_key: bool
+    has_tmdb_api_key: bool
+    has_qbittorrent_password: bool
+    has_notify_webhook_url: bool
+    has_notify_telegram_bot_token: bool
+
+
+#: PUT 生效三档（12-D）：每个被改字段在响应里带档位，前端据此提示。
+SettingEffect = Literal["immediate", "scheduler_rebuild", "requires_restart"]
 
 
 class SettingsUpdateIn(BaseModel):
-    """可运行时覆写的项（PUT 作用于进程内 Settings 实例）。"""
+    """可写入的配置项（与路由白名单三档一致）。
 
+    - 白名单外字段（extra="forbid"）→ 422，不再静默丢弃（12-D 收口：
+      前端打错 key 应显式失败）；
+    - 密钥字段（SecretStr）：空串 = 不修改，显式 null = 清除（RSS token
+      惯例）；非密钥字段 null = 不修改（保持 v1 行为）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # 立即生效
     dry_run: bool | None = None
     l2_enabled: bool | None = None
     llm_enabled: bool | None = None
     llm_model: str | None = None
     reference_enabled: bool | None = None
     reference_order: list[str] | None = None
+    llm_timeout_s: float | None = None
+    llm_max_retries: int | None = None
+    reference_qps: float | None = None
+    pending_backlog_alert_threshold: int | None = None
+    log_level: str | None = None
+    # 调度类（重建 loop 生效）
+    scheduler_enabled: bool | None = None
+    rss_poll_interval_minutes: int | None = None
+    rss_poll_jitter_pct: int | None = None
+    download_poll_interval_s: int | None = None
+    download_max_retries: int | None = None
+    collected_check_days: int | None = None
+    # 重启生效（连接/密钥类）
+    llm_base_url: str | None = None
+    llm_api_key: SecretStr | None = None
+    tmdb_api_key: SecretStr | None = None
+    downloader: str | None = None
+    qbittorrent_host: str | None = None
+    qbittorrent_port: int | None = None
+    qbittorrent_username: str | None = None
+    qbittorrent_password: SecretStr | None = None
+    notify_enabled: bool | None = None
+    notify_webhook_url: SecretStr | None = None
+    notify_telegram_bot_token: SecretStr | None = None
+    notify_telegram_chat_id: str | None = None
+    notify_events: list[str] | None = None
+    upgrade_threshold: float | None = None
+    upgrade_max_per_episode: int | None = None
+    upgrade_copy_policy: str | None = None
+    upgrade_skip_size_gb: float | None = None
+    mismatch_backfill_budget: int | None = None
+    naming_title_language: str | None = None
+    rss_fetch_timeout_s: float | None = None
+    rss_fetch_retries: int | None = None
+
+
+class SettingsUpdateOut(SettingsOut):
+    """PUT 响应：常规载荷 + 每个被改字段的生效档位（与调度重建警告）。"""
+
+    applied: dict[str, SettingEffect]
+    warnings: list[str] = []
+
+
+class ChannelTestOut(BaseModel):
+    """notify-test 逐通道结果（error 只含异常类型名，不含 URL/token）。"""
+
+    channel: str
+    ok: bool
+    error: str | None = None
+
+
+class NotifyTestOut(BaseModel):
+    results: list[ChannelTestOut]
+
+
+class QbitTestOut(BaseModel):
+    """qbit-test 结果（version 为 qBittorrent 服务端版本号）。"""
+
+    ok: bool
+    version: str | None = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------

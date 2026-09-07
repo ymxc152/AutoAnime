@@ -313,3 +313,24 @@ class PosterFetch(Base):
     ext: Mapped[str | None] = mapped_column(String, nullable=True)
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class AppSetting(Base):
+    """``app_settings`` 表（12-D 配置中心）：运行期覆盖项持久化。
+
+    只存「与默认值不同的覆盖项」（key 主键，每 key 至多一行）；显式清除
+    （PUT 密钥字段传 null）= 删行，回落 env/toml 默认。``value`` 是
+    ``config.encode_setting_value`` 序列化的 JSON 字符串（密钥类字段是
+    明文——单用户本地库与 ``.env`` 同级安全，docs/12 §风险 3），合并/
+    校验在 ``config.parse_db_overrides``；``updated_at`` 仅记录最近一次
+    写入，无业务语义。
+
+    API 层纪律：GET 永不回显密钥值（只给 has_* 布尔），audit 只记 key 名
+    不记 value。
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

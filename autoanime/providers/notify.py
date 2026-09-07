@@ -46,18 +46,22 @@ class WebhookNotifier:
         self._timeout_s = timeout_s
         self._client = client
 
-    async def send(self, event: Event) -> None:
+    async def send_or_raise(self, event: Event) -> None:
+        """与 ``send`` 同语义但异常向上抛（12-D notify-test 端点逐通道归因）。"""
         body = {
             "category": event.category.value,
             "message": event.message,
             "payload": event.payload,
         }
+        if self._client is not None:
+            await self._client.post(self._url, json=body)
+        else:
+            async with httpx.AsyncClient(timeout=self._timeout_s) as client:
+                await client.post(self._url, json=body)
+
+    async def send(self, event: Event) -> None:
         try:
-            if self._client is not None:
-                await self._client.post(self._url, json=body)
-            else:
-                async with httpx.AsyncClient(timeout=self._timeout_s) as client:
-                    await client.post(self._url, json=body)
+            await self.send_or_raise(event)
         except Exception as exc:  # noqa: BLE001 — 通知永不致命
             logger.warning("webhook notify failed: %s", type(exc).__name__)
 
@@ -78,23 +82,27 @@ class TelegramNotifier:
         self._timeout_s = timeout_s
         self._client = client
 
-    async def send(self, event: Event) -> None:
+    async def send_or_raise(self, event: Event) -> None:
+        """与 ``send`` 同语义但异常向上抛（12-D notify-test 端点逐通道归因）。"""
         payload_tail = json.dumps(event.payload, ensure_ascii=False) if event.payload else ""
         text = f"[AutoAnime][{event.category.value}] {event.message}"
         if payload_tail:
             text = f"{text}\n{payload_tail[:800]}"
-        try:
-            if self._client is not None:
-                await self._client.post(
+        if self._client is not None:
+            await self._client.post(
+                f"{TELEGRAM_API_BASE}/bot{self._token}/sendMessage",
+                json={"chat_id": self._chat_id, "text": text},
+            )
+        else:
+            async with httpx.AsyncClient(timeout=self._timeout_s) as client:
+                await client.post(
                     f"{TELEGRAM_API_BASE}/bot{self._token}/sendMessage",
                     json={"chat_id": self._chat_id, "text": text},
                 )
-            else:
-                async with httpx.AsyncClient(timeout=self._timeout_s) as client:
-                    await client.post(
-                        f"{TELEGRAM_API_BASE}/bot{self._token}/sendMessage",
-                        json={"chat_id": self._chat_id, "text": text},
-                    )
+
+    async def send(self, event: Event) -> None:
+        try:
+            await self.send_or_raise(event)
         except Exception as exc:  # noqa: BLE001
             logger.warning("telegram notify failed: %s", type(exc).__name__)
 

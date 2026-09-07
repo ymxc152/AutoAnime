@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import event, select
@@ -10,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from autoanime.core.models import (
     Alias,
+    AppSetting,
     Base,
     BypassList,
     LlmCacheRow,
@@ -273,6 +275,35 @@ class SqliteStorage:
         async with self._session_factory() as session:
             obj = await session.merge(obj)
             await session.delete(obj)
+            await session.commit()
+
+    async def list_app_settings(self) -> dict[str, str]:
+        """读全部运行期覆盖项（12-D 配置中心）：key → value（未解码原文）。
+
+        只返回行，解码/校验/合并语义在 ``config.parse_db_overrides`` 与
+        ``apply_db_overrides``（store 层不做字段校验）。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(select(AppSetting))
+            return {row.key: row.value for row in result.scalars().all()}
+
+    async def put_app_setting(self, key: str, value: str | None) -> None:
+        """写一条覆盖项（幂等 upsert）；``value=None`` = 清除（删行）。
+
+        显式清除回落 env/toml 默认（而非存 null 值），这是 12-D「PUT 密钥
+        字段 null = 清除」语义的存储侧收口。调用方先经
+        ``config.encode_setting_value`` 序列化。
+        """
+        async with self._session_factory() as session:
+            row = await session.get(AppSetting, key)
+            if value is None:
+                if row is not None:
+                    await session.delete(row)
+            elif row is None:
+                session.add(AppSetting(key=key, value=value, updated_at=datetime.now()))
+            else:
+                row.value = value
+                row.updated_at = datetime.now()
             await session.commit()
 
     async def close(self) -> None:

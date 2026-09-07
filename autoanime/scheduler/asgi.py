@@ -56,8 +56,11 @@ def _compose_lifespan(app: FastAPI, settings: Settings) -> None:
             try:
                 yield
             finally:
-                scheduler.shutdown()
-                await components.close()
+                # 12-D：运行期可能经 settings PUT 重建过 loop（app.state 上的
+                # scheduler/loop_components 已被替换）——必须关「当前挂载在
+                # state 上的」实例，否则重建后的调度器在退出时不被关闭。
+                getattr(target.state, "scheduler", scheduler).shutdown()
+                await getattr(target.state, "loop_components", components).close()
 
     app.router.lifespan_context = combined  # type: ignore[assignment]
 

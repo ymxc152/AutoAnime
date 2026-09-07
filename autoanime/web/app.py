@@ -20,7 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from autoanime.config import Settings, load_settings
+from autoanime.config import Settings, apply_db_overrides, load_settings
 from autoanime.core.events import InMemoryEventBus
 from autoanime.core.interfaces import Registry
 from autoanime.memory.governance import MemoryGovernance
@@ -43,7 +43,10 @@ def build_reference_chain(settings: Settings, storage: SqliteStorage) -> Referen
         return None
     registry = Registry()
     register_reference_providers(
-        registry, cache_store=storage, reference_qps=settings.reference_qps
+        registry,
+        cache_store=storage,
+        reference_qps=settings.reference_qps,
+        tmdb_api_key=settings.tmdb_api_key,
     )
     return ReferenceChain(
         registry, order=settings.reference_order, enabled=settings.reference_enabled
@@ -61,6 +64,11 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         storage = SqliteStorage(settings.database_url)
         await storage.create_all()
+        # 12-D 配置中心：env/toml → DB 覆盖合并出运行时 Settings。原地
+        # setattr（create_app 闭包里的 token 中间件与路由依赖引用同一
+        # 实例）；lifespan 建好的 reference_chain / 后续 build_loop 都在
+        # 合并之后装配，故拿到的已是覆盖后的值。
+        apply_db_overrides(settings, await storage.list_app_settings())
         app.state.settings = settings
         app.state.storage = storage
         app.state.api_store = ApiStore(storage)

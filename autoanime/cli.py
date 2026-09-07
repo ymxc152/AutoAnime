@@ -244,7 +244,10 @@ async def _build_orchestrator(
     # 空链（lookup 恒 None，优雅降级），注册的 adapter 客户端为懒创建，
     # 一次性 CLI 进程结束即释放，无需显式 aclose。
     register_reference_providers(
-        registry, cache_store=storage, reference_qps=settings.reference_qps
+        registry,
+        cache_store=storage,
+        reference_qps=settings.reference_qps,
+        tmdb_api_key=settings.tmdb_api_key,
     )
     reference_chain = ReferenceChain(
         registry, order=settings.reference_order, enabled=settings.reference_enabled
@@ -299,7 +302,10 @@ def _confirm_reference_lookup(
         return None
     registry = Registry()
     register_reference_providers(
-        registry, cache_store=cache_store, reference_qps=settings.reference_qps
+        registry,
+        cache_store=cache_store,
+        reference_qps=settings.reference_qps,
+        tmdb_api_key=settings.tmdb_api_key,
     )
     return ReferenceChain(
         registry, order=settings.reference_order, enabled=settings.reference_enabled

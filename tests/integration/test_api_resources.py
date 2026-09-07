@@ -762,9 +762,11 @@ async def test_settings_roundtrip_masks_secrets(client) -> None:
 
 async def test_settings_rejects_unknown_payload_keys_semantics(client) -> None:
     c, _ = client
-    # 非白名单字段（如 api_port）不允许经 PUT 改（extra=ignore 直接丢弃）。
+    # 12-D 收口：非白名单字段（如 api_port）不允许经 PUT 改，且显式 422
+    # （extra="forbid"），不再静默丢弃——前端打错 key 应当可见地失败。
     resp = await c.put("/api/settings", json={"api_port": 1})
-    assert resp.status_code == 200
+    assert resp.status_code == 422
+    resp = await c.get("/api/settings")
     assert resp.json()["api_port"] == 8000
 
 

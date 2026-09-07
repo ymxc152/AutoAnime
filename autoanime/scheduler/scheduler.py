@@ -84,7 +84,10 @@ def build_orchestrator_for_loop(
         transport_obj = registry.optional(LlmTransport, LLM_TRANSPORT_NAME)
         transport = transport_obj if isinstance(transport_obj, LlmTransport) else None
     register_reference_providers(
-        registry, cache_store=storage, reference_qps=settings.reference_qps
+        registry,
+        cache_store=storage,
+        reference_qps=settings.reference_qps,
+        tmdb_api_key=settings.tmdb_api_key,
     )
     reference_chain = ReferenceChain(
         registry, order=settings.reference_order, enabled=settings.reference_enabled
@@ -213,6 +216,45 @@ def build_loop(
         notify_dispatcher=notify_dispatcher,
         own_storage=own_storage,
     )
+
+
+async def rebuild_running_scheduler(state: Any, settings: Settings) -> list[str]:
+    """调度类配置 PUT 后重建 loop（12-D）；返回警告列表（空 = 重建成功）。
+
+    语义收口（对齐 run-once 的互斥锁 finally 释放纪律）：**先 build 新
+    loop 成功，再 shutdown 旧的**——构建失败绝不 tear down 现役调度（不
+    制造「调度停了但配置没生效」的半拆状态），以警告返回给 PUT 响应，旧
+    loop 继续按旧参数跑。旧 components 与新 components 共享 storage/bus
+    （asgi 装配 ``own_storage=False``），``close`` 只关组件不关共享连接，
+    替换是安全的；run-once 若正持有旧 components 跑本轮，其局部引用不受
+    影响（本轮跑完自灭）。
+
+    API-only 进程（``python -m autoanime.api serve``，app.state 无
+    scheduler）直接返回空：调度类字段已落库，下次以新参数启动。
+    """
+    scheduler = getattr(state, "scheduler", None)
+    if scheduler is None:
+        return []
+    storage = getattr(state, "storage", None)
+    bus = getattr(state, "bus", None)
+    try:
+        components = build_loop(settings, storage=storage, bus=bus)
+    except Exception:  # noqa: BLE001 — 重建失败不拖垮 PUT（旧 loop 保活）
+        logger.exception("scheduler rebuild failed; keeping old loop")
+        return ["scheduler rebuild failed; old loop kept running"]
+    old_components = getattr(state, "loop_components", None)
+    scheduler.shutdown()
+    if old_components is not None:
+        await old_components.close()
+    rebuilt = SubscriptionScheduler(components, settings)
+    state.scheduler = rebuilt
+    state.loop_components = components
+    if settings.scheduler_enabled:
+        rebuilt.start()
+    else:
+        # 总开关被关：重建但不启动，下次启动/重新开启前不再轮询。
+        logger.info("scheduler disabled by settings; loop rebuilt but not started")
+    return []
 
 
 class SubscriptionScheduler:
@@ -369,5 +411,6 @@ __all__ = [
     "build_downloader",
     "build_loop",
     "build_orchestrator_for_loop",
+    "rebuild_running_scheduler",
     "refetch_torrent_bytes",
 ]
