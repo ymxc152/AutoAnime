@@ -24,6 +24,12 @@ export default tseslint.config([
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      // 12-B:shadcn/ui 复制组件惯例导出 cva variants(badgeVariants/buttonVariants),
+      // 与 HMR 快速刷新不兼容但无运行时影响;按名放行(插件只支持精确名,不支持通配)。
+      'react-refresh/only-export-components': [
+        'error',
+        { allowExportNames: ['badgeVariants', 'buttonVariants'] },
+      ],
     },
   },
   {

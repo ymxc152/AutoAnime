@@ -12,6 +12,8 @@ import { useTheme } from '../hooks/useTheme'
 import { useEventStream } from '../hooks/eventStreamContext'
 import { SseStatusLine } from './SseStatusLine'
 import { StatusDot } from './StatusDot'
+import { ConfirmHost } from './confirm'
+import { Toaster } from './ui/sonner'
 
 interface NavItem {
   to: string
@@ -173,6 +175,10 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </main>
       </div>
+
+      {/* 全局挂载:Toast 通知 + 命令式确认框(12-B) */}
+      <Toaster position="top-center" />
+      <ConfirmHost />
     </div>
   )
 }

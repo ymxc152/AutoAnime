@@ -33,6 +33,7 @@ export const strings = {
     retry: '重试',
     cancel: '取消',
     confirm: '确认',
+    confirmTitle: '请确认',
     save: '保存',
     saving: '保存中…',
     delete: '删除',
@@ -289,6 +290,7 @@ export const strings = {
   settings: {
     title: '设置',
     runtimeHint: 'PUT 仅覆写本进程运行时项,重启后回到 env/toml 配置',
+    unsavedLeaveConfirm: '有未保存的更改,确定离开吗?',
     runtimeSection: '运行时开关',
     dryRun: '试运行模式',
     dryRunHint: '开启后只做识别与计划,不实际移动文件',

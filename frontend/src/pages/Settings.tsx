@@ -7,9 +7,11 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
+import { toast } from 'sonner'
 import { api, ApiError, getApiToken, setApiToken } from '../api'
 import { useApi } from '../hooks/useApi'
 import { strings } from '../strings'
+import { confirmDialog } from '../lib/confirm'
 import {
   Badge,
   Button,
@@ -67,9 +69,10 @@ export function SettingsPage() {
   )
   useEffect(() => {
     if (blocker.state === 'blocked') {
-      const leave = window.confirm('有未保存的更改,确定离开吗?')
-      if (leave) blocker.proceed()
-      else blocker.reset()
+      void confirmDialog(strings.settings.unsavedLeaveConfirm).then((leave) => {
+        if (leave) blocker.proceed()
+        else blocker.reset()
+      })
     }
   }, [blocker])
 
@@ -126,6 +129,7 @@ export function SettingsPage() {
       setEdit({})
       setOrderDraft(null)
       setSaved(true)
+      toast.success(strings.settings.saved)
       window.setTimeout(() => setSaved(false), 2500)
     } catch (cause) {
       setSaveError(cause instanceof ApiError ? cause.message : strings.settings.saveFailed)

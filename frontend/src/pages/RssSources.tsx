@@ -24,6 +24,7 @@ import {
   type Column,
 } from '../components'
 import { formatDateTime } from '../lib/views'
+import { Checkbox } from '@/components/ui/checkbox'
 import type { RssSourceDto, RssSourceUpdateBody, SubscriptionDto } from '../api/types'
 
 /** 下拉选项:番名 + 季号 + season id 拼显示文案(B2:手输主键全 UI 无处可查) */
@@ -224,12 +225,11 @@ function EditSourceDrawer({
         </Field>
         {source.has_token && (
           <label className="flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={clearToken}
-              onChange={(e) => setClearToken(e.target.checked)}
+              onCheckedChange={(checked) => setClearToken(checked === true)}
               aria-label={strings.rssSources.clearToken}
-              className="h-3.5 w-3.5 accent-[var(--ink-primary)]"
+              className="h-3.5 w-3.5"
             />
             {strings.rssSources.clearToken}
           </label>

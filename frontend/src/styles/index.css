@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 @import './tokens.css';
 
 /*
@@ -42,6 +43,33 @@
   --shadow-soft-sm: var(--ink-shadow-sm);
   --shadow-soft-md: var(--ink-shadow-md);
   --shadow-soft-lg: var(--ink-shadow-lg);
+
+  /*
+   * shadcn/ui 桥接(12-B):components/ui 下的复制组件用 shadcn 标准色名
+   * (bg-background/text-muted-foreground/border-input/ring...)。
+   * 全部映射回 Soft Ink token,组件即插即用且明暗两套自动跟随;
+   * 12-C 视觉重设计只需改 --ink-* 值,桥接层不动。
+   * 注意:shadcn 的 accent 语义是「悬停底色」,非品牌 accent(后者暂无标记使用)。
+   */
+  --color-background: var(--ink-bg);
+  --color-foreground: var(--ink-text);
+  --color-card: var(--ink-surface);
+  --color-card-foreground: var(--ink-text);
+  --color-popover: var(--ink-surface);
+  --color-popover-foreground: var(--ink-text);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--ink-surface-2);
+  --color-secondary-foreground: var(--ink-text);
+  --color-muted: var(--ink-surface-2);
+  --color-muted-foreground: var(--ink-text-secondary);
+  --color-accent: var(--ink-surface-2);
+  --color-accent-foreground: var(--ink-text);
+  --color-destructive: var(--ink-danger);
+  --color-destructive-foreground: #ffffff;
+  --color-border: var(--ink-border);
+  --color-input: var(--ink-border);
+  --color-ring: var(--ink-primary);
+  --radius: var(--ink-radius-md);
 }
 
 /* 类名驱动的暗色变体(.dark 挂在 <html> 上) */

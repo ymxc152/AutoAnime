@@ -26,6 +26,7 @@ import {
   type Column,
 } from '../components'
 import { formatDateTime, pendingStageLabel } from '../lib/views'
+import { Checkbox } from '@/components/ui/checkbox'
 import type { PendingItemDto } from '../api/types'
 
 /** context 草稿值 → 展示文本(缺失显示 —) */
@@ -331,22 +332,20 @@ export function PendingPage() {
     {
       key: 'select',
       header: (
-        <input
-          type="checkbox"
+        <Checkbox
           aria-label={strings.pending.selectAll}
           checked={allPageSelected}
-          onChange={toggleAllPage}
-          className="h-3.5 w-3.5 accent-[var(--ink-primary)]"
+          onCheckedChange={() => toggleAllPage()}
+          className="h-3.5 w-3.5"
         />
       ),
       render: (row) => (
-        <input
-          type="checkbox"
+        <Checkbox
           aria-label={t(strings.pending.selectRow, { name: row.raw_name })}
           checked={selectedIds.has(row.id)}
           disabled={busyId === row.id}
-          onChange={(e) => toggleOne(row.id, e.target.checked)}
-          className="h-3.5 w-3.5 accent-[var(--ink-primary)]"
+          onCheckedChange={(checked) => toggleOne(row.id, checked === true)}
+          className="h-3.5 w-3.5"
         />
       ),
     },
