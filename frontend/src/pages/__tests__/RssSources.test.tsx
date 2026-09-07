@@ -18,7 +18,7 @@ describe('RssSourcesPage', () => {
   it('渲染源表格', async () => {
     renderPage(<RssSourcesPage />)
     expect(
-      await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***'),
+      await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***'),
     ).toBeInTheDocument()
     expect(screen.getAllByRole('switch').length).toBe(3)
   })
@@ -38,13 +38,13 @@ describe('RssSourcesPage', () => {
   it('移除需二次确认', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
-    await screen.findByText('https://bangumi.moe/rss/moe/6556')
+    await screen.findByTitle('https://bangumi.moe/rss/moe/6556')
     const removeButtons = screen.getAllByRole('button', { name: '移除' })
     await user.click(removeButtons[removeButtons.length - 1]!)
     expect(await screen.findByRole('button', { name: '确认' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认' }))
     await waitFor(() =>
-      expect(screen.queryByText('https://bangumi.moe/rss/moe/6556')).not.toBeInTheDocument(),
+      expect(screen.queryByTitle('https://bangumi.moe/rss/moe/6556')).not.toBeInTheDocument(),
     )
   })
 
@@ -75,18 +75,18 @@ describe('RssSourcesPage', () => {
       .spyOn(api.rssSources, 'remove')
       .mockRejectedValueOnce(new ApiError(409, 'source in use'))
     renderPage(<RssSourcesPage />)
-    await screen.findByText('https://bangumi.moe/rss/moe/6556')
+    await screen.findByTitle('https://bangumi.moe/rss/moe/6556')
     const removeButtons = screen.getAllByRole('button', { name: '移除' })
     await user.click(removeButtons[removeButtons.length - 1]!)
     await user.click(await screen.findByRole('button', { name: '确认' }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('source in use')
-    expect(screen.getByText('https://bangumi.moe/rss/moe/6556')).toBeInTheDocument()
+    expect(screen.getByTitle('https://bangumi.moe/rss/moe/6556')).toBeInTheDocument()
     // 恢复后重试:行移除,错误条消失
     removeSpy.mockRestore()
     await user.click(screen.getByRole('button', { name: '确认' }))
     await waitFor(() =>
-      expect(screen.queryByText('https://bangumi.moe/rss/moe/6556')).not.toBeInTheDocument(),
+      expect(screen.queryByTitle('https://bangumi.moe/rss/moe/6556')).not.toBeInTheDocument(),
     )
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
@@ -94,7 +94,7 @@ describe('RssSourcesPage', () => {
   it('空地址提交显示校验错误', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
-    await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
+    await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
     await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('请填写源地址')).toBeInTheDocument()
   })
@@ -102,7 +102,7 @@ describe('RssSourcesPage', () => {
   it('缺关联季提交显示校验错误(对齐后端 season_id 必填)', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
-    await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
+    await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
     await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
     await user.click(screen.getByRole('button', { name: '添加' }))
     // 错误文案与下拉占位同串:限定 Field 的错误 <p>
@@ -114,12 +114,12 @@ describe('RssSourcesPage', () => {
   it('填写地址与关联季后创建成功', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
-    await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')
+    await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
     await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
     await user.selectOptions(screen.getByLabelText('关联季'), '2')
     await user.click(screen.getByRole('button', { name: '添加' }))
     expect(
-      await screen.findByText('https://mikanani.me/RSS/Bangumi?subgroupid=583'),
+      await screen.findByTitle('https://mikanani.me/RSS/Bangumi?subgroupid=583'),
     ).toBeInTheDocument()
   })
 
@@ -154,7 +154,7 @@ describe('RssSourcesPage', () => {
       .spyOn(api.rssSources, 'list')
       .mockResolvedValue({ total: 1, limit: 100, offset: 0, items: [source] })
     renderPage(<RssSourcesPage />)
-    expect(await screen.findByText('https://example.com/rss/legacy')).toBeInTheDocument()
+    expect(await screen.findByTitle('https://example.com/rss/legacy')).toBeInTheDocument()
     // season_id 999 不在订阅季列表 → 回显原 id(旧数据兼容),不伪装成季名
     expect(screen.getByText('999')).toBeInTheDocument()
     listSpy.mockRestore()
@@ -165,7 +165,7 @@ describe('RssSourcesPage', () => {
     const actualUpdate = api.rssSources.update
     const updateSpy = vi.spyOn(api.rssSources, 'update').mockImplementationOnce(async (...args) => actualUpdate(...args))
     renderPage(<RssSourcesPage />)
-    const row = (await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    const row = (await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
     await user.click(within(row).getByRole('button', { name: '编辑 RSS 源' }))
     const dialog = screen.getByRole('dialog')
     const urlInput = within(dialog).getByLabelText('地址')
@@ -178,7 +178,7 @@ describe('RssSourcesPage', () => {
       enabled: true,
       token: 'new-secret',
     })
-    expect(await screen.findByText('https://mikanani.me/RSS/Updated')).toBeInTheDocument()
+    expect(await screen.findByTitle('https://mikanani.me/RSS/Updated')).toBeInTheDocument()
   })
 
   it('编辑 RSS 源:清除 Token 显式提交 null,状态变未配置', async () => {
@@ -186,7 +186,7 @@ describe('RssSourcesPage', () => {
     const actualUpdate = api.rssSources.update
     const updateSpy = vi.spyOn(api.rssSources, 'update').mockImplementationOnce(async (...args) => actualUpdate(...args))
     renderPage(<RssSourcesPage />)
-    const row = (await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    const row = (await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
     await user.click(within(row).getByRole('button', { name: '编辑 RSS 源' }))
     const dialog = screen.getByRole('dialog')
     await user.click(within(dialog).getByLabelText('清除 Token'))
@@ -204,7 +204,7 @@ describe('RssSourcesPage', () => {
     const user = userEvent.setup()
     vi.spyOn(api.rssSources, 'update').mockRejectedValueOnce(new ApiError(409, 'source locked'))
     renderPage(<RssSourcesPage />)
-    const row = (await screen.findByText('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
+    const row = (await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')).closest('tr') as HTMLElement
     await user.click(within(row).getByRole('button', { name: '编辑 RSS 源' }))
     const dialog = screen.getByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: '保存' }))

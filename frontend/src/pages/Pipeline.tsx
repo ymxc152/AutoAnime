@@ -15,6 +15,7 @@ import {
   type NodeTypes,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { FlaskConical, FolderDown, RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useEventStream } from '../hooks/eventStreamContext'
@@ -52,7 +53,7 @@ function PipelineNodeView({ data }: NodeProps<Node<PipelineNodeData>>) {
   return (
     <div
       data-testid={`pipeline-node-${data.title}`}
-      className={`w-40 rounded-md border bg-surface px-3 py-2 shadow-soft-sm ${
+      className={`w-40 rounded-md border bg-surface px-3 py-2 shadow-soft-md ${
         data.passing > 0 ? 'border-primary' : 'border-line'
       }`}
     >
@@ -182,6 +183,7 @@ function ManualOperations() {
             />
           </Field>
           <Button type="submit" variant="secondary" loading={previewBusy}>
+            <FlaskConical aria-hidden className="h-4 w-4" />
             {strings.pipeline.parsePreview}
           </Button>
           {previewError !== null && <p role="alert" className="text-xs text-danger">{previewError}</p>}
@@ -205,13 +207,15 @@ function ManualOperations() {
               value={directory}
               onChange={(e) => setDirectory(e.target.value)}
               className="data-text"
+              placeholder="D:\downloads\番剧"
             />
           </Field>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm text-ink">{strings.pipeline.dryRun}</span>
+          <div className="flex items-center justify-between gap-2 py-0.5">
+            <span className="text-sm leading-none text-ink">{strings.pipeline.dryRun}</span>
             <Switch checked={dryRun} onChange={setDryRun} aria-label={strings.pipeline.dryRun} />
           </div>
           <Button type="submit" variant="primary" loading={importBusy}>
+            <FolderDown aria-hidden className="h-4 w-4" />
             {strings.pipeline.startImport}
           </Button>
           {importError !== null && <p role="alert" className="text-xs text-danger">{importError}</p>}
@@ -231,6 +235,7 @@ function ManualOperations() {
 
         <div className="flex flex-col gap-2">
           <Button variant="secondary" loading={schedulerBusy} onClick={() => void runOnce()}>
+            <RefreshCw aria-hidden className="h-4 w-4" />
             {strings.pipeline.runOnce}
           </Button>
           {schedulerError !== null && <p role="alert" className="text-xs text-danger">{schedulerError}</p>}
@@ -387,7 +392,7 @@ export function PipelinePage() {
               {state.recent.map((event) => (
                 <li
                   key={event.key}
-                  className="flex items-start gap-2 border-b border-line px-3 py-2 last:border-b-0"
+                  className="flex items-start gap-2 border-b border-line px-3 py-1.5 last:border-b-0"
                 >
                   <StatusDot tone={categoryTone[event.category]} size={7} />
                   <div className="min-w-0">

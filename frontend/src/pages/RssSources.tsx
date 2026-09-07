@@ -3,6 +3,7 @@
  * 数据:GET/POST/PATCH/DELETE /api/rss_sources。
  */
 import { useCallback, useMemo, useState } from 'react'
+import { Rss } from 'lucide-react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
@@ -35,6 +36,15 @@ interface SeasonOption {
 
 function subscriptionTitle(sub: SubscriptionDto): string {
   return sub.title_cn ?? sub.title_romaji ?? sub.title_jp ?? `#${sub.id}`
+}
+
+/** URL → host;解析失败/无 host 时回退原样(仅展示用,不改 row.url 数据) */
+function urlHost(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
 }
 
 /** 订阅列表 → 季下拉选项(按 series→seasons 展开,不新增后端端点) */
@@ -94,7 +104,15 @@ function AddSourceForm({
   }
 
   return (
-    <Card title={strings.rssSources.addSource} className="mb-4">
+    <Card
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          <Rss aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
+          {strings.rssSources.addSource}
+        </span>
+      }
+      className="mb-4"
+    >
       <form
         className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr_1fr_auto] md:items-start"
         onSubmit={(e) => {
@@ -121,7 +139,7 @@ function AddSourceForm({
             value={seasonId}
             onChange={(e) => setSeasonId(e.target.value)}
           >
-            <option value="">
+            <option value="" className="text-ink-muted">
               {seasonOptions.length === 0
                 ? strings.rssSources.seasonEmptyOption
                 : strings.rssSources.seasonPlaceholder}
@@ -313,12 +331,26 @@ export function RssSourcesPage() {
       header: strings.rssSources.url,
       // 约定:URL 中内嵌的 token 随 URL 明文展示;独立 token 字段才按密钥处理。
       sticky: true,
-      render: (row) => (
-        // 12-A:去掉 max-w-md 硬上限,截断只发生在列宽不足时(悬停 title 看全文)
-        <span className="data-text block truncate text-sm text-ink" title={row.url}>
-          {row.url}
-        </span>
-      ),
+      // 12-C:域名主体加粗、后缀路径弱化;解析失败回退原样。完整 URL 走 title 悬停。
+      render: (row) => {
+        const host = urlHost(row.url)
+        const rest = host !== '' && row.url.startsWith(host) && row.url.length > host.length
+          ? row.url.slice(host.length)
+          : ''
+        return (
+          // 12-A:去掉 max-w-md 硬上限,截断只发生在列宽不足时(悬停 title 看全文)
+          <span className="data-text block truncate text-sm text-ink" title={row.url}>
+            {rest === '' ? (
+              row.url
+            ) : (
+              <>
+                <span className="font-medium">{host}</span>
+                <span className="text-ink-muted">{rest}</span>
+              </>
+            )}
+          </span>
+        )
+      },
     },
     {
       key: 'season',
@@ -415,7 +447,12 @@ export function RssSourcesPage() {
             rows={rows}
             rowKey={(row) => row.id}
             loading={loading}
-            empty={<EmptyState title={strings.rssSources.empty} />}
+            empty={
+              <div>
+                <Rss aria-hidden className="mb-2 h-8 w-8 text-ink-muted" />
+                <EmptyState title={strings.rssSources.empty} />
+              </div>
+            }
             footer={
               <span className="text-xs text-ink-secondary data-text">
                 {t(strings.common.total, { count: data?.total ?? 0 })}

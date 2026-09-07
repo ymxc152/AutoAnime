@@ -6,6 +6,8 @@
  * 组级撤销取该组最新一条 audit 行 id(last_audit_id)。404/409 语义由后端给。
  */
 import { useCallback, useState } from 'react'
+import { Copy, Undo2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnEvent } from '../hooks/useReloadOnEvent'
@@ -19,8 +21,17 @@ import {
   Input,
   PageTitle,
   StatusMark,
+  type Tone,
 } from '../components'
 import type { AuditDto, OperationGroupDto } from '../api/types'
+
+/** 动作徽标语义色:organize/upgrade=info、rollback/reverse=warning,其余中性 */
+function actionBadgeTone(action: string): Tone {
+  const lower = action.toLowerCase()
+  if (lower.includes('organize') || lower.includes('upgrade')) return 'info'
+  if (lower.includes('rollback') || lower.includes('reverse')) return 'warning'
+  return 'neutral'
+}
 
 function JsonBlock({ label, value }: { label: string; value: Record<string, unknown> }) {
   if (Object.keys(value).length === 0) return null
@@ -50,7 +61,7 @@ function GroupEntries({ operationId }: { operationId: string }) {
   }
   const entries: AuditDto[] = data?.items ?? []
   return (
-    <ul className="flex flex-col gap-3">
+    <ul className="flex flex-col gap-2">
       {entries.map((entry) => (
         <li key={entry.id} className="flex flex-col gap-1.5 border-l border-line pl-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -95,6 +106,19 @@ function GroupRow({
   onRollback: (auditId: number) => void
   rollbackMessage: string | null
 }) {
+  // 复制操作 ID:jsdom 等环境无 clipboard API 时静默跳过,不让测试/降级环境报错。
+  const copyOperationId = (): void => {
+    try {
+      const clip = navigator.clipboard
+      if (clip === undefined || typeof clip.writeText !== 'function') return
+      void clip.writeText(group.operation_id).then(() => {
+        toast.success('已复制')
+      })
+    } catch {
+      // 无 clipboard:忽略
+    }
+  }
+
   return (
     <li className="border-b border-line last:border-b-0">
       <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
@@ -117,9 +141,19 @@ function GroupRow({
             </span>
           )}
         </button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 px-1.5"
+          aria-label="复制操作 ID"
+          title="复制操作 ID"
+          onClick={copyOperationId}
+        >
+          <Copy aria-hidden className="h-3.5 w-3.5" />
+        </Button>
         <span className="flex flex-wrap gap-1">
           {group.actions.map((action) => (
-            <Badge key={action} tone="neutral">
+            <Badge key={action} tone={actionBadgeTone(action)}>
               {action}
             </Badge>
           ))}
@@ -154,13 +188,14 @@ function GroupRow({
               title={strings.logs.rollbackHint}
               onClick={onArmRollback}
             >
+              <Undo2 aria-hidden className="h-3.5 w-3.5" />
               {strings.common.rollback}
             </Button>
           )
         ) : null}
       </div>
       {expanded && (
-        <div className="flex flex-col gap-3 bg-surface-2/60 px-4 py-3 md:pl-10">
+        <div className="flex flex-col gap-3 bg-surface-2/60 px-4 py-2.5 md:pl-10">
           <GroupEntries operationId={group.operation_id} />
         </div>
       )}

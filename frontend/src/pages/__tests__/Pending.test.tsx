@@ -133,12 +133,12 @@ describe('PendingPage', () => {
     const row = screen
       .getByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]')
       .closest('tr')!
-    // 第一次点击:仅 arm,按钮文案变为「拒绝 1 条？」,队列不变
+    // 第一次点击:仅 arm,按钮文案变为「确认拒绝」,队列不变
     await user.click(within(row).getByRole('button', { name: '拒绝' }))
-    expect(within(row).getByRole('button', { name: '拒绝 1 条？' })).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: '确认拒绝' })).toBeInTheDocument()
     expect(screen.getByText(/共 4 条/)).toBeInTheDocument()
     // 第二次点击:执行,行出队
-    await user.click(within(row).getByRole('button', { name: '拒绝 1 条？' }))
+    await user.click(within(row).getByRole('button', { name: '确认拒绝' }))
     await waitFor(() => expect(screen.getByText(/共 3 条/)).toBeInTheDocument())
     expect(
       screen.queryByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]'),
@@ -153,7 +153,7 @@ describe('PendingPage', () => {
       .getByText('Kusuriya no Hitorigoto - 17 [V2][1080p][Kamigakari]')
       .closest('tr')!
     await user.click(within(row).getByRole('button', { name: '拒绝' }))
-    expect(within(row).getByRole('button', { name: '拒绝 1 条？' })).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: '确认拒绝' })).toBeInTheDocument()
     // 勾选任意一行 → 单条 arm 重置回「拒绝」
     const checkboxes = screen.getAllByRole('checkbox')
     await user.click(checkboxes[1]!)

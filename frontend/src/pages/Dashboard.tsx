@@ -4,93 +4,129 @@
  * llm_call_curve_weekly/pending_open/episode_states)。
  */
 import { useCallback } from 'react'
+import { ChartLine, Check, Inbox, Sparkles, UserRoundCog, type LucideIcon } from 'lucide-react'
 import { api } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnCategories } from '../hooks/useReloadOnEvent'
 import { strings } from '../strings'
 import { Badge, Card, EmptyState, ErrorState, PageTitle, Skeleton } from '../components'
-import { episodeStateLabel, formatPercent } from '../lib/views'
-import type { Metrics } from '../api/types'
+import { episodeStateLabel, episodeStateView, formatPercent } from '../lib/views'
+import type { EpisodeState, Metrics } from '../api/types'
 
 function MetricCard({
   label,
   value,
   hint,
+  icon: Icon,
 }: {
   label: string
   value: string
   hint?: string
+  icon: LucideIcon
 }) {
   return (
-    <Card>
-      <p className="text-xs text-ink-secondary">{label}</p>
-      <p className="data-text mt-1 text-2xl font-semibold text-ink">{value}</p>
+    <Card className="transition-shadow hover:shadow-soft-md">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-ink-secondary">{label}</p>
+        <span
+          aria-hidden
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-ink-muted"
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+      </div>
+      <p className="data-text mt-1 text-3xl font-semibold tracking-tight text-ink">{value}</p>
       {hint !== undefined && <p className="mt-0.5 text-xs text-ink-secondary">{hint}</p>}
     </Card>
   )
 }
 
-/** LLM 调用周曲线柱状图(仅渲染有调用的周),手绘 SVG,无图表依赖 */
+/** LLM 调用周曲线 sparkline(仅渲染有调用的周),手绘 SVG polyline,无图表依赖 */
 function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
   // 空桶(0 调用)无信息量,过滤掉;全空时显示空态
   const active = points.filter((p) => p.llm_called > 0)
   const max = Math.max(1, ...active.map((p) => p.llm_called))
-  const barWidth = 24
-  const gap = 10
+  const spacing = 44
   const height = 72
   if (active.length === 0) {
-    return <EmptyState title={strings.common.empty} />
+    return (
+      <div className="flex flex-col items-center py-6 text-center">
+        <ChartLine aria-hidden className="mb-2 h-8 w-8 text-ink-muted" />
+        <EmptyState title={strings.common.empty} />
+      </div>
+    )
+  }
+  const pts = active.map((p, i) => ({
+    ...p,
+    x: i * spacing + spacing / 2,
+    y: height - (p.llm_called / max) * (height - 14) - 4,
+  }))
+  const last = pts.at(-1)
+  if (last === undefined) {
+    return null
   }
   return (
     <div className="overflow-x-auto">
       <svg
-        viewBox={`0 0 ${active.length * (barWidth + gap)} ${height + 18}`}
+        viewBox={`0 0 ${active.length * spacing} ${height + 18}`}
         className="w-full min-w-[280px]"
         role="img"
         aria-label={strings.dashboard.weeklyCurve}
       >
-        {active.map((p, i) => {
-          const x = i * (barWidth + gap)
-          const barH = (p.llm_called / max) * height
-          return (
-            <g key={p.bucket}>
-              {/* 透明命中区覆盖整列,细柱也易 hover;<title> 为原生 tooltip */}
-              <rect x={x} y={0} width={barWidth + gap} height={height} fill="transparent">
-                <title>{`${p.bucket} · LLM 调用 ${p.llm_called} 次`}</title>
-              </rect>
-              <rect
-                x={x}
-                y={height - barH}
-                width={barWidth}
-                height={barH}
-                rx={2}
-                className="fill-primary pointer-events-none"
-              />
-              <text
-                x={x + barWidth / 2}
-                y={height + 12}
-                textAnchor="middle"
-                className="fill-[var(--ink-text-secondary)] text-[9px] pointer-events-none"
-              >
-                {p.bucket.slice(5)}
-              </text>
-              <text
-                x={x + barWidth / 2}
-                y={height - barH - 3}
-                textAnchor="middle"
-                className="fill-[var(--ink-text-secondary)] text-[9px] pointer-events-none"
-              >
-                {p.llm_called}
-              </text>
-            </g>
-          )
-        })}
+        {/* 折线本体 */}
+        <polyline
+          points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
+          fill="none"
+          stroke="var(--ink-primary)"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          className="pointer-events-none"
+        />
+        {/* 末端小圆点 */}
+        <circle
+          cx={last.x}
+          cy={last.y}
+          r="3"
+          fill="var(--ink-primary)"
+          className="pointer-events-none"
+        />
+        {pts.map((p) => (
+          <g key={p.bucket}>
+            {/* 透明命中区覆盖整列,细线也易 hover;<title> 为原生 tooltip */}
+            <rect
+              x={p.x - spacing / 2}
+              y={0}
+              width={spacing}
+              height={height + 6}
+              fill="transparent"
+            >
+              <title>{`${p.bucket} · LLM 调用 ${p.llm_called} 次`}</title>
+            </rect>
+            <text
+              x={p.x}
+              y={height + 12}
+              textAnchor="middle"
+              className="fill-[var(--ink-text-secondary)] text-[9px] pointer-events-none"
+            >
+              {p.bucket.slice(5)}
+            </text>
+            <text
+              x={p.x}
+              y={p.y - 6}
+              textAnchor="middle"
+              className="fill-[var(--ink-text-secondary)] text-[9px] pointer-events-none"
+            >
+              {p.llm_called}
+            </text>
+          </g>
+        ))}
       </svg>
     </div>
   )
 }
 
-/** 单级统计行:解析数 + LLM 调用数 */
+/** 单级统计行:解析数 + LLM 调用数(全命中零 LLM 调用时带成功小勾) */
 function LevelRow({
   label,
   total,
@@ -100,14 +136,18 @@ function LevelRow({
   total: number
   llmCalled: number
 }) {
+  const fullHit = total > 0 && llmCalled === 0
   return (
     <div className="flex items-center justify-between gap-2 border-b border-line py-1.5 last:border-b-0">
-      <span className="text-sm text-ink">{label}</span>
+      <span className="flex items-center gap-1.5 text-sm text-ink">
+        {label}
+        {fullHit && <Check aria-hidden className="h-3.5 w-3.5 text-success" />}
+      </span>
       <span className="flex items-center gap-2">
         <span className="text-xs text-ink-secondary data-text">
           {strings.dashboard.llmCallsShort} {llmCalled}
         </span>
-        <Badge>{total}</Badge>
+        <Badge className="data-text">{total}</Badge>
       </span>
     </div>
   )
@@ -138,9 +178,9 @@ export function DashboardPage() {
       <>
         <PageTitle title={strings.dashboard.title} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
         </div>
       </>
     )
@@ -159,16 +199,19 @@ export function DashboardPage() {
           label={strings.dashboard.manualInterventionRate}
           value={data.intervention_rate === null ? '—' : formatPercent(data.intervention_rate)}
           hint={`${strings.dashboard.auditManual} ${data.audit_manual} / ${strings.dashboard.auditTotal} ${data.audit_total}`}
+          icon={UserRoundCog}
         />
         <MetricCard
           label={strings.dashboard.pendingQueue}
           value={String(data.pending_open)}
           hint={strings.dashboard.pendingQueueUnit}
+          icon={Inbox}
         />
         <MetricCard
           label={strings.dashboard.llmCallRate}
           value={llmRate === null ? '—' : formatPercent(llmRate)}
           hint={`${totalLlm} / ${totalParsed}`}
+          icon={Sparkles}
         />
       </div>
 
@@ -199,7 +242,7 @@ export function DashboardPage() {
             <p className="text-sm text-ink-secondary">{strings.dashboard.noData}</p>
           ) : (
             Object.entries(data.episode_states).map(([state, count]) => (
-              <Badge key={state} mark>
+              <Badge key={state} mark tone={episodeStateView(state as EpisodeState).tone}>
                 <span className="data-text">
                   {episodeStateLabel(state)} {count}
                 </span>

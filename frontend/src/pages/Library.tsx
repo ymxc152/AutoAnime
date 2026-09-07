@@ -3,6 +3,7 @@
  * 数据:GET /api/series(契约假设:series 资源内嵌 seasons[].episodes[] 全树)。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Film, LibraryBig } from 'lucide-react'
 import { api } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnCategories } from '../hooks/useReloadOnEvent'
@@ -54,6 +55,7 @@ function seriesStats(series: SeriesDto): {
  */
 function SeriesPoster({ seriesId, title }: { seriesId: number; title: string }) {
   const [failed, setFailed] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   if (failed) {
     return (
       <div
@@ -65,13 +67,27 @@ function SeriesPoster({ seriesId, title }: { seriesId: number; title: string }) 
     )
   }
   return (
-    <img
-      src={api.series.posterUrl(seriesId)}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="h-24 w-16 shrink-0 rounded-sm border border-line object-cover"
-    />
+    <div className="relative h-24 w-16 shrink-0">
+      {/* 加载占位:onLoad 前显示,加载完成后淡出 */}
+      {!loaded && (
+        <div
+          aria-hidden
+          className="absolute inset-0 flex items-center justify-center rounded-sm bg-surface-2 text-ink-muted"
+        >
+          <Film className="h-5 w-5" />
+        </div>
+      )}
+      <img
+        src={api.series.posterUrl(seriesId)}
+        alt=""
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+        className={`h-24 w-16 rounded-sm border border-line object-cover transition-opacity duration-200 ${
+          loaded ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
+    </div>
   )
 }
 
@@ -224,10 +240,13 @@ export function LibraryPage() {
         </div>
       ) : seriesList.length === 0 ? (
         <Card>
-          <EmptyState
-            title={strings.library.empty}
-            description={strings.subscriptions.mikanHint}
-          />
+          <div className="flex flex-col items-center py-2 text-center">
+            <LibraryBig aria-hidden className="mb-3 h-10 w-10 text-ink-muted" />
+            <EmptyState
+              title={strings.library.empty}
+              description={strings.subscriptions.mikanHint}
+            />
+          </div>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -238,16 +257,16 @@ export function LibraryPage() {
                 key={series.id}
                 type="button"
                 onClick={() => setSelected(series)}
-                className="flex gap-3 rounded-md border border-line bg-surface p-3 text-left shadow-soft-sm transition-shadow hover:shadow-soft-md"
+                className="flex gap-3 rounded-md border border-line bg-surface p-3 text-left shadow-soft-sm transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-soft-md"
               >
                 <SeriesPoster seriesId={series.id} title={seriesTitle(series)} />
                 <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="font-medium text-ink">{seriesTitle(series)}</p>
+                  <p className="line-clamp-1 font-medium text-ink" title={seriesTitle(series)}>{seriesTitle(series)}</p>
                   <Badge>{mediaTypeLabel(series.media_type)}</Badge>
                 </div>
                 {series.title_romaji !== null && (
-                  <p className="mt-0.5 text-xs text-ink-secondary">{series.title_romaji}</p>
+                  <p className="mt-0.5 line-clamp-1 text-xs text-ink-muted" title={series.title_romaji}>{series.title_romaji}</p>
                 )}
                 <div className="mt-2 flex items-center gap-2 text-xs text-ink-secondary">
                   <span className="data-text">
@@ -261,7 +280,10 @@ export function LibraryPage() {
                 </div>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="data-text text-sm text-ink">
-                    {stats.organized}/{stats.total}
+                    {t(strings.subscriptions.organizedOfTotal, {
+                      organized: String(stats.organized),
+                      total: String(stats.total),
+                    })}
                   </span>
                   <QualityBadge score={stats.avgQuality === null ? null : Math.round(stats.avgQuality * 10) / 10} />
                 </div>

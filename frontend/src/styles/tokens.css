@@ -1,8 +1,14 @@
 /*
- * Soft Ink 设计 token —— 来源:AutoBangumi DESIGN.md(MIT,规范照搬、代码自写)。
- * 策略:近单色墨色文字 + 中性底色;彩色永远不上正文,只出现在
+ * Soft Ink 设计 token v2(12-C 视觉重设计)。
+ * 策略不变:近单色墨色文字 + 中性底色;彩色永远不上正文,只出现在
  * 小色标(7-10px)、错误边框/文字、主按钮、聚焦环、选中态等白名单位置。
  * 明暗双主题:变量在 :root 定义浅色,.dark 覆盖;组件内禁止硬编码主题色。
+ *
+ * v2 变更(命名全部不变,只调值):
+ * - 主色从灰紫 #6c4ab6 提亮为更鲜明的紫罗兰 #6d5ae6,hover/浅底同步重定
+ * - 中性面提对比:正文 #181c25 更锐,层级(bg/surface/surface-2)更清晰
+ * - 圆角整体 +2px(6/10/14/18),观感更柔和现代
+ * - 阴影改双层(接触影 + 环境影),更接近原生浮层质感
  *
  * 命名说明:DESIGN.md 原文 token 名为 --color-*;为避免与 Tailwind 4
  * @theme 命名空间(--color-*)循环引用,此处统一加 --ink- 前缀,
@@ -11,25 +17,25 @@
 
 :root {
   /* 品牌色 */
-  --ink-primary: #6c4ab6; /* DESIGN.md --color-primary */
-  --ink-primary-hover: #563a92; /* --color-primary-hover */
-  --ink-primary-light: #e8def8; /* --color-primary-light */
-  --ink-primary-alpha: rgba(108, 74, 182, 0.2); /* --color-primary-alpha */
-  --ink-accent: #f97316; /* --color-accent */
+  --ink-primary: #6d5ae6;
+  --ink-primary-hover: #5a47d1;
+  --ink-primary-light: #ece9fc;
+  --ink-primary-alpha: rgba(109, 90, 230, 0.18);
+  --ink-accent: #f97316;
 
   /* 语义色(仅小色标/错误/危险操作) */
-  --ink-success: #22c55e; /* --color-success */
-  --ink-danger: #ef4444; /* --color-danger */
-  --ink-warning: #f59e0b; /* --color-warning */
+  --ink-success: #16a34a;
+  --ink-danger: #e5484d;
+  --ink-warning: #d97706;
 
   /* 中性面 */
-  --ink-bg: #fafafa; /* --color-bg */
-  --ink-surface: #ffffff; /* --color-surface */
-  --ink-surface-2: #f1f4f8; /* --color-surface-2 */
-  --ink-text: #1e293b; /* --color-text */
-  --ink-text-secondary: #64748b; /* --color-text-secondary */
-  --ink-text-muted: #94a3b8; /* --color-text-muted:仅装饰,不用于正文(对比度不足 4.5:1) */
-  --ink-border: #e2e8f0; /* --color-border */
+  --ink-bg: #f6f7f9;
+  --ink-surface: #ffffff;
+  --ink-surface-2: #eef0f4;
+  --ink-text: #181c25;
+  --ink-text-secondary: #5b6472;
+  --ink-text-muted: #8a93a1; /* 仅装饰,不用于正文(对比度不足 4.5:1) */
+  --ink-border: #e4e7ec;
 
   /* 字体 */
   --ink-font-family: Inter, -apple-system, 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
@@ -40,16 +46,16 @@
   --ink-layout-padding: 12px;
   --ink-layout-gap: 10px;
 
-  /* 圆角 */
-  --ink-radius-sm: 4px;
-  --ink-radius-md: 8px;
-  --ink-radius-lg: 12px;
-  --ink-radius-xl: 16px;
+  /* 圆角(v2:整体 +2px,柔和现代) */
+  --ink-radius-sm: 6px;
+  --ink-radius-md: 10px;
+  --ink-radius-lg: 14px;
+  --ink-radius-xl: 18px;
 
-  /* 阴影:软黑 ≤10%,无彩色辉光 */
-  --ink-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --ink-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --ink-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1);
+  /* 阴影(v2:双层 = 接触影 + 环境影;无彩色辉光) */
+  --ink-shadow-sm: 0 1px 2px rgba(16, 20, 30, 0.05);
+  --ink-shadow-md: 0 1px 2px rgba(16, 20, 30, 0.05), 0 4px 12px rgba(16, 20, 30, 0.07);
+  --ink-shadow-lg: 0 2px 4px rgba(16, 20, 30, 0.06), 0 16px 40px rgba(16, 20, 30, 0.12);
 
   /* 动效:仅表达状态 */
   --ink-transition-fast: 150ms;
@@ -75,25 +81,25 @@
 }
 
 .dark {
-  --ink-primary: #9d7cd8;
-  --ink-primary-hover: #b094e4;
-  --ink-primary-light: #2c2440;
-  --ink-primary-alpha: rgba(157, 124, 216, 0.25);
+  --ink-primary: #8f7ff0;
+  --ink-primary-hover: #a396f4;
+  --ink-primary-light: #272243;
+  --ink-primary-alpha: rgba(143, 127, 240, 0.24);
   --ink-accent: #fb923c;
 
-  --ink-success: #4ade80;
-  --ink-danger: #f87171;
-  --ink-warning: #fbbf24;
+  --ink-success: #3fd77a;
+  --ink-danger: #f2666b;
+  --ink-warning: #f0a92e;
 
-  --ink-bg: #0f1117;
-  --ink-surface: #171a21;
-  --ink-surface-2: #1f232d;
-  --ink-text: #e2e8f0;
-  --ink-text-secondary: #94a3b8;
-  --ink-text-muted: #64748b;
-  --ink-border: #2a2f3a;
+  --ink-bg: #0b0d12;
+  --ink-surface: #14171d;
+  --ink-surface-2: #1d212a;
+  --ink-text: #e7eaf0;
+  --ink-text-secondary: #98a1b0;
+  --ink-text-muted: #6b7482;
+  --ink-border: #272c37;
 
-  --ink-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --ink-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --ink-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --ink-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --ink-shadow-md: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --ink-shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.55);
 }

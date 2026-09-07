@@ -26,7 +26,9 @@ import {
   type Column,
 } from '../components'
 import { formatDateTime, pendingStageLabel } from '../lib/views'
+import { Ban, CheckCheck, Inbox, X } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Separator } from '@/components/ui/separator'
 import type { PendingItemDto } from '../api/types'
 
 /** context 草稿值 → 展示文本(缺失显示 —) */
@@ -53,6 +55,13 @@ function fieldViews(item: PendingItemDto): FieldView[] {
 }
 
 const SEGMENT_OPTIONS = ['episode', 'season_pack', 'movie'] as const
+
+/** 原始 stage 字符串 → Badge tone(按原始枚举判断,非展示文案;未知回退 neutral) */
+const stageTone: Record<string, 'info' | 'primary' | 'warning'> = {
+  episode: 'info',
+  season_pack: 'primary',
+  movie: 'warning',
+}
 
 /** 纠正表单 + 草稿字段视图抽屉 */
 function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone: () => void; onClose: () => void }) {
@@ -108,12 +117,14 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
                 key={view.key}
                 className="flex items-center justify-between gap-2 border-b border-line py-2 last:border-b-0"
               >
-                <span className="text-sm text-ink">{view.label}</span>
+                <span className="text-sm text-ink-secondary">{view.label}</span>
                 <span className="data-text text-sm text-ink">{view.value}</span>
               </li>
             ))}
           </ul>
         </section>
+
+        <Separator />
 
         <section>
           <h3 className="text-sm font-medium text-ink">{strings.pending.correctFormTitle}</h3>
@@ -169,7 +180,7 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
                 onChange={(e) => setForm({ ...form, fansub: e.target.value })}
               />
             </Field>
-            <div className="col-span-2 mt-1 flex flex-wrap gap-2">
+            <div className="col-span-2 flex flex-wrap gap-2">
               <Button type="submit" variant="primary" loading={submitting === 'correct'}>
                 {strings.pending.submitCorrect}
               </Button>
@@ -363,7 +374,9 @@ export function PendingPage() {
     {
       key: 'stage',
       header: strings.pending.stage,
-      render: (row) => <Badge>{pendingStageLabel(row.stage)}</Badge>,
+      render: (row) => (
+        <Badge tone={stageTone[row.stage] ?? 'neutral'}>{pendingStageLabel(row.stage)}</Badge>
+      ),
     },
     {
       key: 'reason',
@@ -401,6 +414,7 @@ export function PendingPage() {
           <Button
             size="sm"
             variant="ghost"
+            className={armRejectId === row.id ? 'text-danger' : undefined}
             disabled={busyId === row.id}
             onClick={() => {
               // 单条拒绝与批量一致走 arm 二次确认(B1):第一次点击只切换文案
@@ -412,8 +426,10 @@ export function PendingPage() {
               }
             }}
           >
+            <X aria-hidden className="h-3.5 w-3.5" />
             {armRejectId === row.id
-              ? t(strings.pending.batchRejectAsk, { n: 1 })
+              ? // strings 键本批冻结,文案按设计规范内联
+                '确认拒绝'
               : strings.pending.rejectAction}
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setSelected(row)}>
@@ -438,7 +454,7 @@ export function PendingPage() {
       {/* 批量操作条:选中后才出现;确认/拒绝均需二次点击 */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface px-3 py-2">
-          <span className="text-xs text-ink-secondary">
+          <span className="data-text text-xs text-ink-secondary">
             {t(strings.pending.selectedCount, { n: selectedIds.size })}
           </span>
           <Button
@@ -454,6 +470,7 @@ export function PendingPage() {
               }
             }}
           >
+            <CheckCheck aria-hidden className="h-3.5 w-3.5" />
             {batchArm === 'confirm'
               ? t(strings.pending.batchConfirmAsk, { n: selectedIds.size })
               : strings.pending.batchConfirm}
@@ -471,6 +488,7 @@ export function PendingPage() {
               }
             }}
           >
+            <Ban aria-hidden className="h-3.5 w-3.5" />
             {batchArm === 'reject'
               ? t(strings.pending.batchRejectAsk, { n: selectedIds.size })
               : strings.pending.batchReject}
@@ -499,7 +517,16 @@ export function PendingPage() {
             rows={items}
             rowKey={(row) => row.id}
             loading={loading}
-            empty={<EmptyState title={strings.pending.empty} />}
+            empty={
+              <EmptyState
+                title={
+                  <span className="flex items-center gap-2">
+                    <Inbox aria-hidden className="h-5 w-5 text-ink-muted" />
+                    {strings.pending.empty}
+                  </span>
+                }
+              />
+            }
             footer={
               <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={changePage} />
             }

@@ -6,6 +6,7 @@
  * 数据:GET/POST/DELETE /api/subscriptions。
  */
 import { useCallback, useState } from 'react'
+import { CirclePlus, ExternalLink, Tv } from 'lucide-react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
@@ -32,6 +33,13 @@ const MIKAN_URL = 'https://mikanani.me'
 
 function subscriptionTitle(sub: SubscriptionDto): string {
   return sub.title_cn ?? sub.title_romaji ?? sub.title_jp ?? `#${sub.id}`
+}
+
+/** 状态徽标语义色:active=连载(success)/paused=暂停(warning)/finished=完结(neutral) */
+function subscriptionStatusTone(status: string): 'success' | 'warning' | 'neutral' {
+  if (status === 'active') return 'success'
+  if (status === 'paused') return 'warning'
+  return 'neutral'
 }
 
 function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
@@ -71,16 +79,22 @@ function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
 
   return (
     <Card
-      title={strings.subscriptions.addSubscription}
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          <CirclePlus aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
+          {strings.subscriptions.addSubscription}
+        </span>
+      }
       description={strings.subscriptions.rssHint}
       actions={
         <a
           href={MIKAN_URL}
           target="_blank"
           rel="noreferrer"
-          className="text-xs font-medium text-primary hover:text-primary-hover"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover"
         >
-          {strings.subscriptions.mikanEntry} ↗
+          {strings.subscriptions.mikanEntry}
+          <ExternalLink aria-hidden className="h-3 w-3" />
         </a>
       }
     >
@@ -247,11 +261,13 @@ function SubscriptionRow({
   removing: boolean
 }) {
   return (
-    <div className="flex flex-col gap-2 border-b border-line px-4 py-3 last:border-b-0">
+    <div className="flex flex-col gap-2 border-b border-line px-4 py-2.5 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-ink">{subscriptionTitle(sub)}</span>
         <Badge>{mediaTypeLabel(sub.media_type)}</Badge>
-        <Badge tone="neutral">{subscriptionStatusLabel(sub.status)}</Badge>
+        <Badge tone={subscriptionStatusTone(sub.status)}>
+          {subscriptionStatusLabel(sub.status)}
+        </Badge>
         <Badge>{sub.fansub_pref ?? strings.subscriptions.noFansub}</Badge>
         <span className="ml-auto">
           <Button size="sm" variant="secondary" onClick={() => onEdit(sub)}>
@@ -367,6 +383,7 @@ export function SubscriptionsPage() {
             </div>
           ) : subs.length === 0 ? (
             <div className="p-4">
+              <Tv aria-hidden className="mb-2 h-8 w-8 text-ink-muted" />
               <EmptyState title={strings.subscriptions.empty} />
             </div>
           ) : (
