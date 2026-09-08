@@ -1,6 +1,8 @@
 /*
  * Settings 配置中心(12-E)测试:七标签页 Tabs、跨组 dirty 圆点、
- * applied 三档 toast、密钥留空不进 body/清除提交 null、白名单外字段不出现、
+ * 保存 toast 按档位合并计数、整页 form 回车提交、数字字段范围校验禁保存、
+ * 并发写冲突 409(清草稿 + reload + payload 携带 base_updated_at)、
+ * 密钥留空不进 body/清除提交 null、白名单外字段不出现、
  * qbit-test/notify-test 按钮结果 toast;参考源顺序(A1)与 API Token 本端注入(A3)回归。
  */
 import { screen, waitFor } from '@testing-library/react'
@@ -9,7 +11,7 @@ import { toast } from 'sonner'
 import { SettingsPage } from '../Settings'
 import { renderPage } from '../../test/testUtils'
 import { api, ApiError } from '../../api'
-import { resetMockState } from '../../mocks/handlers'
+import { createMockApi, MOCK_SETTINGS_UPDATED_AT, resetMockState } from '../../mocks/handlers'
 
 /** 切到指定标签页(先等初始加载渲染出 Tabs;dirty 圆点会追加 accessible name,故用 ^ 前缀正则) */
 async function gotoTab(user: ReturnType<typeof userEvent.setup>, tab: string): Promise<void> {
@@ -114,17 +116,17 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 
-  it('保存后 applied 逐字段 toast:immediate 分支(开关)', async () => {
+  it('保存 toast 合并:单字段 immediate 档只弹一条 success(计数描述)', async () => {
     const user = userEvent.setup()
     renderPage(<SettingsPage />)
     await user.click(await screen.findByRole('switch', { name: '启用 LLM 兜底' }))
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() =>
-      expect(successSpy).toHaveBeenCalledWith('启用 LLM 兜底 已生效'),
+      expect(successSpy).toHaveBeenCalledWith('已保存 1 项', { description: '1 项立即生效' }),
     )
   })
 
-  it('保存后 applied 逐字段 toast:scheduler_rebuild 分支(调度字段)', async () => {
+  it('保存 toast 合并:scheduler_rebuild 档计数进描述', async () => {
     const user = userEvent.setup()
     renderPage(<SettingsPage />)
     await gotoTab(user, '调度')
@@ -133,11 +135,11 @@ describe('SettingsPage', () => {
     await user.type(interval, '30')
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() =>
-      expect(successSpy).toHaveBeenCalledWith('RSS 轮询间隔(分钟) 已生效(调度已重建)'),
+      expect(successSpy).toHaveBeenCalledWith('已保存 1 项', { description: '1 项调度重建后生效' }),
     )
   })
 
-  it('保存后 applied 逐字段 toast:requires_restart 分支(连接字段)+ 数字过滤', async () => {
+  it('保存 toast 合并:requires_restart 档走 success 描述,不再弹 warning', async () => {
     const user = userEvent.setup()
     const updateSpy = vi.spyOn(api.settings, 'update')
     renderPage(<SettingsPage />)
@@ -148,10 +150,104 @@ describe('SettingsPage', () => {
     expect(port).toHaveValue('8081')
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() =>
-      expect(warningSpy).toHaveBeenCalledWith('qBittorrent 端口 重启后生效'),
+      expect(successSpy).toHaveBeenCalledWith('已保存 1 项', { description: '1 项重启后生效' }),
     )
+    expect(warningSpy).not.toHaveBeenCalled()
     expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ qbittorrent_port: 8081 }))
     updateSpy.mockRestore()
+  })
+
+  it('保存 toast 洪水合并:跨三个档位各改一项,只弹一条 success + 一条描述', async () => {
+    const user = userEvent.setup()
+    renderPage(<SettingsPage />)
+    // immediate(运行开关)+ scheduler_rebuild(调度)+ requires_restart(端口)
+    await user.click(await screen.findByRole('switch', { name: '试运行模式' }))
+    await gotoTab(user, '调度')
+    const interval = await screen.findByLabelText('RSS 轮询间隔(分钟)')
+    await user.clear(interval)
+    await user.type(interval, '30')
+    await gotoTab(user, '下载器')
+    const port = await screen.findByLabelText('qBittorrent 端口')
+    await user.clear(port)
+    await user.type(port, '8081')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() =>
+      expect(successSpy).toHaveBeenCalledWith('已保存 3 项', {
+        description: '1 项立即生效 · 1 项调度重建后生效 · 1 项重启后生效',
+      }),
+    )
+    expect(successSpy).toHaveBeenCalledTimes(1)
+    expect(warningSpy).not.toHaveBeenCalled()
+  })
+
+  it('数字字段超范围:行内提示 + 保存禁用;修正后恢复(不拦截输入)', async () => {
+    const user = userEvent.setup()
+    renderPage(<SettingsPage />)
+    await gotoTab(user, '调度')
+    const retries = await screen.findByLabelText('下载最大重试')
+    await user.clear(retries)
+    await user.type(retries, '99')
+    expect(await screen.findByText('允许范围 0 ~ 10')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    await user.clear(retries)
+    await user.type(retries, '5')
+    expect(screen.queryByText('允许范围 0 ~ 10')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+  })
+
+  it('整页 form:输入框内回车触发保存,payload 携带 base_updated_at', async () => {
+    const user = userEvent.setup()
+    const updateSpy = vi.spyOn(api.settings, 'update')
+    renderPage(<SettingsPage />)
+    await gotoTab(user, '识别')
+    const model = await screen.findByLabelText('模型')
+    await user.type(model, '-v2{enter}')
+    await waitFor(() => expect(updateSpy).toHaveBeenCalled())
+    await waitSaved()
+    expect(updateSpy.mock.calls[0]![0]).toMatchObject({
+      llm_model: 'deepseek-chat-v2',
+      base_updated_at: MOCK_SETTINGS_UPDATED_AT,
+    })
+    updateSpy.mockRestore()
+  })
+
+  it('并发写冲突 409:提示 settingsChangedElsewhere,清空草稿并以服务端为准 reload', async () => {
+    const user = userEvent.setup()
+    const updateSpy = vi
+      .spyOn(api.settings, 'update')
+      .mockRejectedValueOnce(new ApiError(409, 'settings_changed'))
+    renderPage(<SettingsPage />)
+    await user.click(await screen.findByRole('switch', { name: '试运行模式' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() =>
+      expect(errorSpy).toHaveBeenCalledWith('配置已被其它窗口修改,请刷新页面后再保存'),
+    )
+    // 草稿被清空:dirty 消失、保存按钮回禁用
+    await waitFor(() => {
+      expect(screen.queryByLabelText('运行有未保存更改')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    })
+    updateSpy.mockRestore()
+  })
+
+  it('mock update 409 路径:base_updated_at 不匹配回 settings_changed,成功后 updated_at 前移', async () => {
+    const mockApi = createMockApi()
+    resetMockState()
+    await expect(
+      mockApi.settings.update({ dry_run: true, base_updated_at: 'stale' }),
+    ).rejects.toMatchObject({ status: 409, message: 'settings_changed' })
+    const current = await mockApi.settings.get()
+    expect(current.updated_at).toBe(MOCK_SETTINGS_UPDATED_AT)
+    const out = await mockApi.settings.update({
+      dry_run: true,
+      base_updated_at: current.updated_at ?? null,
+    })
+    expect(out.updated_at).toBeTruthy()
+    expect(out.updated_at).not.toBe(current.updated_at)
+    // 成功保存后 GET 的基线已前移:再带旧基线提交 → 409
+    await expect(
+      mockApi.settings.update({ dry_run: false, base_updated_at: current.updated_at ?? null }),
+    ).rejects.toMatchObject({ status: 409 })
   })
 
   it('密钥留空不进 body;勾选清除提交 null', async () => {
@@ -197,7 +293,7 @@ describe('SettingsPage', () => {
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(updateSpy).toHaveBeenCalled())
     const payload = updateSpy.mock.calls[0]![0] as Record<string, unknown>
-    expect(payload).toEqual({ notify_enabled: true }) // 无白名单外字段混入
+    expect(payload).toEqual({ notify_enabled: true, base_updated_at: MOCK_SETTINGS_UPDATED_AT }) // 无白名单外字段混入(并发基线除外)
     updateSpy.mockRestore()
   })
 

@@ -257,6 +257,31 @@ describe('RssSourcesPage', () => {
     successSpy.mockRestore()
   })
 
+  it('uxfix:无可选季时关联季下出现「去追番」跳转链接(指向 /subscriptions)', async () => {
+    // mockResolvedValue 非 Once:必须显式 restore,否则泄漏到下个用例(订阅列表恒空 → CTA 恒显)
+    const listSpy = vi.spyOn(api.subscriptions, 'list').mockResolvedValue({
+      total: 0,
+      limit: 200,
+      offset: 0,
+      items: [],
+    })
+    try {
+      renderPage(<RssSourcesPage />)
+      const cta = await screen.findByRole('link', { name: '去「追番」创建订阅' })
+      expect(cta).toHaveAttribute('href', '/subscriptions')
+    } finally {
+      listSpy.mockRestore()
+    }
+  })
+
+  it('uxfix:已有可选季时不显示空态跳转链接', async () => {
+    renderPage(<RssSourcesPage />)
+    await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
+    await waitFor(() =>
+      expect(screen.queryByRole('link', { name: '去「追番」创建订阅' })).not.toBeInTheDocument(),
+    )
+  })
+
   it('12-F:立即轮询对停用源返回 409 → toast.warning 提示先启用,不展示成功', async () => {
     const user = userEvent.setup()
     const warningSpy = vi.spyOn(toast, 'warning')

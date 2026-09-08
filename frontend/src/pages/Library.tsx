@@ -3,6 +3,7 @@
  * 数据:GET /api/series(契约假设:series 资源内嵌 seasons[].episodes[] 全树)。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Film, LibraryBig } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../api'
@@ -405,8 +406,15 @@ export function LibraryPage() {
             <LibraryBig aria-hidden className="mb-3 h-10 w-10 text-ink-muted" />
             <EmptyState
               title={strings.library.empty}
-              description={strings.subscriptions.mikanHint}
+              description={strings.uxfix.emptyLibraryHint}
             />
+            {/* 12-UX:空态不再止步于文案,给一条去追番页的直达路径 */}
+            <Link
+              to="/subscriptions"
+              className="mt-2 inline-flex h-7 w-fit items-center gap-1.5 rounded-sm px-2 text-xs font-medium text-ink-secondary transition-colors duration-[var(--ink-transition-fast)] hover:bg-surface-2 hover:text-ink"
+            >
+              {strings.uxfix.emptyRssCta}
+            </Link>
           </div>
         </Card>
       ) : (

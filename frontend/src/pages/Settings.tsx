@@ -1,9 +1,12 @@
 /*
  * Settings —— 配置中心(12-E):七标签页 Tabs(运行|识别|下载器|洗版|调度|通知|环境),
  * 对齐 12-D 后端 SettingsOut/SettingsUpdateIn(39 项白名单,extra=forbid)三档生效语义:
- * immediate / scheduler_rebuild / requires_restart(PUT 响应 applied 逐字段提示)。
+ * immediate / scheduler_rebuild / requires_restart(保存 toast 按档位聚合计数)。
  * 密钥纪律:GET 只回 has_*;PUT 空串 = 不修改、显式 null = 清除(RSS token 惯例);
  * notify_timeout_s 不在后端白名单,不渲染(以代码为准)。
+ * 整页 form 包裹(Tabs 外层):任何输入框回车经隐藏 submit 触发保存;
+ * 数字字段带 NUM_META 范围/单位元数据,超范围行内提示 + 禁保存(不拦截输入)。
+ * 并发写冲突:PUT 携带 GET 的 updated_at 基线,409 settings_changed 时清草稿并 reload。
  * 单一保存按钮(页头)+ 全标签页共享一份 edit 草稿;分组 dirty 在 Tab 上显小圆点;
  * dirty 时路由离开需确认(useBlocker 拦截侧栏点击 + 浏览器返回)。
  */
@@ -32,7 +35,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '../components'
-import type { SettingsDto, SettingsUpdateBody } from '../api/types'
+import type { SettingsDto, SettingsUpdateBody, SettingEffect } from '../api/types'
 
 /** 逗号分隔串 → 参考源数组(split/trim/去空) */
 function parseOrder(raw: string): string[] {
@@ -155,6 +158,57 @@ const FLOAT_KEYS: ReadonlySet<string> = new Set([
   'upgrade_skip_size_gb',
 ])
 
+/** 数字字段元数据:合法范围 + 单位(backend 契约;qbittorrent_port 后端未约定范围,不在此列) */
+interface NumFieldMeta {
+  min: number
+  max: number
+  unit: string
+}
+
+type NumericMetaKey =
+  | 'llm_timeout_s'
+  | 'llm_max_retries'
+  | 'reference_qps'
+  | 'pending_backlog_alert_threshold'
+  | 'rss_poll_interval_minutes'
+  | 'rss_poll_jitter_pct'
+  | 'download_poll_interval_s'
+  | 'download_max_retries'
+  | 'collected_check_days'
+  | 'upgrade_threshold'
+  | 'upgrade_max_per_episode'
+  | 'upgrade_skip_size_gb'
+  | 'mismatch_backfill_budget'
+
+const NUM_META: Record<NumericMetaKey, NumFieldMeta> = {
+  llm_timeout_s: { min: 5, max: 600, unit: strings.uxfix.unitSecond },
+  llm_max_retries: { min: 0, max: 10, unit: strings.uxfix.unitTimes },
+  reference_qps: { min: 0, max: 100, unit: strings.uxfix.unitTimes },
+  pending_backlog_alert_threshold: { min: 1, max: 1000, unit: strings.uxfix.unitTimes },
+  rss_poll_interval_minutes: { min: 1, max: 1440, unit: strings.uxfix.unitMinute },
+  rss_poll_jitter_pct: { min: 0, max: 50, unit: strings.uxfix.unitPercent },
+  download_poll_interval_s: { min: 5, max: 3600, unit: strings.uxfix.unitSecond },
+  download_max_retries: { min: 0, max: 10, unit: strings.uxfix.unitTimes },
+  collected_check_days: { min: 1, max: 365, unit: '天' },
+  upgrade_threshold: { min: 0, max: 100, unit: '分' },
+  upgrade_max_per_episode: { min: 1, max: 10, unit: strings.uxfix.unitTimes },
+  upgrade_skip_size_gb: { min: 0, max: 10000, unit: strings.uxfix.unitGb },
+  mismatch_backfill_budget: { min: 0, max: 10, unit: strings.uxfix.unitTimes },
+}
+
+/** 单个数字字段的范围校验:空串 = 不修改(合法);超范围/非数 → 行内提示文案 */
+function numRangeError(key: DraftKey, edit: SettingsDraft): string | null {
+  const meta = NUM_META[key as NumericMetaKey]
+  if (meta === undefined) return null
+  const raw = edit[key]
+  if (typeof raw !== 'string' || raw === '') return null
+  const value = Number(raw)
+  if (Number.isNaN(value) || value < meta.min || value > meta.max) {
+    return t(strings.uxfix.numberRangeHint, { min: meta.min, max: meta.max })
+  }
+  return null
+}
+
 // ---- 草稿字段按类型分组(dirty 逐值比对与 buildPayload 共用;顺序无关) ----
 const BOOL_KEYS = [
   'dry_run',
@@ -192,47 +246,6 @@ const NUM_KEYS = [
   'mismatch_backfill_budget',
 ] as const
 const SECRET_KEYS = ['llm_api_key', 'qbittorrent_password', 'notify_webhook_url', 'notify_telegram_bot_token'] as const
-
-/** applied 字段 → 展示标签(逐字段生效 toast 用) */
-const FIELD_LABELS: Record<string, string> = {
-  dry_run: strings.settings.dryRun,
-  l2_enabled: strings.settings.l2Enabled,
-  llm_enabled: strings.settings.llmEnabled,
-  llm_model: strings.settings.llmModel,
-  reference_enabled: strings.settings.referenceEnabled,
-  reference_order: strings.settings.referenceOrder,
-  llm_timeout_s: strings.settings.llmTimeout,
-  llm_max_retries: strings.settings.llmMaxRetries,
-  reference_qps: strings.settings.referenceQps,
-  pending_backlog_alert_threshold: strings.settings.pendingBacklogThreshold,
-  log_level: strings.settings.logLevel,
-  scheduler_enabled: strings.settings.schedulerEnabled,
-  rss_poll_interval_minutes: strings.settings.rssPollInterval,
-  rss_poll_jitter_pct: strings.settings.rssPollJitter,
-  download_poll_interval_s: strings.settings.downloadPollInterval,
-  download_max_retries: strings.settings.downloadMaxRetries,
-  collected_check_days: strings.settings.collectedCheckDays,
-  llm_base_url: strings.settings.llmBaseUrl,
-  llm_api_key: strings.settings.llmApiKey,
-  tmdb_api_key: strings.settings.tmdbApiKey,
-  downloader: strings.settings.downloaderKind,
-  qbittorrent_host: strings.settings.qbHost,
-  qbittorrent_port: strings.settings.qbPort,
-  qbittorrent_username: strings.settings.qbUser,
-  qbittorrent_password: strings.settings.qbPassword,
-  notify_enabled: strings.settings.notifyEnabled,
-  notify_webhook_url: strings.settings.notifyWebhookUrl,
-  notify_telegram_bot_token: strings.settings.notifyTelegramToken,
-  notify_telegram_chat_id: strings.settings.notifyTelegramChatId,
-  upgrade_threshold: strings.settings.upgradeThreshold,
-  upgrade_max_per_episode: strings.settings.upgradeMaxPerEpisode,
-  upgrade_copy_policy: strings.settings.upgradeCopyPolicy,
-  upgrade_skip_size_gb: strings.settings.upgradeSkipSizeGb,
-  mismatch_backfill_budget: strings.settings.mismatchBackfillBudget,
-  naming_title_language: strings.settings.namingTitleLanguage,
-  rss_fetch_timeout_s: strings.settings.rssFetchTimeout,
-  rss_fetch_retries: strings.settings.rssFetchRetries,
-}
 
 // ---------------------------------------------------------------------------
 // 密钥行(密码输入 + has_* 占位 + 清除勾选)
@@ -392,6 +405,11 @@ export function SettingsPage() {
 
   const base: SettingsDto = savedSnapshot ?? data
 
+  // 数字字段校验:任一 NUM_META 字段超范围 → 禁保存(行内提示,不拦截输入)
+  const numInvalid = (Object.keys(NUM_META) as NumericMetaKey[]).some(
+    (key) => numRangeError(key, edit) !== null,
+  )
+
   // ---- 展示值:编辑草稿优先,否则回显当前基线 ----
   const boolValue = (key: 'dry_run' | 'l2_enabled' | 'llm_enabled' | 'reference_enabled' | 'scheduler_enabled' | 'notify_enabled'): boolean =>
     edit[key] ?? base[key]
@@ -482,26 +500,49 @@ export function SettingsPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      const savedSettings = await api.settings.update(buildPayload())
+      const payload = buildPayload()
+      // 并发写冲突基线:携带 GET 时的 updated_at,后端不一致回 409
+      payload.base_updated_at = base.updated_at ?? null
+      const savedSettings = await api.settings.update(payload)
       setSavedSnapshot(savedSettings)
       setEdit({})
       setClearSecrets({})
       setOrderDraft(null)
       setSaved(true)
-      toast.success(strings.settings.saved)
       window.setTimeout(() => setSaved(false), 2500)
-      // 12-E:applied 逐字段生效档位 toast
-      for (const [key, effect] of Object.entries(savedSettings.applied)) {
-        const label = FIELD_LABELS[key] ?? key
-        if (effect === 'immediate') toast.success(`${label} ${strings.settings.effectImmediate}`)
-        else if (effect === 'scheduler_rebuild') toast.success(`${label} ${strings.settings.effectScheduler}`)
-        else toast.warning(`${label} ${strings.settings.effectRestart}`)
+      // toast 合并:按生效档位聚合计数(0 的档位省略),替代逐字段弹窗
+      const counts: Record<SettingEffect, number> = {
+        immediate: 0,
+        scheduler_rebuild: 0,
+        requires_restart: 0,
       }
+      for (const effect of Object.values(savedSettings.applied)) counts[effect] += 1
+      const parts: string[] = []
+      if (counts.immediate > 0) parts.push(t(strings.uxfix.savedImmediate, { n: counts.immediate }))
+      if (counts.scheduler_rebuild > 0)
+        parts.push(t(strings.uxfix.savedRebuild, { n: counts.scheduler_rebuild }))
+      if (counts.requires_restart > 0)
+        parts.push(t(strings.uxfix.savedRestart, { n: counts.requires_restart }))
+      toast.success(t(strings.uxfix.savedSummary, { n: Object.keys(savedSettings.applied).length }), {
+        description: parts.join(' · '),
+      })
       if (savedSettings.warnings.length > 0) {
-        toast.warning(`${strings.settings.warningsTitle}: ${savedSettings.warnings.join('; ')}`)
+        toast.warning(t(strings.uxfix.savedWarnings, { n: savedSettings.warnings.length }), {
+          description: savedSettings.warnings.join('; '),
+        })
       }
     } catch (cause) {
-      setSaveError(cause instanceof ApiError ? cause.message : strings.settings.saveFailed)
+      if (cause instanceof ApiError && cause.status === 409 && cause.message.includes('settings_changed')) {
+        // 并发冲突:以服务端为准——提示 + 清空本地草稿 + reload
+        toast.error(strings.uxfix.settingsChangedElsewhere)
+        setSavedSnapshot(null)
+        setEdit({})
+        setClearSecrets({})
+        setOrderDraft(null)
+        reload()
+      } else {
+        setSaveError(cause instanceof ApiError ? cause.message : strings.settings.saveFailed)
+      }
     } finally {
       setSaving(false)
     }
@@ -586,8 +627,44 @@ export function SettingsPage() {
     </SettingRow>
   )
 
+  /** 数字字段行:输入 + 「单位 · 允许范围」说明;超范围时行内红字(只提示不拦截输入) */
+  const numFieldRow = (key: NumericMetaKey, label: string, baseHint?: string): ReactNode => {
+    const meta = NUM_META[key]
+    const err = numRangeError(key, edit)
+    const metaHint = `单位：${meta.unit} · ${t(strings.uxfix.numberRangeHint, { min: meta.min, max: meta.max })}`
+    return (
+      <SettingRow
+        label={label}
+        description={baseHint !== undefined ? `${baseHint}；${metaHint}` : metaHint}
+        htmlFor={`settings-${key}`}
+      >
+        <div className="flex flex-col gap-1">
+          <Input
+            id={`settings-${key}`}
+            inputMode={FLOAT_KEYS.has(key) ? 'decimal' : 'numeric'}
+            value={numValue(key)}
+            onChange={(e) => setNum(key, e.target.value)}
+            className="data-text"
+          />
+          {err !== null && (
+            <p role="alert" className="text-xs text-danger">
+              {err}
+            </p>
+          )}
+        </div>
+      </SettingRow>
+    )
+  }
+
   return (
-    <>
+    /* 整页 form:任一输入框回车经隐藏 submit 触发保存(保存主按钮在页头 form 外,走 onClick);
+       Switch/Button 均为 type="button",不会误触发提交 */
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (dirty && !numInvalid) void save()
+      }}
+    >
       <PageTitle
         title={strings.settings.title}
         description={strings.settings.runtimeHint}
@@ -595,7 +672,7 @@ export function SettingsPage() {
           <>
             {dirty && <span className="text-xs text-ink-secondary">未保存更改</span>}
             {!dirty && saved && <span className="text-xs text-success">{strings.settings.saved}</span>}
-            <Button variant="primary" loading={saving} disabled={!dirty} onClick={() => void save()}>
+            <Button variant="primary" loading={saving} disabled={!dirty || numInvalid} onClick={() => void save()}>
               {strings.common.save}
             </Button>
           </>
@@ -682,24 +759,8 @@ export function SettingsPage() {
                 clearChecked={clearSecrets.llm_api_key === true}
                 onClearChange={(checked) => setClearSecrets((prev) => ({ ...prev, llm_api_key: checked }))}
               />
-              <SettingRow label={strings.settings.llmTimeout} htmlFor="settings-llm-timeout">
-                <Input
-                  id="settings-llm-timeout"
-                  inputMode="decimal"
-                  value={numValue('llm_timeout_s')}
-                  onChange={(e) => setNum('llm_timeout_s', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow label={strings.settings.llmMaxRetries} htmlFor="settings-llm-retries">
-                <Input
-                  id="settings-llm-retries"
-                  inputMode="numeric"
-                  value={numValue('llm_max_retries')}
-                  onChange={(e) => setNum('llm_max_retries', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
+              {numFieldRow('llm_timeout_s', strings.settings.llmTimeout)}
+              {numFieldRow('llm_max_retries', strings.settings.llmMaxRetries)}
               {switchRow(
                 'reference_enabled',
                 strings.settings.referenceEnabled,
@@ -718,19 +779,7 @@ export function SettingsPage() {
                   className="data-text"
                 />
               </SettingRow>
-              <SettingRow
-                label={strings.settings.referenceQps}
-                description={strings.settings.referenceQpsHint}
-                htmlFor="settings-reference-qps"
-              >
-                <Input
-                  id="settings-reference-qps"
-                  inputMode="decimal"
-                  value={numValue('reference_qps')}
-                  onChange={(e) => setNum('reference_qps', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
+              {numFieldRow('reference_qps', strings.settings.referenceQps, strings.settings.referenceQpsHint)}
               <SettingRow label={strings.settings.tmdbApiKey} description={strings.settings.secretHint}>
                 <Badge tone={base.has_tmdb_api_key ? 'success' : 'neutral'} mark>
                   {base.has_tmdb_api_key ? strings.settings.configured : strings.settings.notConfigured}
@@ -806,27 +855,8 @@ export function SettingsPage() {
         <TabsContent value="upgrade">
           <Card title={strings.settings.tabs.upgrade}>
             <div className="divide-y divide-line">
-              <SettingRow label={strings.settings.upgradeThreshold} htmlFor="settings-upgrade-threshold">
-                <Input
-                  id="settings-upgrade-threshold"
-                  inputMode="decimal"
-                  value={numValue('upgrade_threshold')}
-                  onChange={(e) => setNum('upgrade_threshold', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow
-                label={strings.settings.upgradeMaxPerEpisode}
-                htmlFor="settings-upgrade-max"
-              >
-                <Input
-                  id="settings-upgrade-max"
-                  inputMode="numeric"
-                  value={numValue('upgrade_max_per_episode')}
-                  onChange={(e) => setNum('upgrade_max_per_episode', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
+              {numFieldRow('upgrade_threshold', strings.settings.upgradeThreshold)}
+              {numFieldRow('upgrade_max_per_episode', strings.settings.upgradeMaxPerEpisode)}
               <SettingRow label={strings.settings.upgradeCopyPolicy} htmlFor="settings-copy-policy">
                 <Select
                   id="settings-copy-policy"
@@ -837,27 +867,8 @@ export function SettingsPage() {
                   <option value="strict">{strings.settings.copyPolicyStrict}</option>
                 </Select>
               </SettingRow>
-              <SettingRow label={strings.settings.upgradeSkipSizeGb} htmlFor="settings-upgrade-skip">
-                <Input
-                  id="settings-upgrade-skip"
-                  inputMode="decimal"
-                  value={numValue('upgrade_skip_size_gb')}
-                  onChange={(e) => setNum('upgrade_skip_size_gb', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow
-                label={strings.settings.mismatchBackfillBudget}
-                htmlFor="settings-backfill-budget"
-              >
-                <Input
-                  id="settings-backfill-budget"
-                  inputMode="numeric"
-                  value={numValue('mismatch_backfill_budget')}
-                  onChange={(e) => setNum('mismatch_backfill_budget', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
+              {numFieldRow('upgrade_skip_size_gb', strings.settings.upgradeSkipSizeGb)}
+              {numFieldRow('mismatch_backfill_budget', strings.settings.mismatchBackfillBudget)}
               <SettingRow
                 label={strings.settings.namingTitleLanguage}
                 description={strings.settings.namingTitleLanguageHint}
@@ -883,75 +894,15 @@ export function SettingsPage() {
                 strings.settings.schedulerEnabled,
                 strings.settings.schedulerHint,
               )}
-              <SettingRow
-                label={strings.settings.rssPollInterval}
-                htmlFor="settings-rss-interval"
-              >
-                <Input
-                  id="settings-rss-interval"
-                  inputMode="numeric"
-                  value={numValue('rss_poll_interval_minutes')}
-                  onChange={(e) => setNum('rss_poll_interval_minutes', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow label={strings.settings.rssPollJitter} htmlFor="settings-rss-jitter">
-                <Input
-                  id="settings-rss-jitter"
-                  inputMode="numeric"
-                  value={numValue('rss_poll_jitter_pct')}
-                  onChange={(e) => setNum('rss_poll_jitter_pct', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow
-                label={strings.settings.downloadPollInterval}
-                htmlFor="settings-download-interval"
-              >
-                <Input
-                  id="settings-download-interval"
-                  inputMode="numeric"
-                  value={numValue('download_poll_interval_s')}
-                  onChange={(e) => setNum('download_poll_interval_s', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow
-                label={strings.settings.downloadMaxRetries}
-                htmlFor="settings-download-retries"
-              >
-                <Input
-                  id="settings-download-retries"
-                  inputMode="numeric"
-                  value={numValue('download_max_retries')}
-                  onChange={(e) => setNum('download_max_retries', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow
-                label={strings.settings.collectedCheckDays}
-                htmlFor="settings-collected-days"
-              >
-                <Input
-                  id="settings-collected-days"
-                  inputMode="numeric"
-                  value={numValue('collected_check_days')}
-                  onChange={(e) => setNum('collected_check_days', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
-              <SettingRow
-                label={strings.settings.pendingBacklogThreshold}
-                htmlFor="settings-backlog-threshold"
-              >
-                <Input
-                  id="settings-backlog-threshold"
-                  inputMode="numeric"
-                  value={numValue('pending_backlog_alert_threshold')}
-                  onChange={(e) => setNum('pending_backlog_alert_threshold', e.target.value)}
-                  className="data-text"
-                />
-              </SettingRow>
+              {numFieldRow('rss_poll_interval_minutes', strings.settings.rssPollInterval)}
+              {numFieldRow('rss_poll_jitter_pct', strings.settings.rssPollJitter)}
+              {numFieldRow('download_poll_interval_s', strings.settings.downloadPollInterval)}
+              {numFieldRow('download_max_retries', strings.settings.downloadMaxRetries)}
+              {numFieldRow('collected_check_days', strings.settings.collectedCheckDays)}
+              {numFieldRow(
+                'pending_backlog_alert_threshold',
+                strings.settings.pendingBacklogThreshold,
+              )}
             </div>
           </Card>
         </TabsContent>
@@ -1065,6 +1016,8 @@ export function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </>
+      {/* 隐藏提交钮:jsdom/浏览器的表单隐式提交(default button)依赖它,回车即保存 */}
+      <button type="submit" hidden tabIndex={-1} aria-hidden="true" />
+    </form>
   )
 }

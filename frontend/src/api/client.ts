@@ -85,6 +85,57 @@ interface RequestOptions {
   timeoutMs?: number
 }
 
+/** FastAPI 422 校验错误单条:pydantic v2 错误项 {loc, msg, type, ctx} */
+interface FastapiErrorItem {
+  loc?: unknown
+  msg?: unknown
+  type?: unknown
+  ctx?: Record<string, unknown>
+}
+
+/** pydantic 常见校验 type → 人话(其余保留原文 msg) */
+const VALIDATION_TYPE_MAP: Record<string, string> = {
+  missing: '缺失',
+  string_too_short: '过短',
+}
+
+/** 从 pydantic ctx 取数值上限/下限(gt/ge/lt/le 之一) */
+function limitFromCtx(ctx: Record<string, unknown> | undefined): string {
+  if (ctx !== undefined) {
+    for (const key of ['ge', 'gt', 'le', 'lt']) {
+      if (key in ctx) return String(ctx[key])
+    }
+  }
+  return '?'
+}
+
+/** 单条校验错误 → 「字段校验失败:{字段}: {原因}」 */
+function formatValidationItem(item: FastapiErrorItem): string {
+  const loc =
+    Array.isArray(item.loc) && item.loc.length > 0 ? String(item.loc[item.loc.length - 1]) : ''
+  const msg = typeof item.msg === 'string' ? item.msg : ''
+  switch (item.type) {
+    case 'greater_than_equal':
+    case 'less_than_equal':
+    case 'greater_than':
+    case 'less_than': {
+      const op =
+        item.type === 'greater_than_equal'
+          ? '≥'
+          : item.type === 'less_than_equal'
+            ? '≤'
+            : item.type === 'greater_than'
+              ? '>'
+              : '<'
+      return `字段校验失败:${loc}: 需 ${op} ${limitFromCtx(item.ctx)}`
+    }
+    default: {
+      const type = typeof item.type === 'string' ? item.type : undefined
+      return `字段校验失败:${loc}: ${type !== undefined ? (VALIDATION_TYPE_MAP[type] ?? msg) : msg}`
+    }
+  }
+}
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -119,11 +170,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`
-    // FastAPI 错误体假设:{ "detail": string }
+    // FastAPI 错误体:{ "detail": string } 或 422 校验错误 { "detail": [{loc,msg,type,ctx}] }
     try {
       const data = (await response.json()) as { detail?: unknown }
       if (typeof data.detail === 'string') {
         detail = data.detail
+      } else if (Array.isArray(data.detail)) {
+        detail = data.detail.map((item) => formatValidationItem(item as FastapiErrorItem)).join('; ')
       }
     } catch {
       /* 非 JSON 错误体,保留 statusText */

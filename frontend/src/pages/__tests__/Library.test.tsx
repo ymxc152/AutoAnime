@@ -76,6 +76,26 @@ describe('LibraryPage', () => {
     expect(within(dialog).getAllByText(/E04/).length).toBeGreaterThan(0)
   })
 
+  it('uxfix:空库文案不再引用字幕组 hint,并给出「去追番」直达入口', async () => {
+    vi.spyOn(api.series, 'list').mockResolvedValueOnce({
+      total: 0,
+      limit: 24,
+      offset: 0,
+      items: [],
+    })
+    renderPage(<LibraryPage />)
+    // 新文案:讲清空库的成因,而非「每番只订一个字幕组」
+    expect(
+      await screen.findByText('添加订阅并完成导入后,归档的剧集会出现在这里'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/每番只订一个字幕组/)).not.toBeInTheDocument()
+    // 空态卡下方的直达链接指向追番页
+    expect(screen.getByRole('link', { name: '去「追番」创建订阅' })).toHaveAttribute(
+      'href',
+      '/subscriptions',
+    )
+  })
+
   it('12-F:重新识别 —— 先 dry-run 预览展示解析结果与目标路径,确认执行二次确认后移动', async () => {
     // ConfirmHost 未挂载时 confirmDialog 退回 window.confirm,这里确认放行
     vi.spyOn(window, 'confirm').mockReturnValue(true)

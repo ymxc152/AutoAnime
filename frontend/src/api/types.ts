@@ -456,6 +456,8 @@ export interface SettingsDto {
   has_qbittorrent_password: boolean
   has_notify_webhook_url: boolean
   has_notify_telegram_bot_token: boolean
+  // --- 并发写冲突基线(后端 GET 恒返回;mock fixture 由 handlers 补齐,故声明可选) ---
+  updated_at?: string | null
 }
 
 /**
@@ -510,6 +512,8 @@ export interface SettingsUpdateBody {
   naming_title_language?: string
   rss_fetch_timeout_s?: number
   rss_fetch_retries?: number
+  /** 并发写冲突基线:携带 GET 时的 updated_at;与服务端当前值不一致后端回 409 detail=settings_changed */
+  base_updated_at?: string | null
 }
 
 /** 12-E:PUT 生效三档(后端 SettingEffect Literal 透传) */

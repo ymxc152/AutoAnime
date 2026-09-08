@@ -53,6 +53,9 @@ interface MockState {
   nextOpSeq: number
 }
 
+/** mock settings 的初始 updated_at(并发写冲突基线;须在 freshState 首次调用前初始化) */
+export const MOCK_SETTINGS_UPDATED_AT = '2026-09-08T08:00:00.000Z'
+
 let state: MockState = freshState()
 
 function freshState(): MockState {
@@ -62,7 +65,7 @@ function freshState(): MockState {
     audit: clone(mockAudit),
     subscriptions: clone(mockSubscriptions),
     rssSources: clone(mockRssSources),
-    settings: clone(mockSettings),
+    settings: { ...clone(mockSettings), updated_at: MOCK_SETTINGS_UPDATED_AT },
     metrics: clone(mockMetrics),
     nextId: 1000,
     nextOpSeq: 1,
@@ -601,6 +604,15 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
     settings: {
       get: () => delayed(clone(state.settings)),
       update: (body: SettingsUpdateBody) => {
+        // 并发写冲突:base_updated_at 与服务端当前 updated_at 不一致 → 409(固定 detail,对齐后端契约)
+        if (
+          body.base_updated_at !== undefined &&
+          body.base_updated_at !== (state.settings.updated_at ?? null)
+        ) {
+          return delayed(clone(state.settings)).then(() => {
+            throw new ApiError(409, 'settings_changed')
+          })
+        }
         // 三档白名单(与后端 settings.py 的 _IMMEDIATE/_SCHEDULER/_RESTART 集合一致)
         const immediate = new Set([
           'dry_run',
@@ -635,6 +647,7 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           scheduler.has(key) ? 'scheduler_rebuild' : immediate.has(key) ? 'immediate' : 'requires_restart'
         const applied: Record<string, SettingEffect> = {}
         for (const [key, value] of Object.entries(body)) {
+          if (key === 'base_updated_at') continue // 并发基线,非配置字段
           if (key in secretHasField) {
             if (value === null) {
               // 显式 null = 清除(删 DB 覆盖回落 env/toml)
@@ -651,6 +664,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           ;(state.settings as unknown as Record<string, unknown>)[key] = value
           applied[key] = effectFor(key)
         }
+        // 保存成功 → 服务端 updated_at 前移(下次 PUT 的冲突基线随之变化)
+        state.settings.updated_at = new Date().toISOString()
         return delayed({ ...clone(state.settings), applied, warnings: [] })
       },
       // 12-E:notify-test —— 按 has_* 构造通道结果(未配置通道跳过)

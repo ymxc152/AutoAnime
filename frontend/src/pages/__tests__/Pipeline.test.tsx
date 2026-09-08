@@ -261,4 +261,74 @@ describe('PipelinePage', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认并学习' }))
     expect(await screen.findByText('name resolved to an empty title')).toBeInTheDocument()
   })
+
+  it('UXfix:试跑文件名为空时行内提示且不调用后端', async () => {
+    const parsePreviewSpy = vi.spyOn(api.pipeline, 'parsePreview')
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.click(screen.getByRole('button', { name: '试跑解析' }))
+    expect(await screen.findByText('请先输入要试跑的文件名')).toBeInTheDocument()
+    expect(parsePreviewSpy).not.toHaveBeenCalled()
+  })
+
+  it('UXfix:导入目录为空时行内提示且不调用后端', async () => {
+    const startImportSpy = vi.spyOn(api.pipeline, 'startImport')
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
+    expect(await screen.findByText('请先输入要导入的目录路径')).toBeInTheDocument()
+    expect(startImportSpy).not.toHaveBeenCalled()
+  })
+
+  it('UXfix:试跑结果展示结构化中文卡片,原始 JSON 默认折叠', async () => {
+    vi.spyOn(api.pipeline, 'parsePreview').mockResolvedValueOnce({
+      route: 'archive',
+      result: {
+        title: 'Show', season: 1, episode: 1, segment: 'episode', fansub: 'Kamigakari',
+        level: 'high', confidence: 1, missing_fields: [], evidence: {},
+      },
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('单文件解析试跑'), { target: { value: 'Show S01E01 1080p.mkv' } })
+    fireEvent.click(screen.getByRole('button', { name: '试跑解析' }))
+    const card = await screen.findByTestId('preview-result-card')
+    expect(card).toHaveTextContent('试跑结果')
+    expect(card).toHaveTextContent('Show')
+    expect(card).toHaveTextContent('单集')
+    expect(card).toHaveTextContent('Kamigakari')
+    expect(card).toHaveTextContent('HIGH:自动归档')
+    // 原始 JSON 默认收起,展开后可见(dump 的是 result 本体,不含外层 route)
+    expect(within(card).getByText(/"title": "Show"/)).not.toBeVisible()
+    fireEvent.click(within(card).getByText('查看原始 JSON'))
+    await waitFor(() => expect(within(card).getByText(/"title": "Show"/)).toBeVisible())
+  })
+
+  it('UXfix:试跑解析不出字段时显示空结果提示', async () => {
+    vi.spyOn(api.pipeline, 'parsePreview').mockResolvedValueOnce({ route: 'failed', result: null })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('单文件解析试跑'), { target: { value: '???.mkv' } })
+    fireEvent.click(screen.getByRole('button', { name: '试跑解析' }))
+    expect(
+      await screen.findByText('未能解析出有效字段;这类命名建议在「待确认」页人工纠正后学习'),
+    ).toBeInTheDocument()
+  })
+
+  it('UXfix:导入运行中轮询到 processed/total 时显示已处理进度', async () => {
+    vi.spyOn(api.pipeline, 'startImport').mockResolvedValueOnce({ task_id: 'task-2', status: 'running' })
+    // 第二次轮询永不返回:保持 running 态以便断言进度文案
+    vi.spyOn(api.pipeline, 'task')
+      .mockResolvedValueOnce({
+        task_id: 'task-2', kind: 'import', status: 'running', directory: 'D:/downloads',
+        dry_run: true, created_at: '', finished_at: null, processed: 1, total: 3,
+        summary: null, error: null,
+      })
+      .mockReturnValueOnce(new Promise(() => {}))
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('导入目录'), { target: { value: 'D:/downloads' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
+    expect(await screen.findByText(/已处理 1\/3/)).toBeInTheDocument()
+  })
 })

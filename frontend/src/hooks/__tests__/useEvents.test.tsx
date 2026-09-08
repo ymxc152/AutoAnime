@@ -161,6 +161,69 @@ describe('useEvents', () => {
     expect(registry.length).toBe(8)
   })
 
+  it('12-UX:静默断链兜底 —— open 态 65s 无消息主动重连,消息恢复后回 open', async () => {
+    const registry: FakeEventSource[] = []
+    const { result } = renderHook(() =>
+      useEvents({ onEvent: () => {}, factory: makeFactory(registry) }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const first = registry[0]!
+    act(() => first.open())
+    act(() => {
+      first.emit(sseMessage({ id: '1', category: 'system', message: '心跳' }))
+    })
+    expect(result.current.status).toBe('open')
+
+    // 服务端死亡且代理静默吞掉断链(onerror 不触发):65s 无任何消息判死。
+    // 检查定时器 5s 间隔,70s 处首次满足 >65s;先推进到触发点,再走 1s 退避。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(70_000)
+    })
+    expect(first.closed).toBe(true)
+    expect(result.current.status).toBe('reconnecting')
+    expect(result.current.attempt).toBe(1)
+    expect(registry.length).toBe(1) // 退避期内不重连
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(registry.length).toBe(2)
+
+    // 新链路消息恢复 → 回 open,重连计数归零
+    act(() => registry[1]!.open())
+    expect(result.current.status).toBe('open')
+    act(() => {
+      registry[1]!.emit(sseMessage({ id: '2', category: 'system', message: 'ok' }))
+    })
+    expect(result.current.attempt).toBe(0)
+  })
+
+  it('12-UX:静默计时被消息重置,持续心跳不会误判断链', async () => {
+    const registry: FakeEventSource[] = []
+    const { result } = renderHook(() =>
+      useEvents({ onEvent: () => {}, factory: makeFactory(registry) }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const source = registry[0]!
+    act(() => source.open())
+
+    // 每 60s 一条心跳(短于 65s 静默阈值):累计 180s 也不应触发重连
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000)
+      })
+      act(() => {
+        source.emit(sseMessage({ id: String(i), category: 'system', message: '心跳' }))
+      })
+    }
+    expect(result.current.status).toBe('open')
+    expect(registry.length).toBe(1)
+  })
+
   it('enabled=false 不建连且状态 closed', () => {
     const registry: FakeEventSource[] = []
     const { result } = renderHook(() =>

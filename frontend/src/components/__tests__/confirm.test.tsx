@@ -1,6 +1,7 @@
 /*
  * ConfirmHost 单测:Esc 关闭以 false resolve;确认/取消正常落地;
- * 并发请求时前一个未决确认被覆盖、以 false 安全 resolve(不悬挂)。
+ * 并发请求排队 —— 同一时刻只显示一个,前一个 settle 后第二个才出现,
+ * 各自以用户选择 resolve(12-UX:不再静默覆盖未决请求)。
  */
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -39,14 +40,20 @@ describe('ConfirmHost', () => {
     await expect(second).resolves.toBe(false)
   })
 
-  it('并发:前一个未决确认被第二个覆盖,以 false 安全 resolve', async () => {
+  it('并发:请求排队,前一个 settle 后第二个才出现且各自 resolve(12-UX)', async () => {
+    const user = userEvent.setup()
     render(<ConfirmHost />)
     const first = ask('第一个确认')
     expect(await screen.findByText('第一个确认')).toBeInTheDocument()
     const second = ask('第二个确认')
-    await expect(first).resolves.toBe(false)
+    // 第二个入队等待:仍只显示第一个
+    expect(screen.queryByText('第二个确认')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    await expect(first).resolves.toBe(true)
+    // 第一个 settle 后第二个才弹出,并以自己的选择落地
     expect(await screen.findByText('第二个确认')).toBeInTheDocument()
-    await userEvent.setup().click(screen.getByRole('button', { name: '确认' }))
-    await expect(second).resolves.toBe(true)
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await expect(second).resolves.toBe(false)
+    expect(screen.queryByText('第二个确认')).not.toBeInTheDocument()
   })
 })

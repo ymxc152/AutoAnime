@@ -99,4 +99,40 @@ describe('DashboardPage', () => {
     // 其余区块不受影响
     expect(screen.getByText('人工介入率')).toBeInTheDocument()
   })
+
+  it('uxfix:订阅数为 0 时顶部显示三步引导卡,三个步骤分别跳转对应页面', async () => {
+    // mockResolvedValue 非 Once:必须显式 restore,否则泄漏到下个用例(订阅恒空 → 引导卡恒显)
+    const listSpy = vi.spyOn(api.subscriptions, 'list').mockResolvedValue({
+      total: 0,
+      limit: 1,
+      offset: 0,
+      items: [],
+    })
+    try {
+      renderPage(<DashboardPage />)
+      expect(await screen.findByText('三步开始使用')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /在「追番」页添加订阅/ })).toHaveAttribute(
+        'href',
+        '/subscriptions',
+      )
+      expect(screen.getByRole('link', { name: /在「RSS 源」页挂上 Mikan 订阅地址/ })).toHaveAttribute(
+        'href',
+        '/rss-sources',
+      )
+      expect(screen.getByRole('link', { name: /在「管线」页导入本地下载目录/ })).toHaveAttribute(
+        'href',
+        '/pipeline',
+      )
+    } finally {
+      listSpy.mockRestore()
+    }
+  })
+
+  it('uxfix:已有订阅时不显示三步引导卡', async () => {
+    renderPage(<DashboardPage />)
+    await screen.findByText('人工介入率')
+    await waitFor(() => {
+      expect(screen.queryByText('三步开始使用')).not.toBeInTheDocument()
+    })
+  })
 })

@@ -95,6 +95,56 @@ const categoryTone: Record<
 
 const STEP_MS = 900
 
+type SegmentKey = keyof typeof strings.pending.segment
+
+/**
+ * UXfix:试跑结果结构化小卡片(替代裸 JSON.stringify)。
+ * 字段口径对齐后端 ParsePreviewOut(route/result{title,season,episode,segment,
+ * fansub,level,confidence,missing_fields,evidence},见 web/routers/pipeline.py)。
+ */
+function PreviewResult({ preview }: { preview: ParsePreviewResponse }) {
+  const result = preview.result
+  if (result === null) {
+    return <p className="text-xs text-ink-secondary">{strings.uxfix.parsePreviewEmpty}</p>
+  }
+  const segment = strings.pending.segment[result.segment as SegmentKey] ?? result.segment
+  const verdict =
+    result.level === 'high'
+      ? strings.uxfix.verdictHigh
+      : result.level === 'medium'
+        ? strings.uxfix.verdictMedium
+        : result.level === 'low'
+          ? strings.uxfix.verdictLow
+          : result.level
+  return (
+    <div className="rounded-sm bg-surface-2 px-2 py-1.5 text-xs" data-testid="preview-result-card">
+      <p className="font-medium text-ink">{strings.uxfix.parsePreviewTitle}</p>
+      <dl className="data-text mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+        <dt className="text-ink-secondary">{strings.pending.fieldTitle}</dt>
+        <dd className="text-ink">{result.title}</dd>
+        <dt className="text-ink-secondary">{strings.pending.fieldSeason}</dt>
+        <dd className="text-ink">{result.season ?? '—'}</dd>
+        <dt className="text-ink-secondary">{strings.pending.fieldEpisode}</dt>
+        <dd className="text-ink">{result.episode ?? '—'}</dd>
+        <dt className="text-ink-secondary">{strings.pending.fieldSegment}</dt>
+        <dd className="text-ink">{segment}</dd>
+        <dt className="text-ink-secondary">{strings.pending.fieldFansub}</dt>
+        <dd className="text-ink">{result.fansub ?? '—'}</dd>
+        <dt className="text-ink-secondary">{strings.uxfix.previewConfidenceLabel}</dt>
+        <dd className="text-ink">
+          {result.level} · {Math.round(result.confidence * 100)}%
+        </dd>
+        <dt className="text-ink-secondary">{strings.uxfix.previewVerdictLabel}</dt>
+        <dd className="text-ink">{verdict}</dd>
+      </dl>
+      <details className="mt-1.5">
+        <summary className="cursor-pointer text-ink-secondary">{strings.uxfix.showRawJson}</summary>
+        <pre className="data-text mt-1 overflow-x-auto text-xs">{JSON.stringify(preview.result, null, 2)}</pre>
+      </details>
+    </div>
+  )
+}
+
 
 function ManualOperations() {
   const [parseName, setParseName] = useState('')
@@ -104,12 +154,16 @@ function ManualOperations() {
   const [preview, setPreview] = useState<ParsePreviewResponse | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  // UXfix:空文件名不再静默 no-op,行内提示必填
+  const [parseNameError, setParseNameError] = useState<string | null>(null)
 
   const [directory, setDirectory] = useState('')
   const [dryRun, setDryRun] = useState(true)
   const [task, setTask] = useState<PipelineTask | null>(null)
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  // UXfix:空导入路径不再静默 no-op,行内提示必填
+  const [importDirError, setImportDirError] = useState<string | null>(null)
 
   // 12-F:run-once scope 三选(后端 SchedulerRunIn.scope: all/rss/download),默认 all
   const [scope, setScope] = useState<SchedulerScope>('all')
@@ -118,7 +172,11 @@ function ManualOperations() {
   const [schedulerError, setSchedulerError] = useState<string | null>(null)
 
   const submitPreview = async (): Promise<void> => {
-    if (parseName.trim() === '') return
+    if (parseName.trim() === '') {
+      setParseNameError(strings.uxfix.parseNameRequired)
+      return
+    }
+    setParseNameError(null)
     setPreviewBusy(true)
     setPreviewError(null)
     try {
@@ -153,7 +211,11 @@ function ManualOperations() {
   }
 
   const submitImport = async (): Promise<void> => {
-    if (directory.trim() === '') return
+    if (directory.trim() === '') {
+      setImportDirError(strings.uxfix.importPathRequired)
+      return
+    }
+    setImportDirError(null)
     setImportBusy(true)
     setImportError(null)
     try {
@@ -192,7 +254,12 @@ function ManualOperations() {
             void submitPreview()
           }}
         >
-          <Field label={strings.pipeline.parseName} description={strings.pipeline.parseNameHint} htmlFor="pipeline-parse-name">
+          <Field
+            label={strings.pipeline.parseName}
+            description={strings.pipeline.parseNameHint}
+            htmlFor="pipeline-parse-name"
+            error={parseNameError}
+          >
             <Input
               id="pipeline-parse-name"
               value={parseName}
@@ -223,11 +290,7 @@ function ManualOperations() {
             {strings.pipeline.parsePreview}
           </Button>
           {previewError !== null && <p role="alert" className="text-xs text-danger">{previewError}</p>}
-          {preview !== null && (
-            <pre className="data-text overflow-x-auto rounded-sm bg-surface-2 px-2 py-1.5 text-xs">
-              {typeof preview === 'string' ? preview : JSON.stringify(preview.result, null, 2)}
-            </pre>
-          )}
+          {preview !== null && <PreviewResult preview={preview} />}
         </form>
 
         <form
@@ -237,7 +300,7 @@ function ManualOperations() {
             void submitImport()
           }}
         >
-          <Field label={strings.pipeline.importDirectory} htmlFor="pipeline-import-directory">
+          <Field label={strings.pipeline.importDirectory} htmlFor="pipeline-import-directory" error={importDirError}>
             <Input
               id="pipeline-import-directory"
               value={directory}
@@ -258,7 +321,10 @@ function ManualOperations() {
           {task !== null && (
             <p className="text-xs text-ink-secondary data-text">
               {task.status === 'running'
-                ? strings.pipeline.running
+                ? // UXfix:轮询到 processed/total 时显示导入进度
+                  task.total !== null
+                  ? `${strings.pipeline.running} · ${t(strings.uxfix.importProgress, { done: task.processed, total: task.total })}`
+                  : strings.pipeline.running
                 : task.status === 'completed'
                   ? strings.pipeline.completed
                   : strings.pipeline.failed}
@@ -288,9 +354,31 @@ function ManualOperations() {
           </Button>
           {schedulerError !== null && <p role="alert" className="text-xs text-danger">{schedulerError}</p>}
           {schedulerResult !== null && (
-            <pre className="data-text overflow-x-auto rounded-sm bg-surface-2 px-2 py-1.5 text-xs">
-              {JSON.stringify(schedulerResult, null, 2)}
-            </pre>
+            // UXfix:run-once 结果轻量摘要(数值统计逐项列出),原始 JSON 折叠收起
+            <div className="rounded-sm bg-surface-2 px-2 py-1.5 text-xs" data-testid="run-once-summary">
+              <ul className="flex flex-col gap-0.5">
+                {Object.entries(schedulerResult.reports).map(([key, report]) => {
+                  const stats = Object.entries(report)
+                    .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+                    .map(([statKey, value]) => `${statKey} ${value}`)
+                  return (
+                    <li key={key} className="data-text text-ink">
+                      {key}
+                      {stats.length > 0 && ` · ${stats.join(' · ')}`}
+                    </li>
+                  )
+                })}
+              </ul>
+              {schedulerResult.errors.length > 0 && (
+                <p className="mt-1 text-danger">
+                  {t(strings.uxfix.savedWarnings, { n: schedulerResult.errors.length })}
+                </p>
+              )}
+              <details className="mt-1.5">
+                <summary className="cursor-pointer text-ink-secondary">{strings.uxfix.showRawJson}</summary>
+                <pre className="data-text mt-1 overflow-x-auto text-xs">{JSON.stringify(schedulerResult, null, 2)}</pre>
+              </details>
+            </div>
           )}
         </div>
       </div>

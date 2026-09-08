@@ -4,7 +4,18 @@
  * llm_call_curve_weekly/pending_open/episode_states)。
  */
 import { useCallback } from 'react'
-import { ChartLine, Check, Inbox, Sparkles, UserRoundCog, type LucideIcon } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import {
+  ChartLine,
+  Check,
+  CircleDot,
+  FolderDown,
+  Inbox,
+  Rss,
+  Sparkles,
+  UserRoundCog,
+  type LucideIcon,
+} from 'lucide-react'
 import { api } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnCategories } from '../hooks/useReloadOnEvent'
@@ -161,6 +172,47 @@ const LEVEL_LABELS: Record<number, string> = {
 }
 
 /**
+ * 12-UX:新手三步引导卡 —— 订阅数为 0(首次使用)时顶部展示,
+ * 三行均可点击直达对应页面;一旦有订阅(total > 0)整卡消失,纯静态指引不记状态。
+ */
+function OnboardingCard() {
+  const fetcher = useCallback(() => api.subscriptions.list({ limit: 1 }), [])
+  const { data } = useApi(fetcher)
+
+  if (data === null || data.total > 0) {
+    return null
+  }
+
+  const steps: { icon: LucideIcon; label: string; to: string }[] = [
+    { icon: CircleDot, label: strings.uxfix.onboardingStep1, to: '/subscriptions' },
+    { icon: Rss, label: strings.uxfix.onboardingStep2, to: '/rss-sources' },
+    { icon: FolderDown, label: strings.uxfix.onboardingStep3, to: '/pipeline' },
+  ]
+
+  return (
+    <Card title={strings.uxfix.onboardingTitle} flush className="mb-3">
+      <nav className="flex flex-col px-2 pb-2">
+        {steps.map(({ icon: Icon, label, to }) => (
+          <Link
+            key={to}
+            to={to}
+            className="flex items-center gap-2.5 rounded-sm px-2 py-2 text-sm text-ink-secondary transition-colors duration-[var(--ink-transition-fast)] hover:bg-surface-2 hover:text-ink"
+          >
+            <span
+              aria-hidden
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm bg-surface-2 text-ink-muted"
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </span>
+            {label}
+          </Link>
+        ))}
+      </nav>
+    </Card>
+  )
+}
+
+/**
  * 12-F:「识别指标」区块 —— GET /api/report(CLI report --json 同构)。
  * 与上方指标卡互补:这里放「累计学习成效」视角(总解析/LLM 兜底/
  * 归档事件/人工纠正),不与按周期聚合的三级管线统计重复。
@@ -264,6 +316,8 @@ export function DashboardPage() {
   return (
     <>
       <PageTitle title={strings.dashboard.title} description={strings.app.tagline} />
+      {/* 12-UX:首次使用(订阅数 0)时的新手三步引导卡,位于指标卡之上 */}
+      <OnboardingCard />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <MetricCard
           label={strings.dashboard.manualInterventionRate}

@@ -3,6 +3,7 @@
  * 数据:GET/POST/PATCH/DELETE /api/rss_sources。
  */
 import { useCallback, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { RefreshCw, Rss } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '../api'
@@ -151,6 +152,15 @@ function AddSourceForm({
               </option>
             ))}
           </Select>
+          {/* 12-UX:无可选季时不再让用户自己找侧栏,给一条去追番页的直达路径 */}
+          {seasonOptions.length === 0 && (
+            <Link
+              to="/subscriptions"
+              className="inline-flex h-7 w-fit items-center gap-1.5 self-start rounded-sm px-2 text-xs font-medium text-ink-secondary transition-colors duration-[var(--ink-transition-fast)] hover:bg-surface-2 hover:text-ink"
+            >
+              {strings.uxfix.emptyRssCta}
+            </Link>
+          )}
         </Field>
         <Field label={strings.rssSources.token} description={strings.rssSources.tokenHint} htmlFor="rss-token">
           <Input

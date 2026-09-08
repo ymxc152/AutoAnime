@@ -8,6 +8,8 @@
  * 原因(可选);快速确认仍无 body 直采。
  */
 import { useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
@@ -212,6 +214,7 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
 const PAGE_SIZE = 20
 
 export function PendingPage() {
+  const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const fetcher = useCallback(
     () =>
@@ -242,8 +245,8 @@ export function PendingPage() {
   const total = data?.total ?? 0
 
   const changePage = (next: number): void => {
+    // 12-UX:翻页不再清空选择 —— selectedIds 跨页保留,批量操作按 id 集合提交
     setPage(next)
-    setSelectedIds(new Set())
     setBatchArm(null)
     setRejectInputId(null)
   }
@@ -304,9 +307,13 @@ export function PendingPage() {
     )
     const succeeded: number[] = []
     const failed: number[] = []
+    const invalid: number[] = []
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
         succeeded.push(ids[index]!)
+      } else if (result.reason instanceof ApiError && result.reason.status === 404) {
+        // 12-UX:条目已不在库(404)——从选择中剔除,不算可重试失败
+        invalid.push(ids[index]!)
       } else {
         failed.push(ids[index]!)
       }
@@ -316,9 +323,15 @@ export function PendingPage() {
       for (const id of succeeded) {
         next.delete(id)
       }
+      for (const id of invalid) {
+        next.delete(id)
+      }
       return next
     })
     setBatchArm(null)
+    if (invalid.length > 0) {
+      toast.warning(t(strings.uxfix.batchInvalidRemoved, { n: invalid.length }))
+    }
     if (failed.length > 0) {
       setActionError(t(strings.pending.batchPartialFailed, { n: failed.length }))
     }
@@ -348,6 +361,11 @@ export function PendingPage() {
   }
 
   const allPageSelected = items.length > 0 && items.every((item) => selectedIds.has(item.id))
+
+  // 12-UX:跨页保留提示 —— 存在不在当前页的选中项时,在批量条里提示保留了多少条
+  const crossPageSelectedCount = [...selectedIds].filter(
+    (id) => !items.some((item) => item.id === id),
+  ).length
 
   const toggleAllPage = (): void => {
     setBatchArm(null)
@@ -513,6 +531,11 @@ export function PendingPage() {
           <span className="data-text text-xs text-ink-secondary">
             {t(strings.pending.selectedCount, { n: selectedIds.size })}
           </span>
+          {crossPageSelectedCount > 0 && (
+            <span className="data-text text-xs text-ink-muted">
+              {t(strings.uxfix.selectionKept, { n: crossPageSelectedCount })}
+            </span>
+          )}
           <Button
             size="sm"
             variant="primary"
@@ -589,6 +612,12 @@ export function PendingPage() {
                     <Inbox aria-hidden className="h-5 w-5 text-ink-muted" />
                     {strings.pending.empty}
                   </span>
+                }
+                action={
+                  // 12-UX:空态给下一步入口,引导去管线页试跑
+                  <Button variant="ghost" onClick={() => navigate('/pipeline')}>
+                    {strings.uxfix.emptyPendingCta}
+                  </Button>
                 }
               />
             }

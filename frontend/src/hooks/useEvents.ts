@@ -18,6 +18,13 @@ export type EventsStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
 const RETRY_BASE_MS = 1000
 const RETRY_MAX_MS = 30_000
 
+// 12-UX:静默断链兜底 —— vite 代理 / nginx 反代下后端进程死亡时断链是静默的,
+// EventSource 收不到 onerror,UI 会永远停在「事件流已连接」。服务端心跳 30s,
+// 这里取 65s(两个心跳周期 + 余量)无任何消息即判链路已死,主动 close 并走
+// 既有退避重连路径。
+const STALE_MS = 65_000
+const STALE_CHECK_INTERVAL_MS = 5_000
+
 export interface UseEventsResult {
   status: EventsStatus
   /** 当前重连尝试次数(链路恢复后归零) */
@@ -81,9 +88,21 @@ export function useEvents(options: UseEventsOptions): UseEventsResult {
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     let attempts = 0
     let lastEventId = ''
+    // 12-UX:最后收到消息的时刻;connect 与每条消息都刷新,作为静默断链检测基准
+    let lastMsgAt = Date.now()
+
+    const scheduleReconnect = (): void => {
+      attempts += 1
+      setAttempt(attempts)
+      setStatus('reconnecting')
+      const backoff = Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS)
+      retryTimer = setTimeout(connect, backoff)
+    }
 
     const connect = (): void => {
       if (disposed) return
+      // 新连接给满 STALE_MS 的宽限,避免刚建连就被判死
+      lastMsgAt = Date.now()
       setStatus(attempts === 0 ? 'connecting' : 'reconnecting')
       const make = factoryRef.current
       if (!make) return
@@ -95,6 +114,8 @@ export function useEvents(options: UseEventsOptions): UseEventsResult {
       })
       handle.onMessage((message) => {
         if (disposed) return
+        // 收到任何消息都刷新链路健康基准(12-UX:静默断链兜底)
+        lastMsgAt = Date.now()
         if (message.lastEventId) {
           lastEventId = message.lastEventId
         }
@@ -113,19 +134,27 @@ export function useEvents(options: UseEventsOptions): UseEventsResult {
         if (disposed) return
         handle?.close()
         handle = null
-        attempts += 1
-        setAttempt(attempts)
-        setStatus('reconnecting')
-        const backoff = Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS)
-        retryTimer = setTimeout(connect, backoff)
+        scheduleReconnect()
       })
     }
 
     connect()
 
+    // 12-UX:静默断链兜底 —— open 态超过 STALE_MS 无任何消息(正常心跳 30s)
+    // 即判链路已死:主动 close 并走与 onError 相同的退避重连路径。代理层吞掉
+    // 断链错误时这是唯一的感知手段;收到任何消息即重置计时,不误判。
+    const staleTimer = setInterval(() => {
+      if (disposed || handle === null) return
+      if (Date.now() - lastMsgAt <= STALE_MS) return
+      handle.close()
+      handle = null
+      scheduleReconnect()
+    }, STALE_CHECK_INTERVAL_MS)
+
     return () => {
       disposed = true
       if (retryTimer) clearTimeout(retryTimer)
+      clearInterval(staleTimer)
       handle?.close()
       handle = null
     }

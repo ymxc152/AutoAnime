@@ -52,3 +52,57 @@ describe('request auth handling', () => {
     }
   })
 })
+
+describe('request 422 validation detail formatting', () => {
+  function respondWith(detail: unknown): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ detail }), { status: 422 })),
+    )
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('数组 detail:大于等于校验 → 字段 + 需 ≥ 限值(pydantic ctx.ge)', async () => {
+    respondWith([
+      { type: 'greater_than_equal', loc: ['body', 'season'], msg: 'Input should be greater than or equal to 1', ctx: { ge: 1 } },
+    ])
+    const error = await request('/api/pipeline/confirm-name').catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).status).toBe(422)
+    expect((error as ApiError).message).toBe('字段校验失败:season: 需 ≥ 1')
+  })
+
+  it('数组 detail:小于等于校验 → 需 ≤ 限值', async () => {
+    respondWith([
+      { type: 'less_than_equal', loc: ['body', 'season'], msg: 'Input should be less than or equal to 1000', ctx: { le: 1000 } },
+    ])
+    const error = await request('/api/pipeline/confirm-name').catch((cause: unknown) => cause)
+    expect((error as ApiError).message).toBe('字段校验失败:season: 需 ≤ 1000')
+  })
+
+  it('数组 detail:missing / string_too_short 映射为人话', async () => {
+    respondWith([
+      { type: 'missing', loc: ['body', 'name'], msg: 'Field required' },
+      { type: 'string_too_short', loc: ['body', 'name'], msg: 'String should have at least 1 character', ctx: { min_length: 1 } },
+    ])
+    const error = await request('/api/pipeline/confirm-name').catch((cause: unknown) => cause)
+    expect((error as ApiError).message).toBe('字段校验失败:name: 缺失; 字段校验失败:name: 过短')
+  })
+
+  it('数组 detail:未知 type 保留 pydantic 原文 msg', async () => {
+    respondWith([
+      { type: 'value_error', loc: ['body', 'directory'], msg: 'value is not a valid directory' },
+    ])
+    const error = await request('/api/pipeline/import').catch((cause: unknown) => cause)
+    expect((error as ApiError).message).toBe('字段校验失败:directory: value is not a valid directory')
+  })
+
+  it('字符串 detail 仍按原文展示(回归)', async () => {
+    respondWith('directory must be an absolute path')
+    const error = await request('/api/pipeline/import').catch((cause: unknown) => cause)
+    expect((error as ApiError).message).toBe('directory must be an absolute path')
+  })
+})

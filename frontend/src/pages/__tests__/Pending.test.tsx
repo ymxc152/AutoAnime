@@ -9,6 +9,14 @@ import { renderPage } from '../../test/testUtils'
 import { api } from '../../api'
 import { resetMockState } from '../../mocks/handlers'
 
+/** 12-UX:空态 CTA 用 mock 的 useNavigate 断言跳转意图 —— 真实导航在 jsdom 下
+ * 会触发 react-router data router 内部 Request 构造,产生 AbortSignal unhandled rejection */
+const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }))
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => navigateMock }
+})
+
 /** 打开某行纠正抽屉(行内首按钮现在是 checkbox,需按名找「纠正」) */
 async function openCorrectRow(user: ReturnType<typeof userEvent.setup>, rawName: string) {
   const row = (await screen.findByText(rawName)).closest('tr')!
@@ -20,6 +28,7 @@ async function openCorrectRow(user: ReturnType<typeof userEvent.setup>, rawName:
 describe('PendingPage', () => {
   beforeEach(() => {
     resetMockState()
+    navigateMock.mockClear()
   })
 
   it('渲染待确认队列', async () => {
@@ -49,6 +58,9 @@ describe('PendingPage', () => {
       await waitFor(() => expect(screen.queryByText(name)).not.toBeInTheDocument())
     }
     expect(await screen.findByText('队列为空,没有需要人工确认的解析结果。')).toBeInTheDocument()
+    // 12-UX:空态给下一步入口 —— ghost 按钮跳转 /pipeline
+    await user.click(screen.getByRole('button', { name: '去「管线」试跑一个文件名' }))
+    expect(navigateMock).toHaveBeenCalledWith('/pipeline')
   })
 
   it('抽屉展示 context 草稿字段(后端无证据来源标注,不做来源徽标)', async () => {
