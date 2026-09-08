@@ -245,6 +245,67 @@ async def test_settings_persist_and_merge_on_restart(
 
 
 # ---------------------------------------------------------------------------
+# 并发写防护：updated_at / base_updated_at 乐观锁
+# ---------------------------------------------------------------------------
+
+
+async def test_put_conflict_returns_409_settings_changed(client) -> None:
+    """base_updated_at 与当前不一致 → 409 settings_changed（不做部分写入）。"""
+    c, _, _ = client
+    # 无覆盖行：GET updated_at 为 null
+    body = (await c.get("/api/settings")).json()
+    assert body["updated_at"] is None
+
+    resp = await c.put("/api/settings", json={"dry_run": False})
+    assert resp.status_code == 200
+    stale_base = (await c.get("/api/settings")).json()["updated_at"]
+    assert stale_base is not None
+
+    # 另一写方先改 → stale_base 过期
+    resp = await c.put("/api/settings", json={"dry_run": True})
+    assert resp.status_code == 200
+    resp = await c.put(
+        "/api/settings", json={"dry_run": False, "base_updated_at": stale_base}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "settings_changed"
+    # 409 路不做部分写入：当前值仍是后写方的 True
+    assert (await c.get("/api/settings")).json()["dry_run"] is True
+
+
+async def test_put_base_updated_at_match_ok(client) -> None:
+    """base_updated_at 与当前一致 → 正常写入，响应带新 updated_at。"""
+    c, _, _ = client
+    resp = await c.put("/api/settings", json={"dry_run": False})
+    assert resp.status_code == 200
+    base = (await c.get("/api/settings")).json()["updated_at"]
+    assert base is not None
+
+    resp = await c.put(
+        "/api/settings", json={"dry_run": True, "base_updated_at": base}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"] == {"dry_run": "immediate"}
+    assert body["updated_at"] is not None and body["updated_at"] != base
+
+
+async def test_put_without_base_skips_conflict_check(client) -> None:
+    """base_updated_at 缺省（CLI/脚本场景）= 跳过冲突检查。"""
+    c, _, _ = client
+    resp = await c.put("/api/settings", json={"dry_run": True})
+    assert resp.status_code == 200
+    # 无 base（过期与否均不检查）仍 200
+    resp = await c.put("/api/settings", json={"dry_run": False})
+    assert resp.status_code == 200
+    # 显式 null 同样跳过
+    resp = await c.put(
+        "/api/settings", json={"dry_run": True, "base_updated_at": None}
+    )
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # notify-test（fake 通道，成功/失败两路 + 未配置空明细）
 # ---------------------------------------------------------------------------
 
@@ -328,15 +389,19 @@ async def test_notify_test_without_channels_returns_empty(client) -> None:
 
 
 async def test_test_endpoints_rate_limited(client) -> None:
-    """试跑端点冷却：冷却期内连发返回 429，不触发外呼。"""
+    """试跑端点冷却：冷却期内连发返回 429（文案按端点区分），不触发外呼。"""
     c, _, _ = client
     resp = await c.post("/api/settings/notify-test")
     assert resp.status_code == 200
     resp = await c.post("/api/settings/notify-test")
     assert resp.status_code == 429
+    assert resp.json()["detail"] == "发送太频繁，请稍后再试"
     resp = await c.post("/api/settings/qbit-test")
     # qbit-test 与 notify-test 冷却相互独立
     assert resp.status_code == 200
+    resp = await c.post("/api/settings/qbit-test")
+    assert resp.status_code == 429
+    assert resp.json()["detail"] == "测试太频繁，请稍后再试"
 
 
 # ---------------------------------------------------------------------------

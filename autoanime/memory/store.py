@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -286,6 +286,17 @@ class SqliteStorage:
         async with self._session_factory() as session:
             result = await session.execute(select(AppSetting))
             return {row.key: row.value for row in result.scalars().all()}
+
+    async def app_settings_updated_at(self) -> str | None:
+        """app_settings 覆盖项最近一次写入时间（ISO 串；无覆盖行时 None）。
+
+        并发写防护（乐观锁）用：前端 GET 拿到后随 PUT ``base_updated_at``
+        原样带回，与当前值比对，不一致 → 409 settings_changed。
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(select(func.max(AppSetting.updated_at)))
+            latest = result.scalar_one_or_none()
+            return latest.isoformat() if latest is not None else None
 
     async def put_app_setting(self, key: str, value: str | None) -> None:
         """写一条覆盖项（幂等 upsert）；``value=None`` = 清除（删行）。

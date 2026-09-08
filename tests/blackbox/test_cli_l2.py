@@ -30,6 +30,11 @@ def _run(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[st
 
 def _env(db_path: Path, **extra: str) -> dict[str, str]:
     env = os.environ.copy()
+    # 隔离本机常驻的 AUTOANIME_* 环境(如 AUTOANIME_LLM_ENABLED=true 会让 L3
+    # 意外启用,degraded 语义翻转导致断言失败):子进程环境只保留本测试显式设置的项
+    for key in list(env):
+        if key.startswith("AUTOANIME_"):
+            del env[key]
     env[_DB_ENV] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
     env.update(extra)
     return env

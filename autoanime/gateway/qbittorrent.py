@@ -129,11 +129,15 @@ class QbittorrentGateway:
         client: Any = self._get_client()
 
         def _read() -> str:
-            # qbittorrent-api 的版本是同步属性（属性访问即发 HTTP），必须
-            # 留在 to_thread 内执行；新旧字段名双兜底。
+            # qbittorrent-api 的 app_version / qbittorrent_version 是**方法**
+            # 而非属性（调用即发 HTTP），必须留在 to_thread 内调用；取到
+            # bound method 后直接 str() 会泄漏 "<bound method ...>" repr
+            # （qbit-test UI 实测复现）。新旧字段名双兜底。
             value = getattr(client, "qbittorrent_version", None) or getattr(
                 client, "app_version", None
             )
+            if callable(value):
+                value = value()
             return str(value or "")
 
         return await self._call("qbittorrent_version", _read)

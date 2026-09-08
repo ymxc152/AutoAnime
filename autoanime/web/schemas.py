@@ -349,6 +349,8 @@ class SettingsOut(BaseModel):
     has_qbittorrent_password: bool
     has_notify_webhook_url: bool
     has_notify_telegram_bot_token: bool
+    # --- 并发写防护（乐观锁）：app_settings max(updated_at) 的 ISO 串；无覆盖行 = null ---
+    updated_at: str | None = None
 
 
 #: PUT 生效三档（12-D）：每个被改字段在响应里带档位，前端据此提示。
@@ -361,10 +363,16 @@ class SettingsUpdateIn(BaseModel):
     - 白名单外字段（extra="forbid"）→ 422，不再静默丢弃（12-D 收口：
       前端打错 key 应显式失败）；
     - 密钥字段（SecretStr）：空串 = 不修改，显式 null = 清除（RSS token
-      惯例）；非密钥字段 null = 不修改（保持 v1 行为）。
+      惯例）；非密钥字段 null = 不修改（保持 v1 行为）；
+    - ``base_updated_at``（并发写防护，非业务字段）：前端把 GET 拿到的
+      ``updated_at`` 原样带回；提供且与当前不一致 → 409 settings_changed；
+      缺省/null = 跳过检查（兼容 CLI/脚本）。
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    # 并发写防护（非业务字段，不进三档白名单；路由层先 pop 再处理）
+    base_updated_at: str | None = None
 
     # 立即生效
     dry_run: bool | None = None

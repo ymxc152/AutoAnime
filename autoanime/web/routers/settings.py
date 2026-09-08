@@ -189,11 +189,18 @@ def _reconfigure_log_level(level: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def settings_out(settings: Settings, rows: dict[str, str]) -> SettingsOut:
+def settings_out(
+    settings: Settings,
+    rows: dict[str, str],
+    *,
+    updated_at: str | None = None,
+) -> SettingsOut:
     """运行时 + DB 覆盖 → 响应载荷。
 
     重启生效档字段 DB 覆盖优先（显示「重启后将生效的值」）；密钥只回
     ``has_*``：DB 有行 = 已配置（待生效），否则看运行时实例。
+    ``updated_at`` = app_settings max(updated_at) 的 ISO 串（无覆盖行
+    None），前端 PUT 随 ``base_updated_at`` 带回做并发写防护。
     """
     db = parse_db_overrides(rows)
 
@@ -256,6 +263,7 @@ def settings_out(settings: Settings, rows: dict[str, str]) -> SettingsOut:
         has_qbittorrent_password=_has("qbittorrent_password"),
         has_notify_webhook_url=_has("notify_webhook_url"),
         has_notify_telegram_bot_token=_has("notify_telegram_bot_token"),
+        updated_at=updated_at,
     )
 
 
@@ -271,7 +279,11 @@ def _merged_settings(settings: Settings, rows: dict[str, str]) -> Settings:
 
 @router.get("", response_model=SettingsOut)
 async def get_settings(settings: SettingsDep, storage: StorageDep) -> SettingsOut:
-    return settings_out(settings, await storage.list_app_settings())
+    return settings_out(
+        settings,
+        await storage.list_app_settings(),
+        updated_at=await storage.app_settings_updated_at(),
+    )
 
 
 @router.put("", response_model=SettingsUpdateOut)
@@ -290,8 +302,18 @@ async def update_settings(
     装配固化的字段在 setattr 之外重建 reference chain + 触发 scheduler loop
     重建（与 _SCHEDULER_FIELDS 同路）；log_level 另做运行期 logging 重配置。
     audit 只记 key 与档位，**不记任何 value**。
+
+    并发写防护：``base_updated_at`` 提供时（前端把 GET 的 ``updated_at``
+    原样带回）先与当前 max(updated_at) 比对，不一致 → 409 ``settings_changed``
+    （在任何写入之前检查，不做部分写入）；缺省/null = 跳过检查（兼容
+    CLI/脚本）。
     """
     supplied = body.model_dump(exclude_unset=True)
+    base_updated_at = supplied.pop("base_updated_at", None)
+    if base_updated_at is not None:
+        current_updated_at = await storage.app_settings_updated_at()
+        if current_updated_at != base_updated_at:
+            raise HTTPException(status_code=409, detail="settings_changed")
     applied: dict[str, SettingEffect] = {}
     scheduler_touched = False
     reference_chain_touched = False
@@ -361,7 +383,11 @@ async def update_settings(
         actor=Actor.MANUAL,
     )
     return SettingsUpdateOut(
-        **settings_out(settings, await storage.list_app_settings()).model_dump(),
+        **settings_out(
+            settings,
+            await storage.list_app_settings(),
+            updated_at=await storage.app_settings_updated_at(),
+        ).model_dump(),
         applied=applied,
         warnings=warnings,
     )
@@ -372,8 +398,9 @@ async def update_settings(
 # ---------------------------------------------------------------------------
 
 #: 试跑端点进程内冷却：防误点连发真实外呼（webhook/telegram/qbit 登录）。
-#: 时间戳存 app.state（每 app 独立），测试夹具每测新建 app 天然隔离；
-#: check→set 之间无 await，事件循环下原子。
+#: 时间戳存 app.state（每 app 独立），按端点名各自独立计数（notify-test
+#: 与 qbit-test 互不影响）；测试夹具每测新建 app 天然隔离；check→set 之间
+#: 无 await，事件循环下原子。
 _TEST_ENDPOINT_COOLDOWN_S = 30.0
 
 
@@ -403,7 +430,7 @@ async def notify_test(
     连点造成外呼轰炸。
     """
     if not _test_call_allowed(request, "notify-test"):
-        raise HTTPException(status_code=429, detail="试跑冷却中，请稍后再试")
+        raise HTTPException(status_code=429, detail="发送太频繁，请稍后再试")
     merged = _merged_settings(settings, await storage.list_app_settings())
     results: list[ChannelTestOut] = []
     event = Event(EventCategory.SYSTEM, "settings.notify_test", {"test": True})
@@ -465,7 +492,7 @@ async def qbit_test(
     不含密码）。带进程内冷却，同 notify-test。
     """
     if not _test_call_allowed(request, "qbit-test"):
-        raise HTTPException(status_code=429, detail="试跑冷却中，请稍后再试")
+        raise HTTPException(status_code=429, detail="测试太频繁，请稍后再试")
     merged = _merged_settings(settings, await storage.list_app_settings())
     gateway = QbittorrentGateway(
         merged.qbittorrent_host,
