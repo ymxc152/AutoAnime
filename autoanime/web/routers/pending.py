@@ -15,7 +15,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 
 from autoanime.config import Settings
-from autoanime.core.enums import MemorySource, PendingStatus, ResolvedBy
+from autoanime.core.enums import MemorySource, PendingStatus, ResolvedBy, Segment
 from autoanime.core.events import EventCategory
 from autoanime.core.interfaces import ParseResult, RawName
 from autoanime.core.models import PendingQueue
@@ -23,8 +23,10 @@ from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.store import SqliteStorage
 from autoanime.organize import confirm_archive
+from autoanime.organize.library_ingest import upsert_archived_file
 from autoanime.organize.poster import schedule_poster_fetch
 from autoanime.pipeline.l1_local import LocalRecognizer
+from autoanime.scheduler.store import LoopStore
 from autoanime.web.deps import (
     ApiStoreDep,
     BusDep,
@@ -66,6 +68,7 @@ async def _archive_after_resolution(
     governance: MemoryGovernance,
     source: str,
     poster_service: PosterServiceDep | None = None,
+    ingest_store: LoopStore | None = None,
 ) -> confirm_archive.ArchiveOutcome:
     """确认/纠正后的归档通路（报告 §6.1 v2 首要补齐项）。
 
@@ -99,6 +102,16 @@ async def _archive_after_resolution(
         )
     except Exception:  # noqa: BLE001 -- 审计失败不阻塞归档（与 ArchiveService 同口径）
         logger.warning("confirm archive audit write failed", exc_info=True)
+    # P0-B 库收纳（12-IA 补口）：确认/纠正归档与 import 同样 upsert 库条目。
+    if ingest_store is not None and outcome.archived:
+        await upsert_archived_file(
+            ingest_store,
+            titles={"title_cn": confirmed.title},
+            media_type="movie" if confirmed.segment is Segment.MOVIE else "tv",
+            season_number=confirmed.season,
+            episode_number=confirmed.episode,
+            file_path=str(outcome.dst),
+        )
     if outcome.archived:
         logger.info(
             "pending #%s archived via %s: %s", row.id, source, outcome.dst
@@ -194,7 +207,8 @@ async def confirm_pending(
         raise HTTPException(status_code=422, detail=str(exc)) from None
     learned, bypassed = await _learn(storage, reference_chain, row=row, confirmed=confirmed)
     archive = await _archive_after_resolution(
-        row, confirmed, settings=settings, governance=governance, source="confirm", poster_service=poster_service
+        row, confirmed, settings=settings, governance=governance, source="confirm", poster_service=poster_service,
+        ingest_store=LoopStore(storage),
     )
     resolution: dict[str, object] = {
         "action": "confirm",
@@ -251,7 +265,8 @@ async def correct_pending(
     # 负记忆（5.3）：该 raw_name 的既有 L1/L2 结论已被人工推翻，登记 bypass。
     await governance.add_bypass(row.raw_name, reason=f"webui correct: pending #{pending_id}")
     archive = await _archive_after_resolution(
-        row, confirmed, settings=settings, governance=governance, source="correct", poster_service=poster_service
+        row, confirmed, settings=settings, governance=governance, source="correct", poster_service=poster_service,
+        ingest_store=LoopStore(storage),
     )
     resolution: dict[str, object] = {
         "action": "correct",

@@ -379,6 +379,7 @@ async def _archive_confirmed_file(
     resolved_rows: Sequence[Any],
     settings: Settings,
     governance: MemoryGovernance,
+    ingest_store: LoopStore | None = None,
 ) -> confirm_archive.ArchiveOutcome:
     """确认结果落归档（confirm 归档通路，CLI/WebUI 共用实现）。
 
@@ -407,6 +408,18 @@ async def _archive_confirmed_file(
         )
     except Exception:  # noqa: BLE001 -- 审计失败不阻塞归档（与 ArchiveService 同口径）
         logger.warning("confirm archive audit write failed", exc_info=True)
+    # P0-B 库收纳（12-IA 补口）：确认归档路径与 import 同样 upsert 库条目，
+    # 否则「导入→待确认→确认」的作品文件进库而 media 库仍看不到。失败吞在
+    # upsert 内，不影响归档与学习。
+    if ingest_store is not None and outcome.archived and outcome.dst:
+        await upsert_archived_file(
+            ingest_store,
+            titles={"title_cn": confirmed.title},
+            media_type="movie" if confirmed.segment is Segment.MOVIE else "tv",
+            season_number=confirmed.season,
+            episode_number=confirmed.episode,
+            file_path=str(outcome.dst),
+        )
     return outcome
 
 
@@ -528,6 +541,7 @@ async def _confirm(args: argparse.Namespace) -> int:
             else await _archive_confirmed_file(
                 confirmed, raw_name=args.name, resolved_rows=resolved_rows,
                 settings=settings, governance=governance,
+                ingest_store=LoopStore(storage),
             )
         )
         if archive.archived:

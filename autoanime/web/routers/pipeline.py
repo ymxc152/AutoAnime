@@ -177,6 +177,7 @@ async def confirm_name(
             resolved_rows=resolved_rows,
             settings=settings,
             governance=governance,
+            ingest_store=LoopStore(storage),
         )
     )
     if archive.archived:
