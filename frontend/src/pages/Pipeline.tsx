@@ -18,6 +18,7 @@ import '@xyflow/react/dist/style.css'
 import { FlaskConical, FolderDown, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '../api'
+import { FolderPickerDialog } from '../components/FolderPickerDialog'
 import { useApi } from '../hooks/useApi'
 import { useEventStream } from '../hooks/eventStreamContext'
 import { strings, t } from '../strings'
@@ -164,6 +165,8 @@ function ManualOperations() {
   const [importError, setImportError] = useState<string | null>(null)
   // UXfix:空导入路径不再静默 no-op,行内提示必填
   const [importDirError, setImportDirError] = useState<string | null>(null)
+  // P1-D:目录选择弹窗(「浏览」打开,选中回填导入路径)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   // 12-F:run-once scope 三选(后端 SchedulerRunIn.scope: all/rss/download),默认 all
   const [scope, setScope] = useState<SchedulerScope>('all')
@@ -301,13 +304,25 @@ function ManualOperations() {
           }}
         >
           <Field label={strings.pipeline.importDirectory} htmlFor="pipeline-import-directory" error={importDirError}>
-            <Input
-              id="pipeline-import-directory"
-              value={directory}
-              onChange={(e) => setDirectory(e.target.value)}
-              className="data-text"
-              placeholder="D:\downloads\番剧"
-            />
+            {/* P1-D:输入框旁「浏览」打开目录选择弹窗,选中路径回填 */}
+            <div className="flex items-center gap-2">
+              <Input
+                id="pipeline-import-directory"
+                value={directory}
+                onChange={(e) => setDirectory(e.target.value)}
+                className="data-text flex-1"
+                placeholder="D:\downloads\番剧"
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                type="button"
+                aria-label={strings.uxfix.pickerTitle}
+                onClick={() => setPickerOpen(true)}
+              >
+                {strings.uxfix.pickerTitle}
+              </Button>
+            </div>
           </Field>
           <div className="flex items-center justify-between gap-2 py-0.5">
             <span className="text-sm leading-none text-ink">{strings.pipeline.dryRun}</span>
@@ -382,6 +397,16 @@ function ManualOperations() {
           )}
         </div>
       </div>
+      {/* P1-D:目录选择弹窗(选中回填导入路径并关闭) */}
+      <FolderPickerDialog
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={(picked) => {
+          setDirectory(picked)
+          setImportDirError(null)
+          setPickerOpen(false)
+        }}
+      />
     </Card>
   )
 }

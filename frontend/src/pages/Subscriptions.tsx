@@ -1,17 +1,20 @@
 /*
- * Subscriptions —— 追番管理:列表 + 每季进度(对齐后端 SubscriptionOut)。
- * 订阅载体 = series 行 + 预生成季/集表(ARCHITECTURE §2);POST 至少一个
- * 标题,episode_count 非空时预生成 N 条 MISSING 集。RSS 地址关联走
- * 「RSS 源」页(后端 /api/rss_sources,按季挂载)。放送调度与降频随 E4。
- * 数据:GET/POST/DELETE /api/subscriptions。
+ * Subscriptions —— 追番(P1-E 信息架构重构:双 Tab)。
+ * Tab1「季度选番」(默认):当季走 GET /api/season-calendar,历史季走
+ * GET /api/season-browse(近 6 年 × 4 季;degraded=true 显示降级提示);
+ * 卡片点开 SubscriptionDrawer,单次 POST /api/subscriptions 完成
+ * 订阅 + 可选挂 RSS(P0-B 一步订阅,bangumi_id 作 adopt 精确键)。
+ * Tab2「我的订阅」:既有订阅列表/表单整体迁入(添加/编辑/删除全保留)。
  */
 import { useCallback, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { CirclePlus, ExternalLink, Tv } from 'lucide-react'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
 import { useReloadOnMessages } from '../hooks/useReloadOnEvent'
 import { strings, t } from '../strings'
 import {
+  AnimeCard,
   Badge,
   Button,
   Card,
@@ -25,11 +28,139 @@ import {
   Select,
   Skeleton,
   StatusDot,
+  SubscriptionDrawer,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from '../components'
 import { mediaTypeLabel, seasonStateView, subscriptionStatusLabel } from '../lib/views'
-import type { SubscriptionDto } from '../api/types'
+import type { BangumiItemDto, SeasonName, SubscriptionDto } from '../api/types'
 
 const MIKAN_URL = 'https://mikanani.me'
+
+/** 季节切换条可选项:近 6 年(含当年)× 4 季 */
+const SEASON_NAMES: SeasonName[] = ['winter', 'spring', 'summer', 'fall']
+const YEAR_COUNT = 6
+
+/** 月(0-11)→ 季名(12/1/2=winter,3-5=spring,6-8=summer,9-11=fall) */
+function monthToSeason(month: number): SeasonName {
+  if (month >= 3 && month <= 5) return 'spring'
+  if (month >= 6 && month <= 8) return 'summer'
+  if (month >= 9) return 'fall'
+  return 'winter'
+}
+
+/** 季节切换条数据源:当季 = calendar;历史季 = browse(区分走哪个端点) */
+type SeasonScope = { kind: 'current' } | { kind: 'browse'; year: number; season: SeasonName }
+
+/* ---------- Tab1:季度选番 ---------- */
+
+function SeasonBrowseTab({ onSubscribed }: { onSubscribed: () => void }) {
+  const now = new Date()
+  const years = Array.from({ length: YEAR_COUNT }, (_, i) => now.getFullYear() - i)
+  const [scope, setScope] = useState<SeasonScope>({ kind: 'current' })
+  // Select 受控值(与 scope 分离:未切历史季时仅作草稿)
+  const [yearInput, setYearInput] = useState(String(now.getFullYear()))
+  const [seasonInput, setSeasonInput] = useState<SeasonName>(monthToSeason(now.getMonth()))
+
+  const fetcher = useCallback(
+    () =>
+      scope.kind === 'current'
+        ? api.seasonCalendar.get()
+        : api.seasonBrowse.get({ year: scope.year, season: scope.season }),
+    [scope],
+  )
+  const { data, loading, error, reload } = useApi(fetcher)
+
+  const [selected, setSelected] = useState<BangumiItemDto | null>(null)
+
+  const isCurrent = scope.kind === 'current'
+  const items = data?.items ?? []
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* 季节切换条:当季 + 年份/季节 Select */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant={isCurrent ? 'primary' : 'secondary'}
+          onClick={() => setScope({ kind: 'current' })}
+        >
+          {strings.uxfix.seasonCurrent}
+        </Button>
+        <Select
+          aria-label={strings.uxfix.seasonYearLabel}
+          data-testid="season-year-select"
+          className="w-28"
+          value={yearInput}
+          onChange={(e) => {
+            setYearInput(e.target.value)
+            setScope({ kind: 'browse', year: Number(e.target.value), season: seasonInput })
+          }}
+        >
+          {years.map((year) => (
+            <option key={year} value={String(year)}>
+              {year}
+            </option>
+          ))}
+        </Select>
+        <Select
+          aria-label={strings.uxfix.seasonNameLabel}
+          data-testid="season-name-select"
+          className="w-28"
+          value={seasonInput}
+          onChange={(e) => {
+            const season = e.target.value as SeasonName
+            setSeasonInput(season)
+            setScope({ kind: 'browse', year: Number(yearInput), season })
+          }}
+        >
+          {SEASON_NAMES.map((season) => (
+            <option key={season} value={season}>
+              {strings.uxfix.seasonNames[season]}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      {error !== null ? (
+        <ErrorState message={error} onRetry={reload} />
+      ) : loading ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }, (_, i) => (
+            <Skeleton key={i} className="h-64" />
+          ))}
+        </div>
+      ) : data?.degraded ? (
+        // 网关降级:items 为空,如实提示不伪装成「无番」
+        <Card>
+          <p role="status" data-testid="season-degraded" className="py-2 text-sm text-ink-secondary">
+            {strings.uxfix.seasonDegraded}
+          </p>
+        </Card>
+      ) : items.length === 0 ? (
+        <EmptyState title={strings.uxfix.seasonGridEmpty} />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="season-grid">
+          {items.map((item) => (
+            <AnimeCard key={item.subject_id} item={item} onSelect={setSelected} />
+          ))}
+        </div>
+      )}
+
+      {selected !== null && (
+        <SubscriptionDrawer
+          item={selected}
+          onClose={() => setSelected(null)}
+          onSubscribed={onSubscribed}
+        />
+      )}
+    </div>
+  )
+}
+
+/* ---------- Tab2:我的订阅(既有功能整体迁入) ---------- */
 
 function subscriptionTitle(sub: SubscriptionDto): string {
   return sub.title_cn ?? sub.title_romaji ?? sub.title_jp ?? `#${sub.id}`
@@ -322,7 +453,7 @@ function SubscriptionRow({
   )
 }
 
-export function SubscriptionsPage() {
+function MySubscriptionsTab() {
   const fetcher = useCallback(() => api.subscriptions.list({ limit: 100 }), [])
   const { data, loading, error, reload } = useApi(fetcher)
   useReloadOnMessages(reload, [
@@ -360,7 +491,16 @@ export function SubscriptionsPage() {
 
   return (
     <>
-      <PageTitle title={strings.subscriptions.title} />
+      {/* 12-IA:RSS 源高级管理入口(日常订阅走 Tab1 选番) */}
+      <div className="flex justify-end">
+        <Link
+          to="/rss-sources"
+          data-testid="manage-rss-link"
+          className="inline-flex h-7 w-fit items-center gap-1.5 rounded-sm px-2 text-xs font-medium text-ink-secondary transition-colors duration-[var(--ink-transition-fast)] hover:bg-surface-2 hover:text-ink"
+        >
+          {strings.uxfix.manageRss}
+        </Link>
+      </div>
 
       {actionError !== null && (
         <div role="alert" className="rounded-md border border-line px-3 py-2 text-sm text-ink-secondary">
@@ -425,6 +565,33 @@ export function SubscriptionsPage() {
           onClose={() => setEditingSub(null)}
         />
       )}
+    </>
+  )
+}
+
+/* ---------- 页面骨架:双 Tab ---------- */
+
+type SubscriptionTab = 'season' | 'mine'
+
+export function SubscriptionsPage() {
+  // 默认落在「季度选番」:选番是一切的起点(12-IA)
+  const [tab, setTab] = useState<SubscriptionTab>('season')
+
+  return (
+    <>
+      <PageTitle title={strings.subscriptions.title} />
+      <Tabs value={tab} onValueChange={(value) => setTab(value as SubscriptionTab)}>
+        <TabsList data-testid="subscriptions-tabs">
+          <TabsTrigger value="season">{strings.uxfix.seasonBrowse}</TabsTrigger>
+          <TabsTrigger value="mine">{strings.uxfix.mySubscriptions}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="season">
+          <SeasonBrowseTab onSubscribed={() => setTab('mine')} />
+        </TabsContent>
+        <TabsContent value="mine">
+          <MySubscriptionsTab />
+        </TabsContent>
+      </Tabs>
     </>
   )
 }

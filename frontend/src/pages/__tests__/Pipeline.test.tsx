@@ -331,4 +331,29 @@ describe('PipelinePage', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
     expect(await screen.findByText(/已处理 1\/3/)).toBeInTheDocument()
   })
+
+  it('P1-D:点浏览打开目录弹窗,下钻后选择回填导入路径', async () => {
+    const list = vi
+      .spyOn(api.filesystem, 'list')
+      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\', 'D:\\'] })
+      .mockResolvedValueOnce({ path: 'D:\\', parent: 'D:\\', directories: ['番剧'] })
+      .mockResolvedValueOnce({ path: 'D:\\番剧', parent: 'D:\\', directories: ['Show'] })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    await userEvent.setup().click(screen.getByRole('button', { name: '选择目录' }))
+    // 打开时从盘符根视图加载
+    expect(await screen.findByTestId('picker-row-D:\\')).toBeInTheDocument()
+    // 下钻:此电脑 → D:\ → 番剧
+    fireEvent.click(screen.getByTestId('picker-row-D:\\'))
+    expect(await screen.findByTestId('picker-row-番剧')).toBeInTheDocument()
+    expect(list).toHaveBeenLastCalledWith('D:\\')
+    fireEvent.click(screen.getByTestId('picker-row-番剧'))
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith('D:\\番剧'))
+    // 选择当前目录 → 回填导入路径输入框并关闭弹窗
+    fireEvent.click(screen.getByRole('button', { name: '选择当前目录' }))
+    await waitFor(() => {
+      expect(screen.queryByTestId('folder-picker-dialog')).not.toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('导入目录')).toHaveValue('D:\\番剧')
+  })
 })

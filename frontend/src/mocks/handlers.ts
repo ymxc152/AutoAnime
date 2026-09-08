@@ -8,9 +8,12 @@ import type * as RealEndpoints from '../api/endpoints'
 import { ApiError } from '../api/client'
 import {
   mockAudit,
+  mockFilesystemListing,
   mockMetrics,
   mockPending,
   mockRssSources,
+  mockSeasonBrowse,
+  mockSeasonCalendar,
   mockSeries,
   mockSettings,
   mockSubscriptions,
@@ -335,6 +338,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         }
         const episodeCount = body.episode_count ?? 0
         const seasonNumber = body.season_number ?? 1
+        // P0-B 一步订阅:rss_url 提供时同事务挂源;rss_saved 只在创建响应有语义
+        const rssSaved = Boolean(body.rss_url)
         const sub: SubscriptionDto = {
           id: state.nextId++,
           title_cn: body.title_cn ?? null,
@@ -353,11 +358,22 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
               // 预生成集表 = 全部 MISSING
               episodes_missing: episodeCount,
               episodes_organized: 0,
-              rss_sources: 0,
+              rss_sources: rssSaved ? 1 : 0,
             },
           ],
+          rss_saved: rssSaved,
         }
         state.subscriptions.unshift(sub)
+        if (rssSaved) {
+          state.rssSources.unshift({
+            id: state.nextId++,
+            url: body.rss_url!,
+            has_token: Boolean(body.rss_token),
+            season_id: sub.seasons[0]!.season_id,
+            enabled: true,
+            last_polled_at: null,
+          })
+        }
         return delayed(clone(sub))
       },
       update: (id, body: SubscriptionUpdateBody) => {
@@ -450,6 +466,20 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         }
         return delayed(result)
       },
+    },
+
+    // ---- P1-E:季度选番(与真实端点同构:degraded=true 时 items 空) ----
+    seasonCalendar: {
+      get: () => delayed(clone(mockSeasonCalendar)),
+    },
+    seasonBrowse: {
+      get: (_query) => delayed(clone(mockSeasonBrowse)),
+    },
+
+    // P1-D 目录浏览(最小 stub:path 缺省 = 盘符根视图)
+    filesystem: {
+      list: (path?: string) =>
+        delayed(clone({ ...mockFilesystemListing, ...(path === undefined ? {} : { path }) })),
     },
 
     // 12-F:集重新识别(对齐后端两步契约:dry_run=true 预览 / false 执行)

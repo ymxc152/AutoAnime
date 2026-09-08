@@ -4,7 +4,7 @@
  */
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCw, Rss } from 'lucide-react'
+import { Info, RefreshCw, Rss } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '../api'
 import { useApi } from '../hooks/useApi'
@@ -490,6 +490,15 @@ export function RssSourcesPage() {
   return (
     <>
       <PageTitle title={strings.rssSources.title} />
+
+      {/* 12-IA:页面定位提示 —— 本页是高级管理入口,日常订阅在「追番」页选番 */}
+      <div
+        data-testid="rss-advanced-hint"
+        className="flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-secondary"
+      >
+        <Info aria-hidden className="h-3.5 w-3.5 shrink-0" />
+        {strings.uxfix.rssSourcesAdvancedHint}
+      </div>
 
       {actionError !== null && (
         <div role="alert" className="rounded-md border border-line px-3 py-2 text-sm text-ink-secondary">

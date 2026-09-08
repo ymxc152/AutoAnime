@@ -4,10 +4,13 @@
  */
 import type {
   AuditDto,
+  BangumiItemDto,
   EpisodeDto,
+  FilesystemListing,
   Metrics,
   PendingItemDto,
   RssSourceDto,
+  SeasonBrowseOut,
   SeriesDto,
   SettingsDto,
   SubscriptionDto,
@@ -471,6 +474,94 @@ export const mockSettings: SettingsDto = {
   has_qbittorrent_password: false,
   has_notify_webhook_url: false,
   has_notify_telegram_bot_token: false,
+}
+
+// ---- P1-E:季度选番(对齐 routers/calendar.py SeasonBrowseOut;条目 = BangumiItemOut) ----
+// 注意:fixture 标题有意避开订阅/媒体库既有番名(药屋/迷宫饭/芙莉莲等),
+// 避免 Subscriptions 双 Tab 同屏渲染同名文本干扰测试断言。
+
+export const mockCalendarItems: BangumiItemDto[] = [
+  {
+    subject_id: 511100,
+    title_cn: '孤独摇滚',
+    title_jp: 'ぼっち・ざ・ろっく!',
+    image_url: null,
+    rating: 8.6,
+    air_date: '2026-10-05',
+    eps: 12,
+    mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=%E5%AD%A4%E7%8B%AC%E6%91%87%E6%BB%9A',
+  },
+  {
+    subject_id: 511101,
+    title_cn: '药屋魔法使的新娘',
+    title_jp: '魔法使いの夜',
+    image_url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22160%22 height=%22224%22%3E%3Crect width=%22160%22 height=%22224%22 fill=%22%2388a%22/%3E%3C/svg%3E',
+    rating: 7.9,
+    air_date: '2026-10-08',
+    eps: 13,
+    mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=mahoutsukai',
+  },
+  {
+    subject_id: 511102,
+    title_cn: null,
+    title_jp: 'Shangri-La Frontier Season 3',
+    image_url: null,
+    rating: 7.2,
+    air_date: '2026-10-12',
+    eps: 24,
+    mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=shangrila',
+  },
+  {
+    subject_id: 511103,
+    title_cn: '星空列车',
+    title_jp: 'ほしやてつどう',
+    image_url: null,
+    rating: null,
+    air_date: null,
+    eps: null,
+    mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=hoshitetsu',
+  },
+  {
+    subject_id: 511104,
+    title_cn: '幻日的夜羽',
+    title_jp: '幻日のヨハネ',
+    image_url: null,
+    rating: 6.8,
+    air_date: '2026-10-03',
+    eps: 12,
+    mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=yohane',
+  },
+  {
+    subject_id: 511105,
+    title_cn: '百千家的妖怪王子',
+    title_jp: '百千さん家のあやかし王子',
+    image_url: null,
+    rating: 5.9,
+    air_date: '2026-10-07',
+    eps: 12,
+    mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=momochi',
+  },
+]
+
+/** 当季时间表(GET /api/season-calendar;degraded 恒 false,降级场景由用例自拟响应) */
+export const mockSeasonCalendar: SeasonBrowseOut = {
+  items: mockCalendarItems,
+  degraded: false,
+  reason: null,
+}
+
+/** 历史季浏览(GET /api/season-browse;mock 与当季同构,不区分年季) */
+export const mockSeasonBrowse: SeasonBrowseOut = {
+  items: mockCalendarItems,
+  degraded: false,
+  reason: null,
+}
+
+/** P1-D 目录浏览 fixture(最小 stub,交由 FolderPicker worker 扩充;path='' = 盘符根视图) */
+export const mockFilesystemListing: FilesystemListing = {
+  path: '',
+  parent: null,
+  directories: ['C:\\', 'D:\\'],
 }
 
 // ---- metrics(对齐 MetricsOut) ----

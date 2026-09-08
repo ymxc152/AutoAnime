@@ -13,7 +13,6 @@ import {
   Inbox,
   LayoutDashboard,
   Moon,
-  Rss,
   ScrollText,
   Settings as SettingsIcon,
   Sun,
@@ -36,12 +35,13 @@ interface NavItem {
   end?: boolean
 }
 
+/* 12-IA:nav 重排为新信息架构 —— 总览/追番/媒体库/导入与识别/待确认/日志/设置;
+ * RSS 源页保留路由但降级为「追番」页与设置类入口(strings.nav.rssSources 键保留) */
 const navItems: NavItem[] = [
   { to: '/dashboard', label: strings.nav.dashboard, icon: LayoutDashboard, end: true },
-  { to: '/pipeline', label: strings.nav.pipeline, icon: Workflow },
-  { to: '/library', label: strings.nav.library, icon: Film },
   { to: '/subscriptions', label: strings.nav.subscriptions, icon: Tv },
-  { to: '/rss-sources', label: strings.nav.rssSources, icon: Rss },
+  { to: '/library', label: strings.nav.library, icon: Film },
+  { to: '/pipeline', label: strings.nav.pipeline, icon: Workflow },
   { to: '/pending', label: strings.nav.pending, icon: Inbox },
   { to: '/logs', label: strings.nav.logs, icon: ScrollText },
   { to: '/settings', label: strings.nav.settings, icon: SettingsIcon },

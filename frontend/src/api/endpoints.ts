@@ -11,6 +11,7 @@ import type {
   ConfirmNameOut,
   EpisodeReparseBody,
   EpisodeReparseOut,
+  FilesystemListing,
   Metrics,
   OperationGroupDto,
   Page,
@@ -32,6 +33,8 @@ import type {
   RssSourceUpdateBody,
   SchedulerRunResponse,
   SchedulerScope,
+  SeasonBrowseOut,
+  SeasonName,
   SeriesDto,
   SeriesQuery,
   NotifyTestOut,
@@ -119,6 +122,17 @@ export const endpoints = {
       request<RssPollResult>(`/api/rss_sources/${id}/poll`, { method: 'POST' }),
   },
 
+  /** P1-E:GET /api/season-calendar —— 当季选番(Bangumi 时间表;拉取失败 degraded=true 空表,不 500) */
+  seasonCalendar: {
+    get: () => request<SeasonBrowseOut>('/api/season-calendar'),
+  },
+
+  /** P1-E:GET /api/season-browse?year=&season= —— 历史季浏览(同构出参;year 上限 = 当前年 + 1) */
+  seasonBrowse: {
+    get: (query: { year: number; season: SeasonName }) =>
+      request<SeasonBrowseOut>('/api/season-browse', { query }),
+  },
+
   /** POST /api/episodes/{id}/reparse —— 12-F 集重新识别(dry_run=true 预览/false 执行) */
   episodes: {
     reparse: (id: number, body: EpisodeReparseBody) =>
@@ -135,6 +149,11 @@ export const endpoints = {
     // 12-F:库外人工确认命名(学习三件套 + pending 收尾 + 归档;422 = 校验失败)
     confirmName: (body: ConfirmNameBody) =>
       request<ConfirmNameOut>('/api/pipeline/confirm-name', { method: 'POST', body }),
+  },
+
+  /** GET /api/filesystem —— 目录浏览(P1-D):path 缺省 = 盘符根视图,仅列子目录 */
+  filesystem: {
+    list: (path?: string) => request<FilesystemListing>('/api/filesystem', { query: { path } }),
   },
 
   /** Scheduler D:手动触发一轮订阅闭环 */

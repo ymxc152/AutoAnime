@@ -8,11 +8,11 @@ import { Link } from 'react-router-dom'
 import {
   ChartLine,
   Check,
-  CircleDot,
   FolderDown,
   Inbox,
-  Rss,
+  LibraryBig,
   Sparkles,
+  Tv,
   UserRoundCog,
   type LucideIcon,
 } from 'lucide-react'
@@ -183,10 +183,11 @@ function OnboardingCard() {
     return null
   }
 
+  // 12-IA:三步文案与跳转对新流程(选番 → 导入 → 媒体库),动作链接与文案指向一致
   const steps: { icon: LucideIcon; label: string; to: string }[] = [
-    { icon: CircleDot, label: strings.uxfix.onboardingStep1, to: '/subscriptions' },
-    { icon: Rss, label: strings.uxfix.onboardingStep2, to: '/rss-sources' },
-    { icon: FolderDown, label: strings.uxfix.onboardingStep3, to: '/pipeline' },
+    { icon: Tv, label: strings.uxfix.onboardingStep1, to: '/subscriptions' },
+    { icon: FolderDown, label: strings.uxfix.onboardingStep2, to: '/pipeline' },
+    { icon: LibraryBig, label: strings.uxfix.onboardingStep3, to: '/library' },
   ]
 
   return (

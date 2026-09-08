@@ -280,6 +280,8 @@ export interface SubscriptionDto {
   fansub_pref: string | null
   quality_pref: string | null
   seasons: SeasonProgressDto[]
+  /** P0-B:本次(创建)提交的 RSS 是否落库;token/URL 永不回显。列表行恒 false */
+  rss_saved?: boolean
 }
 
 /**
@@ -304,6 +306,39 @@ export interface SubscriptionCreateBody {
   episode_count?: number | null
   fansub_pref?: string | null
   quality_pref?: string | null
+  /** P0-B 一步订阅:Bangumi subject_id 作 adopt 精确键(字符串透传) */
+  bangumi_id?: string
+  /** P0-B 一步订阅:提供时与订阅同一事务挂 RssSource;响应 rss_saved 表示是否落库 */
+  rss_url?: string
+  /** P0-B:RSS token 按密钥处理,任何响应不回显 */
+  rss_token?: string
+}
+
+// ---------- P1-E:季度选番(GET /api/season-calendar、/api/season-browse) ----------
+
+/** 季名枚举(后端 SeasonName Literal;非法值后端 422) */
+export type SeasonName = 'winter' | 'spring' | 'summer' | 'fall'
+
+/** 规范化番剧条目(= 后端 routers/calendar.py BangumiItemOut) */
+export interface BangumiItemDto {
+  subject_id: number
+  title_cn: string | null
+  title_jp: string
+  image_url: string | null
+  rating: number | null
+  air_date: string | null
+  eps: number | null
+  mikan_search_url: string
+}
+
+/**
+ * 时间表/季浏览统一出参(= 后端 SeasonBrowseOut):
+ * degraded=true 时 items 为空并附 reason(网关降级链,不 500)。
+ */
+export interface SeasonBrowseOut {
+  items: BangumiItemDto[]
+  degraded: boolean
+  reason: string | null
 }
 
 // ---------- Pipeline / Scheduler:D/E 操作入口 ----------
@@ -687,6 +722,17 @@ export interface ReportOut {
     rate: number | null
     note: string
   }
+}
+
+// ---------- 目录浏览:GET /api/filesystem(P1-D) ----------
+
+/** GET /api/filesystem 响应(= 后端 FilesystemListing,仅子目录,截断 500) */
+export interface FilesystemListing {
+  /** 当前目录(resolve 后);空串 = Windows 盘符根视图 */
+  path: string
+  /** 上一级目录;根目录(null)时「上一级」禁用 */
+  parent: string | null
+  directories: string[]
 }
 
 // ---------- SSE:GET /api/events ----------
