@@ -120,51 +120,73 @@ describe('RssSourcesPage', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
+  it('12-IA 弹窗化:点「添加」打开添加源弹窗(标题/字段齐全)', async () => {
+    const user = userEvent.setup()
+    renderPage(<RssSourcesPage />)
+    await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: '添加源' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('地址')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('关联季')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('令牌(可选)')).toBeInTheDocument()
+  })
+
   it('空地址提交显示校验错误', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
     await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
     await user.click(screen.getByRole('button', { name: '添加' }))
-    expect(await screen.findByText('请填写源地址')).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '添加' }))
+    expect(await within(dialog).findByText('请填写源地址')).toBeInTheDocument()
   })
 
   it('缺关联季提交显示校验错误(对齐后端 season_id 必填)', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
     await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
-    await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
     await user.click(screen.getByRole('button', { name: '添加' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
+    await user.click(within(dialog).getByRole('button', { name: '添加' }))
     // 错误文案与下拉占位同串:限定 Field 的错误 <p>
     expect(
-      await screen.findByText('请选择关联季', { selector: 'p.text-xs' }),
+      await within(dialog).findByText('请选择关联季', { selector: 'p.text-xs' }),
     ).toBeInTheDocument()
   })
 
-  it('填写地址与关联季后创建成功', async () => {
+  it('填写地址与关联季后创建成功;成功后弹窗关闭(12-IA 弹窗化)', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
     await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
-    await user.type(screen.getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
-    await user.selectOptions(screen.getByLabelText('关联季'), '2')
     await user.click(screen.getByRole('button', { name: '添加' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
+    await user.selectOptions(within(dialog).getByLabelText('关联季'), '2')
+    await user.click(within(dialog).getByRole('button', { name: '添加' }))
     expect(
       await screen.findByTitle('https://mikanani.me/RSS/Bangumi?subgroupid=583'),
     ).toBeInTheDocument()
+    // 12-IA 弹窗化:提交成功后弹窗关闭
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
   it('回归 B2:关联季为下拉框,选项来自订阅季(番名+季号+ID 拼文案)', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
-    const select = (await screen.findByLabelText('关联季')) as HTMLSelectElement
+    await user.click(await screen.findByRole('button', { name: '添加' }))
+    const dialog = await screen.findByRole('dialog')
+    const select = within(dialog).getByLabelText('关联季') as HTMLSelectElement
     expect(select.tagName).toBe('SELECT')
     // 默认占位;等订阅数据落地后出现 3 个季选项(药屋 S2 / 迷宫饭 S1 / 芙莉莲 S1)
     expect(select).toHaveValue('')
     expect(
-      await screen.findByRole('option', { name: /药屋少女的呢喃 · 第 2 季\(ID 2\)/ }),
+      await within(dialog).findByRole('option', { name: /药屋少女的呢喃 · 第 2 季\(ID 2\)/ }),
     ).toBeInTheDocument()
     expect(select.options.length).toBe(4)
-    expect(screen.getByRole('option', { name: /迷宫饭 · 第 1 季\(ID 6\)/ })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /葬送的芙莉莲 · 第 1 季\(ID 1\)/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('option', { name: /迷宫饭 · 第 1 季\(ID 6\)/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('option', { name: /葬送的芙莉莲 · 第 1 季\(ID 1\)/ })).toBeInTheDocument()
     // 选择后以 season id 提交
     await user.selectOptions(select, '6')
     expect(select).toHaveValue('6')
@@ -257,7 +279,8 @@ describe('RssSourcesPage', () => {
     successSpy.mockRestore()
   })
 
-  it('uxfix:无可选季时关联季下出现「去追番」跳转链接(指向 /subscriptions)', async () => {
+  it('uxfix:无可选季时关联季下出现「去追番」跳转链接(指向 /subscriptions;12-IA 弹窗化后在弹窗内)', async () => {
+    const user = userEvent.setup()
     // mockResolvedValue 非 Once:必须显式 restore,否则泄漏到下个用例(订阅列表恒空 → CTA 恒显)
     const listSpy = vi.spyOn(api.subscriptions, 'list').mockResolvedValue({
       total: 0,
@@ -267,6 +290,7 @@ describe('RssSourcesPage', () => {
     })
     try {
       renderPage(<RssSourcesPage />)
+      await user.click(await screen.findByRole('button', { name: '添加' }))
       const cta = await screen.findByRole('link', { name: '去「追番」创建订阅' })
       expect(cta).toHaveAttribute('href', '/subscriptions')
     } finally {
@@ -274,11 +298,16 @@ describe('RssSourcesPage', () => {
     }
   })
 
-  it('uxfix:已有可选季时不显示空态跳转链接', async () => {
+  it('uxfix:已有可选季时不显示空态跳转链接(12-IA 弹窗化:打开弹窗后断言)', async () => {
+    const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
     await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    const dialog = await screen.findByRole('dialog')
     await waitFor(() =>
-      expect(screen.queryByRole('link', { name: '去「追番」创建订阅' })).not.toBeInTheDocument(),
+      expect(
+        within(dialog).queryByRole('link', { name: '去「追番」创建订阅' }),
+      ).not.toBeInTheDocument(),
     )
   })
 

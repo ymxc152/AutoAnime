@@ -4,7 +4,8 @@
  * GET /api/season-browse(近 6 年 × 4 季;degraded=true 显示降级提示);
  * 卡片点开 SubscriptionDrawer,单次 POST /api/subscriptions 完成
  * 订阅 + 可选挂 RSS(P0-B 一步订阅,bangumi_id 作 adopt 精确键)。
- * Tab2「我的订阅」:既有订阅列表/表单整体迁入(添加/编辑/删除全保留)。
+ * Tab2「我的订阅」:既有订阅列表/表单整体迁入(添加/编辑/删除全保留;
+ * 12-IA 弹窗化:添加订阅改为按钮 + 居中 Dialog,编辑仍走右侧 Drawer)。
  */
 import { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -35,6 +36,14 @@ import {
   TabsTrigger,
 } from '../components'
 import { mediaTypeLabel, seasonStateView, subscriptionStatusLabel } from '../lib/views'
+// 12-IA 弹窗化:添加订阅常驻卡片 → 按钮 + 居中 Dialog(编辑仍走右侧 Drawer)
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import type { BangumiItemDto, SeasonName, SubscriptionDto } from '../api/types'
 
 const MIKAN_URL = 'https://mikanani.me'
@@ -173,7 +182,19 @@ function subscriptionStatusTone(status: string): 'success' | 'warning' | 'neutra
   return 'neutral'
 }
 
-function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
+/**
+ * 添加订阅弹窗(12-IA 弹窗化:原常驻 AddSubscriptionForm 卡片整体迁入,
+ * 字段/校验/mock 行为不变,仅容器从卡片变居中 Dialog;提交成功后关闭并刷新)。
+ */
+function AddSubscriptionDialog({
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onDone: () => void
+}) {
   const [title, setTitle] = useState('')
   const [seasonNumber, setSeasonNumber] = useState('1')
   const [episodeCount, setEpisodeCount] = useState('')
@@ -201,6 +222,7 @@ function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
       setEpisodeCount('')
       setFansub('')
       onDone()
+      onOpenChange(false)
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : strings.subscriptions.addFailed)
     } finally {
@@ -209,79 +231,78 @@ function AddSubscriptionForm({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <Card
-      title={
-        <span className="inline-flex items-center gap-1.5">
-          <CirclePlus aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
-          {strings.subscriptions.addSubscription}
-        </span>
-      }
-      description={strings.subscriptions.rssHint}
-      actions={
-        <a
-          href={MIKAN_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover"
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="inline-flex items-center gap-1.5">
+            <CirclePlus aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
+            {strings.subscriptions.addSubscription}
+          </DialogTitle>
+          <DialogDescription>{strings.subscriptions.rssHint}</DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submit()
+          }}
         >
-          {strings.subscriptions.mikanEntry}
-          <ExternalLink aria-hidden className="h-3 w-3" />
-        </a>
-      }
-    >
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void submit()
-        }}
-      >
-        <Field label={strings.subscriptions.titleLabel} error={error} htmlFor="sub-title">
-          <Input
-            id="sub-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder={strings.subscriptions.titlePlaceholder}
-            invalid={error !== null}
-            className="data-text"
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={strings.subscriptions.seasonNumber} htmlFor="sub-season">
+          <Field label={strings.subscriptions.titleLabel} error={error} htmlFor="sub-title">
             <Input
-              id="sub-season"
-              inputMode="numeric"
-              value={seasonNumber}
-              onChange={(e) => setSeasonNumber(e.target.value.replace(/[^\d]/g, ''))}
+              id="sub-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={strings.subscriptions.titlePlaceholder}
+              invalid={error !== null}
               className="data-text"
             />
           </Field>
-          <Field label={strings.subscriptions.episodeCount} htmlFor="sub-episodes">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={strings.subscriptions.seasonNumber} htmlFor="sub-season">
+              <Input
+                id="sub-season"
+                inputMode="numeric"
+                value={seasonNumber}
+                onChange={(e) => setSeasonNumber(e.target.value.replace(/[^\d]/g, ''))}
+                className="data-text"
+              />
+            </Field>
+            <Field label={strings.subscriptions.episodeCount} htmlFor="sub-episodes">
+              <Input
+                id="sub-episodes"
+                inputMode="numeric"
+                value={episodeCount}
+                onChange={(e) => setEpisodeCount(e.target.value.replace(/[^\d]/g, ''))}
+                placeholder={strings.subscriptions.episodeCountPlaceholder}
+                className="data-text"
+              />
+            </Field>
+          </div>
+          <Field label={strings.subscriptions.fansubPref} htmlFor="sub-fansub">
             <Input
-              id="sub-episodes"
-              inputMode="numeric"
-              value={episodeCount}
-              onChange={(e) => setEpisodeCount(e.target.value.replace(/[^\d]/g, ''))}
-              placeholder={strings.subscriptions.episodeCountPlaceholder}
-              className="data-text"
+              id="sub-fansub"
+              value={fansub}
+              onChange={(e) => setFansub(e.target.value)}
+              placeholder={strings.subscriptions.fansubPlaceholder}
             />
           </Field>
-        </div>
-        <Field label={strings.subscriptions.fansubPref} htmlFor="sub-fansub">
-          <Input
-            id="sub-fansub"
-            value={fansub}
-            onChange={(e) => setFansub(e.target.value)}
-            placeholder={strings.subscriptions.fansubPlaceholder}
-          />
-        </Field>
-        <div>
-          <Button type="submit" variant="primary" loading={submitting}>
-            {strings.subscriptions.submitAdd}
-          </Button>
-        </div>
-      </form>
-    </Card>
+          <div className="flex items-center justify-between gap-2">
+            <Button type="submit" variant="primary" loading={submitting}>
+              {strings.subscriptions.submitAdd}
+            </Button>
+            <a
+              href={MIKAN_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover"
+            >
+              {strings.subscriptions.mikanEntry}
+              <ExternalLink aria-hidden className="h-3 w-3" />
+            </a>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -465,6 +486,8 @@ function MySubscriptionsTab() {
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [editingSub, setEditingSub] = useState<SubscriptionDto | null>(null)
+  // 12-IA 弹窗化:添加订阅弹窗开关
+  const [adding, setAdding] = useState(false)
   // 取消订阅失败不再静默(A2):复用页面级 role="alert" 错误条
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -491,8 +514,12 @@ function MySubscriptionsTab() {
 
   return (
     <>
-      {/* 12-IA:RSS 源高级管理入口(日常订阅走 Tab1 选番) */}
-      <div className="flex justify-end">
+      {/* 12-IA 弹窗化:顶部一行操作区 —— 「添加订阅」主按钮 + RSS 源高级管理入口 */}
+      <div className="flex items-center justify-between">
+        <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+          <CirclePlus aria-hidden className="h-3.5 w-3.5" />
+          {strings.subscriptions.addSubscription}
+        </Button>
         <Link
           to="/rss-sources"
           data-testid="manage-rss-link"
@@ -509,54 +536,62 @@ function MySubscriptionsTab() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        <Card flush>
-          {error !== null ? (
-            <div className="p-4">
-              <ErrorState message={error} onRetry={reload} />
-            </div>
-          ) : loading ? (
-            <div className="flex flex-col gap-2 p-4">
-              <Skeleton className="h-16" />
-              <Skeleton className="h-16" />
-              <Skeleton className="h-16" />
-            </div>
-          ) : subs.length === 0 ? (
-            <div className="p-4">
-              <Tv aria-hidden className="mb-2 h-8 w-8 text-ink-muted" />
-              <EmptyState title={strings.subscriptions.empty} />
-            </div>
-          ) : (
-            subs.map((sub) => (
-              <SubscriptionRow
-                key={sub.id}
-                sub={sub}
-                onEdit={setEditingSub}
-                onRemove={(id) => void remove(id)}
-                removing={removingId === sub.id}
-              />
-            ))
-          )}
-          {confirmId !== null && (
-            <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-2.5">
-              <span className="text-xs text-ink-secondary">
-                {t(strings.subscriptions.removeConfirm, {
-                  title: subscriptionTitle(subs.find((s) => s.id === confirmId)!),
-                })}
-              </span>
-              <span className="flex gap-2">
-                <Button size="sm" variant="danger" onClick={() => void remove(confirmId)}>
-                  {strings.common.confirm}
+      <Card flush>
+        {error !== null ? (
+          <div className="p-4">
+            <ErrorState message={error} onRetry={reload} />
+          </div>
+        ) : loading ? (
+          <div className="flex flex-col gap-2 p-4">
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+          </div>
+        ) : subs.length === 0 ? (
+          <div className="p-4">
+            <Tv aria-hidden className="mb-2 h-8 w-8 text-ink-muted" />
+            {/* 12-IA 弹窗化:空态引导按钮指向添加订阅弹窗 */}
+            <EmptyState
+              title={strings.subscriptions.empty}
+              action={
+                <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+                  {strings.subscriptions.addSubscription}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmId(null)}>
-                  {strings.common.cancel}
-                </Button>
-              </span>
-            </div>
-          )}
-        </Card>
-        <AddSubscriptionForm onDone={reload} />
-      </div>
+              }
+            />
+          </div>
+        ) : (
+          subs.map((sub) => (
+            <SubscriptionRow
+              key={sub.id}
+              sub={sub}
+              onEdit={setEditingSub}
+              onRemove={(id) => void remove(id)}
+              removing={removingId === sub.id}
+            />
+          ))
+        )}
+        {confirmId !== null && (
+          <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-2.5">
+            <span className="text-xs text-ink-secondary">
+              {t(strings.subscriptions.removeConfirm, {
+                title: subscriptionTitle(subs.find((s) => s.id === confirmId)!),
+              })}
+            </span>
+            <span className="flex gap-2">
+              <Button size="sm" variant="danger" onClick={() => void remove(confirmId)}>
+                {strings.common.confirm}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmId(null)}>
+                {strings.common.cancel}
+              </Button>
+            </span>
+          </div>
+        )}
+      </Card>
+
+      {/* 12-IA 弹窗化:添加订阅弹窗(原常驻表单卡迁入) */}
+      <AddSubscriptionDialog open={adding} onOpenChange={setAdding} onDone={reload} />
 
       {editingSub !== null && (
         <EditSubscriptionDrawer

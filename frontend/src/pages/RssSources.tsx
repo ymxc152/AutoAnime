@@ -1,6 +1,7 @@
 /*
  * RSSSources —— 源管理:增删启停。
  * 数据:GET/POST/PATCH/DELETE /api/rss_sources。
+ * 12-IA 弹窗化:「添加源」常驻表单卡 → 标题行按钮 + 居中 Dialog(编辑仍走右侧 Drawer)。
  */
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -28,6 +29,13 @@ import {
 } from '../components'
 import { formatDateTime } from '../lib/views'
 import { Checkbox } from '@/components/ui/checkbox'
+// 12-IA 弹窗化:添加源常驻表单卡 → 按钮 + 居中 Dialog(编辑仍走右侧 Drawer)
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import type { RssSourceDto, RssSourceUpdateBody, SubscriptionDto } from '../api/types'
 
 /** 下拉选项:番名 + 季号 + season id 拼显示文案(B2:手输主键全 UI 无处可查) */
@@ -63,10 +71,19 @@ function buildSeasonOptions(subs: SubscriptionDto[]): SeasonOption[] {
   )
 }
 
-function AddSourceForm({
+/**
+ * 添加源弹窗(12-IA 弹窗化:原常驻 AddSourceForm 表单卡整体迁入,
+ * url/关联季/令牌逻辑与无可选季「去追番」引导不变,仅容器从卡片变居中 Dialog;
+ * 提交成功后关闭并刷新)。
+ */
+function AddSourceDialog({
+  open,
+  onOpenChange,
   onDone,
   seasonOptions,
 }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
   onDone: () => void
   seasonOptions: SeasonOption[]
 }) {
@@ -98,6 +115,7 @@ function AddSourceForm({
       setSeasonId('')
       setToken('')
       onDone()
+      onOpenChange(false)
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
     } finally {
@@ -106,77 +124,77 @@ function AddSourceForm({
   }
 
   return (
-    <Card
-      title={
-        <span className="inline-flex items-center gap-1.5">
-          <Rss aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
-          {strings.rssSources.addSource}
-        </span>
-      }
-      className="mb-4"
-    >
-      <form
-        className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr_1fr_auto] md:items-start"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void submit()
-        }}
-      >
-        <Field label={strings.rssSources.url} error={error} htmlFor="rss-url">
-          <Input
-            id="rss-url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            invalid={error !== null}
-            className="data-text"
-          />
-        </Field>
-        <Field
-          label={strings.rssSources.season}
-          description={strings.rssSources.seasonHint}
-          htmlFor="rss-season"
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="inline-flex items-center gap-1.5">
+            <Rss aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
+            {strings.rssSources.addSource}
+          </DialogTitle>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submit()
+          }}
         >
-          <Select
-            id="rss-season"
-            value={seasonId}
-            onChange={(e) => setSeasonId(e.target.value)}
+          <Field label={strings.rssSources.url} error={error} htmlFor="rss-url">
+            <Input
+              id="rss-url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              invalid={error !== null}
+              className="data-text"
+            />
+          </Field>
+          <Field
+            label={strings.rssSources.season}
+            description={strings.rssSources.seasonHint}
+            htmlFor="rss-season"
           >
-            <option value="" className="text-ink-muted">
-              {seasonOptions.length === 0
-                ? strings.rssSources.seasonEmptyOption
-                : strings.rssSources.seasonPlaceholder}
-            </option>
-            {seasonOptions.map((option) => (
-              <option key={option.id} value={String(option.id)}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-          {/* 12-UX:无可选季时不再让用户自己找侧栏,给一条去追番页的直达路径 */}
-          {seasonOptions.length === 0 && (
-            <Link
-              to="/subscriptions"
-              className="inline-flex h-7 w-fit items-center gap-1.5 self-start rounded-sm px-2 text-xs font-medium text-ink-secondary transition-colors duration-[var(--ink-transition-fast)] hover:bg-surface-2 hover:text-ink"
+            <Select
+              id="rss-season"
+              value={seasonId}
+              onChange={(e) => setSeasonId(e.target.value)}
             >
-              {strings.uxfix.emptyRssCta}
-            </Link>
-          )}
-        </Field>
-        <Field label={strings.rssSources.token} description={strings.rssSources.tokenHint} htmlFor="rss-token">
-          <Input
-            id="rss-token"
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-        </Field>
-        <div className="md:pt-6">
-          <Button type="submit" variant="primary" loading={submitting}>
-            {strings.rssSources.addSubmit}
-          </Button>
-        </div>
-      </form>
-    </Card>
+              <option value="" className="text-ink-muted">
+                {seasonOptions.length === 0
+                  ? strings.rssSources.seasonEmptyOption
+                  : strings.rssSources.seasonPlaceholder}
+              </option>
+              {seasonOptions.map((option) => (
+                <option key={option.id} value={String(option.id)}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            {/* 12-UX:无可选季时不再让用户自己找侧栏,给一条去追番页的直达路径 */}
+            {seasonOptions.length === 0 && (
+              <Link
+                to="/subscriptions"
+                className="inline-flex h-7 w-fit items-center gap-1.5 self-start rounded-sm px-2 text-xs font-medium text-ink-secondary transition-colors duration-[var(--ink-transition-fast)] hover:bg-surface-2 hover:text-ink"
+              >
+                {strings.uxfix.emptyRssCta}
+              </Link>
+            )}
+          </Field>
+          <Field label={strings.rssSources.token} description={strings.rssSources.tokenHint} htmlFor="rss-token">
+            <Input
+              id="rss-token"
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </Field>
+          <div>
+            <Button type="submit" variant="primary" loading={submitting}>
+              {strings.rssSources.addSubmit}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -303,6 +321,8 @@ export function RssSourcesPage() {
   // 12-F:行内「立即轮询」进行中的源 id(null = 空闲;防重复点击)
   const [pollingId, setPollingId] = useState<number | null>(null)
   const [editingSource, setEditingSource] = useState<RssSourceDto | null>(null)
+  // 12-IA 弹窗化:添加源弹窗开关
+  const [adding, setAdding] = useState(false)
   // 启停/移除失败不再静默(A2):复用页面级 role="alert" 错误条
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -489,7 +509,16 @@ export function RssSourcesPage() {
 
   return (
     <>
-      <PageTitle title={strings.rssSources.title} />
+      {/* 12-IA 弹窗化:标题行右侧「添加源」主按钮(原常驻表单卡移入 Dialog) */}
+      <PageTitle
+        title={strings.rssSources.title}
+        actions={
+          <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+            <Rss aria-hidden className="h-3.5 w-3.5" />
+            {strings.common.add}
+          </Button>
+        }
+      />
 
       {/* 12-IA:页面定位提示 —— 本页是高级管理入口,日常订阅在「追番」页选番 */}
       <div
@@ -507,7 +536,6 @@ export function RssSourcesPage() {
         </div>
       )}
 
-      <AddSourceForm onDone={reload} seasonOptions={seasonOptions} />
       <Card flush>
         {error !== null ? (
           <div className="p-4">
@@ -533,6 +561,14 @@ export function RssSourcesPage() {
           />
         )}
       </Card>
+
+      {/* 12-IA 弹窗化:添加源弹窗(原常驻表单卡迁入) */}
+      <AddSourceDialog
+        open={adding}
+        onOpenChange={setAdding}
+        onDone={reload}
+        seasonOptions={seasonOptions}
+      />
 
       {editingSource !== null && (
         <EditSourceDrawer

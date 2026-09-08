@@ -208,12 +208,14 @@ describe('SubscriptionsPage', () => {
     expect(within(row).getByText('已归档 28/28 集')).toBeInTheDocument()
   })
 
-  it('Mikan 选番入口与 RSS 关联提示存在', async () => {
+  it('Mikan 选番入口与 RSS 关联提示存在(12-IA 弹窗化:位于添加订阅弹窗内)', async () => {
     const user = userEvent.setup()
     renderPage(<SubscriptionsPage />)
     await openMineTab(user)
-    expect(await screen.findByText(/先在这里建订阅,再在「RSS 源」页/)).toBeInTheDocument()
-    const link = screen.getByRole('link', { name: /去 Mikan 选番/ })
+    await user.click(await screen.findByRole('button', { name: '添加订阅' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/先在这里建订阅,再在「RSS 源」页/)).toBeInTheDocument()
+    const link = within(dialog).getByRole('link', { name: /去 Mikan 选番/ })
     expect(link).toHaveAttribute('href', 'https://mikanani.me')
   })
 
@@ -250,25 +252,43 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
-  it('添加订阅:标题 + 季号 + 集数(预生成 MISSING 集表)', async () => {
+  it('添加订阅:标题 + 季号 + 集数(预生成 MISSING 集表);成功后弹窗关闭(12-IA 弹窗化)', async () => {
     const user = userEvent.setup()
     renderPage(<SubscriptionsPage />)
     await openMineTab(user)
+    await user.click(await screen.findByRole('button', { name: '添加订阅' }))
     await user.type(await screen.findByLabelText('标题(至少填一个语言的标题)'), '测试番')
     await user.type(screen.getByLabelText('当季集数(可选)'), '12')
     await user.click(screen.getByRole('button', { name: '订阅' }))
     expect(await screen.findByText('测试番')).toBeInTheDocument()
     // 预生成集表:全 MISSING → 已归档 0/12
     expect(await screen.findByText('已归档 0/12 集')).toBeInTheDocument()
+    // 12-IA 弹窗化:提交成功后弹窗关闭
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
   it('空标题提交显示校验错误(对齐后端至少一个标题)', async () => {
     const user = userEvent.setup()
     renderPage(<SubscriptionsPage />)
     await openMineTab(user)
+    await user.click(await screen.findByRole('button', { name: '添加订阅' }))
     await screen.findByText('药屋少女的呢喃')
     await user.click(screen.getByRole('button', { name: '订阅' }))
     expect(await screen.findByText('请填写标题')).toBeInTheDocument()
+  })
+
+  it('12-IA 弹窗化:点「添加订阅」打开弹窗(标题/字段/提交按钮齐全)', async () => {
+    const user = userEvent.setup()
+    renderPage(<SubscriptionsPage />)
+    await openMineTab(user)
+    await user.click(await screen.findByRole('button', { name: '添加订阅' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: '添加订阅' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('标题(至少填一个语言的标题)')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('季号')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('当季集数(可选)')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('字幕组偏好')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '订阅' })).toBeEnabled()
   })
 
   it('编辑订阅:状态/字幕组可更新,清空偏好显式提交 null', async () => {
