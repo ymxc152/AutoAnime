@@ -37,6 +37,7 @@ from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
 from autoanime.organize import confirm_archive, mover
+from autoanime.organize.library_ingest import upsert_archived_file
 from autoanime.organize.naming import NamingInput, relative_path
 from autoanime.organize.poster import PosterService
 from autoanime.pipeline.l1_local import LocalRecognizer
@@ -1091,6 +1092,21 @@ async def _handle_import_outcome(
     item["action"] = "archive"
     item["dst"] = str(executed.dst_paths[0])
     await _import_audit(governance, file, result, plan, executed)
+    # P0-B 库收纳：归档落盘 + audit 后 upsert series/season/episode 库条目
+    # （Library 页可见性根因修复；web 端 _run_import_task 复用本函数自动生效）。
+    # dry-run 在上方提前 return 绝不走到这里；失败吞在 upsert 内不拖垮导入批。
+    ingest = await upsert_archived_file(
+        store,
+        titles={"title_cn": result.title},
+        media_type="movie" if result.segment is Segment.MOVIE else "tv",
+        season_number=result.season,
+        episode_number=result.episode,
+        file_path=str(executed.dst_paths[0]),
+    )
+    if ingest.ok:
+        item["series_id"] = ingest.series_id
+    else:
+        item["library_ingest"] = ingest.note
     return item
 
 

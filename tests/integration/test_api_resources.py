@@ -24,7 +24,9 @@ from autoanime.core.models import (
     PendingQueue,
 )
 from autoanime.memory.governance import MemoryGovernance
+from autoanime.organize.library_ingest import upsert_archived_file
 from autoanime.pipeline.l3.reference import ReferenceFacts
+from autoanime.scheduler.store import LoopStore
 from autoanime.web.app import create_app
 
 
@@ -104,6 +106,68 @@ async def test_subscription_create_and_series_tree(client) -> None:
     resp = await c.get("/api/series", params={"limit": 1, "offset": 1})
     page = resp.json()
     assert page["total"] == 1 and page["items"] == []
+
+
+async def test_subscription_adopts_imported_series_without_phantom_missing(client) -> None:
+    """P0-B adopt：先 import（upsert ORGANIZED 行）后订阅 → 无整季 MISSING 幻影。
+
+    已有 ORGANIZED 行保留，只补缺失集号；不传 rss_url → rss_saved=false。
+    """
+    c, _ = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    store = LoopStore(app_state.storage)
+    report = await upsert_archived_file(
+        store,
+        titles={"title_cn": "葬送的芙莉莲"},
+        media_type="tv",
+        season_number=1,
+        episode_number=1,
+        file_path="/library/葬送的芙莉莲/Season 01/ep01.mkv",
+    )
+    assert report.ok
+
+    resp = await c.post(
+        "/api/subscriptions",
+        json={"title_cn": "葬送的芙莉莲", "season_number": 1, "episode_count": 3},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["rss_saved"] is False
+    season = body["seasons"][0]
+    assert season["episodes_total"] == 3
+    assert season["episodes_organized"] == 1  # import 归档行保留
+    assert season["episodes_missing"] == 2  # 只补缺失集号，无整季幻影
+
+    page = (await c.get("/api/series")).json()
+    assert page["total"] == 1  # 未新建重复 Series
+
+
+async def test_subscription_one_step_rss_saved_and_token_not_echoed(client) -> None:
+    """P0-B 一步订阅契约：rss_url/rss_token 与订阅同事务落库，token 不回显。"""
+    c, _ = client
+    resp = await c.post(
+        "/api/subscriptions",
+        json={
+            "title_cn": "孤独摇滚",
+            "season_number": 1,
+            "episode_count": 2,
+            "bangumi_id": "406790",
+            "rss_url": "https://mikan.example/RSS/MyBangumi",
+            "rss_token": "secret-token",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["rss_saved"] is True
+    assert body["seasons"][0]["rss_sources"] == 1
+    assert "secret-token" not in resp.text
+
+    # 同事务落库：rss_sources 行挂在本季，token 只存 DB 不出现在任何响应
+    page = (await c.get("/api/rss_sources")).json()
+    assert page["total"] == 1
+    assert page["items"][0]["season_id"] == body["seasons"][0]["season_id"]
+    assert page["items"][0]["has_token"] is True
+    assert "secret-token" not in str(page)
 
 
 async def test_series_poster_serves_local_library_file(client) -> None:

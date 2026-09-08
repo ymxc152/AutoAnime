@@ -308,6 +308,33 @@ def test_dry_run_pending_item_writes_no_row(tmp_path: Path) -> None:
 # ------------------------------------------------- 单元：重跑幂等（R2 验收）
 
 
+def test_import_upserts_library_tree(env: dict[str, Path]) -> None:
+    """P0-B 库收纳：import 归档后 series/season/episode 树出现且 episode ORGANIZED。
+
+    dry-run 绝不建库条目；实跑后 file_path 指向真实归档位（Library 页可见性
+    根因修复）。
+    """
+    source = _make_tree(env["root"], {HIGH_NAME: b"high"})
+    preview = json.loads(_run_cli("import", source.as_posix(), "--dry-run")[1])
+    assert preview["archived"] == 1
+    with sqlite3.connect(env["db"]) as conn:
+        assert conn.execute("SELECT count(*) FROM series").fetchone()[0] == 0
+
+    payload = json.loads(_run_cli("import", source.as_posix())[1])
+    archived = [i for i in payload["items"] if i["action"] == "archive"]
+    assert len(archived) == 1
+    dst = str(archived[0]["dst"])
+    assert isinstance(archived[0]["series_id"], int)
+
+    with sqlite3.connect(env["db"]) as conn:
+        series = conn.execute("SELECT title_cn, media_type, status FROM series").fetchall()
+        seasons = conn.execute("SELECT number FROM season").fetchall()
+        episodes = conn.execute("SELECT number, state, file_path FROM episode").fetchall()
+    assert series == [("Bocchi the Rock", "tv", "active")]
+    assert seasons == [(1,)]
+    assert episodes == [(1, "organized", dst)]
+
+
 def test_import_rerun_skips_already_archived_and_pending(env: dict[str, Path]) -> None:
     """R2 验收：同一目录连跑两遍 import，第二遍 scanned 全部 skipped 零新增。
 

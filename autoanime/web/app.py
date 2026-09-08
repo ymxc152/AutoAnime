@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from autoanime.config import Settings, apply_db_overrides, load_settings
 from autoanime.core.events import InMemoryEventBus
 from autoanime.core.interfaces import Registry
+from autoanime.gateway.bangumi_calendar import BangumiCalendarGateway
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.store import SqliteStorage
 from autoanime.organize.poster import PosterService
@@ -83,11 +84,14 @@ def create_app(
             settings=settings,
             chain_provider=lambda: getattr(app.state, "reference_chain", None),
         )
+        # 选番网关（P1-C）：TTL 缓存/QPS 频控/降级链都在实例内，外呼惰性发起。
+        app.state.bangumi_calendar = BangumiCalendarGateway()
         try:
             yield
         finally:
             # 海报服务的下载连接先于 storage 关闭。
             await app.state.poster_service.aclose()
+            await app.state.bangumi_calendar.aclose()
             await storage.close()
 
     app = FastAPI(

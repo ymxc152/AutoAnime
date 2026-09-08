@@ -196,6 +196,8 @@ class SubscriptionOut(BaseModel):
     fansub_pref: str | None
     quality_pref: str | None
     seasons: list[SeasonProgressOut]
+    # P0-B 一步订阅契约：token/URL 永不回显，只回「本次提交的 RSS 是否落库」。
+    rss_saved: bool = False
 
 
 class SubscriptionCreateIn(BaseModel):
@@ -208,6 +210,11 @@ class SubscriptionCreateIn(BaseModel):
     episode_count: int | None = None
     fansub_pref: str | None = None
     quality_pref: str | None = None
+    # P0-B 一步订阅契约：bangumi_id 作 adopt 精确键；rss_url/rss_token 提供
+    # 时与订阅同一事务挂 RSS 源（token 用 SecretStr 承载、任何响应不回显）。
+    bangumi_id: str | None = None
+    rss_url: str | None = None
+    rss_token: SecretStr | None = None
 
     @field_validator("media_type")
     @classmethod

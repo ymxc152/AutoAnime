@@ -13,6 +13,7 @@ from fastapi import Depends, Query, Request
 
 from autoanime.config import Settings
 from autoanime.core.events import InMemoryEventBus
+from autoanime.gateway.bangumi_calendar import BangumiCalendarGateway
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.store import SqliteStorage
 from autoanime.organize.poster import PosterService
@@ -58,6 +59,16 @@ def get_poster_service(request: Request) -> PosterService:
 
 ReferenceChainDep = Annotated[ReferenceChain | None, Depends(get_reference_chain)]
 PosterServiceDep = Annotated[PosterService, Depends(get_poster_service)]
+
+
+def get_bangumi_calendar(request: Request) -> BangumiCalendarGateway:
+    """选番网关（P1-C；lifespan 装配，测试可整体替换）。"""
+    return request.app.state.bangumi_calendar
+
+
+BangumiCalendarDep = Annotated[
+    BangumiCalendarGateway, Depends(get_bangumi_calendar)
+]
 
 
 @dataclass(frozen=True)

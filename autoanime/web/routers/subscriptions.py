@@ -97,7 +97,13 @@ async def create_subscription(
     governance: GovernanceDep,
     bus: BusDep,
 ) -> SubscriptionOut:
-    """新建订阅：Series + 当季 Season + 预生成 N 条 MISSING 集行（一个事务）。"""
+    """新建订阅：Series + 当季 Season + 预生成 N 条 MISSING 集行（一个事务）。
+
+    P0-B adopt：bangumi_id（精确）/ 标题 shape 命中已有 Series 时收编——
+    置回 active、只补缺失集号 MISSING（import 归档的 ORGANIZED 行保留，
+    消「先导入后订阅整季幻影 MISSING」）。rss_url 提供时同一事务挂
+    RssSource（token 只落库不回显，响应只给 rss_saved 布尔）。
+    """
     season = Season(number=body.season_number)
     episodes = [
         Episode(number=number, state=EpisodeState.MISSING)
@@ -108,14 +114,24 @@ async def create_subscription(
         title_jp=body.title_jp,
         title_romaji=body.title_romaji,
         media_type=MediaType(body.media_type),
+        bangumi_id=body.bangumi_id,
         fansub_pref=body.fansub_pref,
         quality_pref=body.quality_pref,
         status="active",
     )
     try:
-        created = await store.create_subscription(series, season, episodes)
+        upserted = await store.create_or_adopt_subscription(
+            series,
+            season,
+            episodes,
+            rss_url=str(body.rss_url) if body.rss_url else None,
+            rss_token=(
+                body.rss_token.get_secret_value() if body.rss_token is not None else None
+            ),
+        )
     except Exception as exc:  # 含 ck_series_title 校验失败
         raise HTTPException(status_code=422, detail=f"subscription rejected: {exc}") from None
+    created = upserted.series
     audit = await governance.record_audit(
         operation_id=uuid4().hex,
         entity="series",
@@ -125,6 +141,8 @@ async def create_subscription(
             "season_number": body.season_number,
             "episodes_pregenerated": len(episodes),
             "media_type": body.media_type,
+            "adopted": upserted.adopted,
+            "rss_saved": upserted.rss_saved,
         },
     )
     await publish(
@@ -134,7 +152,9 @@ async def create_subscription(
         audit_id=audit.id,
         series_id=created.id,
     )
-    return await _get_subscription(store, created.id)
+    out = await _get_subscription(store, created.id)
+    out.rss_saved = upserted.rss_saved
+    return out
 
 
 @router.get("/{series_id}", response_model=SubscriptionOut)

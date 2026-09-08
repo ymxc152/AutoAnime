@@ -86,6 +86,35 @@ class LoopStore:
             await session.flush()
         return row
 
+    # --- P0-B 库收纳（organize.library_ingest）：不经状态机的直接行写入 -------
+
+    async def list_series(self) -> list[Series]:
+        """全量 Series 行（库收纳的标题 shape 内存查重用；单用户库量小）。"""
+        async with self._storage.transaction() as session:
+            rows = (
+                await session.execute(select(Series).order_by(Series.id))
+            ).scalars().all()
+        return list(rows)
+
+    async def insert_series(self, row: Series) -> Series:
+        async with self._storage.transaction() as session:
+            session.add(row)
+            await session.flush()
+        return row
+
+    async def insert_season(self, row: Season) -> Season:
+        async with self._storage.transaction() as session:
+            session.add(row)
+            await session.flush()
+        return row
+
+    async def insert_episode(self, row: Episode) -> Episode:
+        """直接插入任意状态集行（库收纳以 state=ORGANIZED 入库，不走转移）。"""
+        async with self._storage.transaction() as session:
+            session.add(row)
+            await session.flush()
+        return row
+
     # --- read sides ----------------------------------------------------------
 
     async def enabled_rss_sources(self) -> list[RssSource]:

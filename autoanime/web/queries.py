@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy import BigInteger, delete, func, or_, select
 
-from autoanime.core.enums import MemoryStatus, PendingStatus, ResolvedBy
+from autoanime.core.enums import MediaType, MemoryStatus, PendingStatus, ResolvedBy
 from autoanime.core.models import (
     AuditLog,
     Episode,
@@ -28,6 +28,7 @@ from autoanime.core.models import (
     Series,
 )
 from autoanime.memory.store import SqliteStorage
+from autoanime.pipeline.l2.placeholders import build_title_shape
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,24 @@ class MetricsSnapshot:
     pending_open: int = 0
     episode_states: dict[str, int] = field(default_factory=dict)
     memory_sources: list[dict[str, object]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SubscriptionUpsertResult:
+    """P0-B adopt 建订阅的结果：series 行 + 是否收编已有番 + RSS 是否落库。"""
+
+    series: Series
+    adopted: bool
+    rss_saved: bool
+
+
+def _enum_value(value: MediaType | str) -> str:
+    return value.value if isinstance(value, MediaType) else str(value)
+
+
+def _title_shapes(*titles: str | None) -> set[str]:
+    """非空标题的归一化 shape 集合（P0-B adopt 查重键）。"""
+    return {build_title_shape(title) for title in titles if title}
 
 
 class ApiStore:
@@ -296,6 +315,123 @@ class ApiStore:
                 episode.season_id = season.id
             session.add_all(episodes)
         return series
+
+    async def create_or_adopt_subscription(
+        self,
+        series: Series,
+        season: Season,
+        episodes: list[Episode],
+        *,
+        rss_url: str | None = None,
+        rss_token: str | None = None,
+    ) -> SubscriptionUpsertResult:
+        """P0-B adopt 建订阅（一个事务）：已有番收编，未命中走原 create。
+
+        查重：``Series.bangumi_id`` 精确匹配优先；否则 ``build_title_shape``
+        归一化标题与全量 Series 行内存比对（单用户库量小，全量可接受），
+        ``media_type`` 参与比对（剧场版 vs TV 同题不合并）。
+
+        命中（adopt 消幻影）：status 置回 active、回填空标题/bangumi_id、
+        find_or_create Season、**只为缺失集号补 MISSING 行**（已有
+        ORGANIZED/UPGRADED 等 import 归档行原样保留，绝不整季重生成）。
+        未命中：与 ``create_subscription`` 同语义落 series/season/episodes。
+
+        ``rss_url`` 提供时在同一事务内挂 RssSource（season_id 用新建/命中
+        的季；同季同 URL 已存在则不重复建）。token 只落 DB，调用端不回显。
+        """
+        async with self._storage.transaction() as session:
+            existing: Series | None = None
+            if series.bangumi_id:
+                existing = (
+                    await session.execute(
+                        select(Series).where(Series.bangumi_id == series.bangumi_id)
+                    )
+                ).scalars().first()
+            if existing is None:
+                incoming = _title_shapes(series.title_cn, series.title_jp, series.title_romaji)
+                if incoming:
+                    for row in (
+                        await session.execute(select(Series).order_by(Series.id))
+                    ).scalars():
+                        if _enum_value(row.media_type) != _enum_value(series.media_type):
+                            continue
+                        if _title_shapes(
+                            row.title_cn, row.title_jp, row.title_romaji
+                        ) & incoming:
+                            existing = row
+                            break
+
+            rss_saved = False
+            if existing is not None:
+                # adopt：置回 active + 回填空槽，不覆盖已有偏好/标题。
+                existing.status = "active"
+                for slot in ("title_cn", "title_jp", "title_romaji"):
+                    if getattr(existing, slot) is None and getattr(series, slot) is not None:
+                        setattr(existing, slot, getattr(series, slot))
+                if existing.bangumi_id is None and series.bangumi_id:
+                    existing.bangumi_id = series.bangumi_id
+                session.add(existing)
+                await session.flush()
+                season_row = (
+                    await session.execute(
+                        select(Season).where(
+                            Season.series_id == existing.id,
+                            Season.number == season.number,
+                        )
+                    )
+                ).scalars().first()
+                if season_row is None:
+                    season.series_id = existing.id
+                    session.add(season)
+                    await session.flush()
+                    season_row = season
+                existing_numbers = set(
+                    (
+                        await session.execute(
+                            select(Episode.number).where(Episode.season_id == season_row.id)
+                        )
+                    ).scalars().all()
+                )
+                for episode in episodes:
+                    if episode.number in existing_numbers:
+                        continue  # 已有行（含 ORGANIZED 归档行）原样保留
+                    episode.series_id = existing.id
+                    episode.season_id = season_row.id
+                    session.add(episode)
+                target: Series = existing
+                target_season_id = season_row.id
+                adopted = True
+            else:
+                session.add(series)
+                await session.flush()
+                season.series_id = series.id
+                session.add(season)
+                await session.flush()
+                for episode in episodes:
+                    episode.series_id = series.id
+                    episode.season_id = season.id
+                session.add_all(episodes)
+                target = series
+                target_season_id = season.id
+                adopted = False
+
+            if rss_url:
+                duplicate = (
+                    await session.execute(
+                        select(RssSource).where(
+                            RssSource.season_id == target_season_id,
+                            RssSource.url == rss_url,
+                        )
+                    )
+                ).scalars().first()
+                if duplicate is None:
+                    session.add(
+                        RssSource(
+                            url=rss_url, token=rss_token, season_id=target_season_id
+                        )
+                    )
+                    rss_saved = True
+        return SubscriptionUpsertResult(series=target, adopted=adopted, rss_saved=rss_saved)
 
     async def update_series_fields(
         self, series_id: int, fields: dict[str, object]
