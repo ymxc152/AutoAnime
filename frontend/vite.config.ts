@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath, URL } from 'node:url'
+import { ServerResponse } from 'node:http'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -20,6 +21,16 @@ export default defineConfig({
       '/api': {
         target: proxyTarget,
         changeOrigin: true,
+        // 12-IA 审核 P0 根修:后端未就绪/连接竞争时 http-proxy 默认无限悬挂,
+        // 客户端只见 loading;对 proxy error 显式回 502 让前端超时/错误态接管。
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            if (res instanceof ServerResponse && !res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ detail: 'backend-unreachable' }))
+            }
+          })
+        },
       },
     },
   },

@@ -2,7 +2,7 @@
  * FolderPickerDialog 单测(P1-D):盘符根加载/下钻/面包屑回跳/空目录/错误重试/
  * 选择回调与禁用态。mock 走 spyOn api.filesystem(不经 mocks/handlers.ts)。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 import { FolderPickerDialog } from '../FolderPickerDialog'
 import { api } from '../../api'
@@ -78,6 +78,31 @@ describe('FolderPickerDialog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('boom')
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => expect(list).toHaveBeenLastCalledWith(''))
+  })
+
+  it('P0 逃生门:请求 8s 未响应转可重试错误态;重试恢复且丢弃旧响应', async () => {
+    vi.useFakeTimers()
+    try {
+      const list = vi
+        .spyOn(api.filesystem, 'list')
+        // 第一次永不 resolve(模拟 vite proxy 悬挂),重试后正常返回
+        .mockReturnValueOnce(new Promise(() => {}))
+        .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'] })
+      render(<FolderPickerDialog open onClose={vi.fn()} onPick={vi.fn()} />)
+      // 推进 8s:超时竞速触发,转错误态而非永久「加载中」
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8001)
+      })
+      expect(screen.getByRole('alert')).toHaveTextContent('加载失败')
+      expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
+      // 回到真实时钟后重试:立即 resolve 的 mock 正常渲染列表
+      vi.useRealTimers()
+      fireEvent.click(screen.getByRole('button', { name: '重试' }))
+      expect(await screen.findByTestId('picker-row-C:\\')).toBeInTheDocument()
+      expect(list).toHaveBeenLastCalledWith('')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('空目录列表显示空态文案', async () => {

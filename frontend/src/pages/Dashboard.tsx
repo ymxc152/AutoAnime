@@ -183,17 +183,23 @@ function OnboardingCard() {
     return null
   }
 
-  // 12-IA:三步文案与跳转对新流程(选番 → 导入 → 媒体库),动作链接与文案指向一致
-  const steps: { icon: LucideIcon; label: string; to: string }[] = [
+  // 12-IA:三步文案与跳转对新流程(选番 → 导入 → 媒体库),动作链接与文案指向一致;
+  // P1-UX:步骤②补前置说明(qBittorrent 需先配置)
+  const steps: { icon: LucideIcon; label: string; note?: string; to: string }[] = [
     { icon: Tv, label: strings.uxfix.onboardingStep1, to: '/subscriptions' },
-    { icon: FolderDown, label: strings.uxfix.onboardingStep2, to: '/pipeline' },
+    {
+      icon: FolderDown,
+      label: strings.uxfix.onboardingStep2,
+      note: strings.uxfix.onboardingStep2Note,
+      to: '/pipeline',
+    },
     { icon: LibraryBig, label: strings.uxfix.onboardingStep3, to: '/library' },
   ]
 
   return (
     <Card title={strings.uxfix.onboardingTitle} flush className="mb-3">
       <nav className="flex flex-col px-2 pb-2">
-        {steps.map(({ icon: Icon, label, to }) => (
+        {steps.map(({ icon: Icon, label, note, to }) => (
           <Link
             key={to}
             to={to}
@@ -205,7 +211,12 @@ function OnboardingCard() {
             >
               <Icon className="h-3.5 w-3.5" />
             </span>
-            {label}
+            <span className="flex min-w-0 flex-col">
+              <span>{label}</span>
+              {note !== undefined && (
+                <span className="text-xs text-ink-muted">{note}</span>
+              )}
+            </span>
           </Link>
         ))}
       </nav>

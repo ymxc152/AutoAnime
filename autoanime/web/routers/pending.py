@@ -226,7 +226,9 @@ async def confirm_pending(
     )
     await publish(
         bus,
-        category=EventCategory.PARSE,
+        # 归档成功走 ORGANIZE 类别（Library 页只监听 organize/system，PARSE
+        # 类别不触发其自动刷新）；未归档保持 PARSE。事件名/负载不变。
+        category=EventCategory.ORGANIZE if archive.archived else EventCategory.PARSE,
         message="pending.confirmed",
         audit_id=audit.id if audit is not None else None,
         pending_id=pending_id,
@@ -284,7 +286,8 @@ async def correct_pending(
     )
     await publish(
         bus,
-        category=EventCategory.PARSE,
+        # 与 confirm 同口径：归档成功 → ORGANIZE（Library 实时刷新）。
+        category=EventCategory.ORGANIZE if archive.archived else EventCategory.PARSE,
         message="pending.corrected",
         audit_id=audit.id if audit is not None else None,
         pending_id=pending_id,

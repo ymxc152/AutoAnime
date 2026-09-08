@@ -341,10 +341,20 @@ function ManualOperations() {
                   ? `${strings.pipeline.running} · ${t(strings.uxfix.importProgress, { done: task.processed, total: task.total })}`
                   : strings.pipeline.running
                 : task.status === 'completed'
-                  ? strings.pipeline.completed
+                  ? // P1:完成后按 summary 口径给人话汇总 —— processed 在
+                    // 待确认/跳过场景恒为 0,「已完成 · 0/3」会误导;summary 字段
+                    // 见 types.ts PipelineTask.summary(total/scanned/archived/
+                    // pending/failed/skipped),失败为 0 时省略
+                    task.summary !== null
+                    ? [
+                        strings.pipeline.completed,
+                        `${task.summary.total} 个文件:归档 ${task.summary.archived} · 待人工确认 ${task.summary.pending} · 跳过 ${task.summary.skipped}`,
+                        ...(task.summary.failed > 0
+                          ? [`失败 ${task.summary.failed}`]
+                          : []),
+                      ].join(' · ')
+                    : strings.pipeline.completed
                   : strings.pipeline.failed}
-              {task.summary !== null &&
-                ` · ${task.summary.archived}/${task.summary.scanned}`}
               {task.error !== null && ` · ${task.error}`}
             </p>
           )}

@@ -412,6 +412,8 @@ function SubscriptionRow({
   onRemove: (id: number) => void
   removing: boolean
 }) {
+  // P1-UX:每行给「在 Mikan 搜索」小外链(触屏用户也可直达),按标题拼接搜索地址
+  const mikanSearchUrl = `${MIKAN_URL}/Home/Search?searchstr=${encodeURIComponent(subscriptionTitle(sub))}`
   return (
     <div className="flex flex-col gap-2 border-b border-line px-4 py-2.5 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
@@ -421,7 +423,19 @@ function SubscriptionRow({
           {subscriptionStatusLabel(sub.status)}
         </Badge>
         <Badge>{sub.fansub_pref ?? strings.subscriptions.noFansub}</Badge>
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-1.5">
+          {/* P1-UX:「在 Mikan 搜索」小外链(新窗口打开,不冒泡) */}
+          <a
+            href={mikanSearchUrl}
+            target="_blank"
+            rel="noreferrer"
+            data-testid={`mikan-search-${sub.id}`}
+            aria-label={`${strings.uxfix.mikanSearch} ${subscriptionTitle(sub)}`}
+            className="inline-flex items-center gap-1 text-xs font-medium text-ink-secondary transition-colors hover:text-ink"
+          >
+            <ExternalLink aria-hidden className="h-3 w-3" />
+            {strings.uxfix.mikanSearch}
+          </a>
           <Button size="sm" variant="secondary" onClick={() => onEdit(sub)}>
             {strings.subscriptions.edit}
           </Button>
@@ -440,6 +454,9 @@ function SubscriptionRow({
       ) : (
         sub.seasons.map((season) => {
           const view = seasonStateView(season.status)
+          // P1-UX:未放送/集数总数为 0 时,「已归档 0/0 集 缺 0 集」无信息量 → 如实标注
+          const notAired = season.status === 'upcoming'
+          const noEpisodes = notAired || season.episodes_total === 0
           const progress =
             season.episodes_total > 0
               ? season.episodes_organized / season.episodes_total
@@ -452,15 +469,23 @@ function SubscriptionRow({
                   {t(strings.library.seasonN, { n: season.number })}
                 </span>
                 <span>{view.label}</span>
-                <span className="data-text">
-                  {t(strings.subscriptions.organizedOfTotal, {
-                    organized: season.episodes_organized,
-                    total: season.episodes_total,
-                  })}
-                </span>
-                <span className="data-text">
-                  {t(strings.subscriptions.missingCount, { count: season.episodes_missing })}
-                </span>
+                {noEpisodes ? (
+                  <span className="data-text">
+                    {notAired ? strings.uxfix.notAired : strings.uxfix.episodesUnknown}
+                  </span>
+                ) : (
+                  <>
+                    <span className="data-text">
+                      {t(strings.subscriptions.organizedOfTotal, {
+                        organized: season.episodes_organized,
+                        total: season.episodes_total,
+                      })}
+                    </span>
+                    <span className="data-text">
+                      {t(strings.subscriptions.missingCount, { count: season.episodes_missing })}
+                    </span>
+                  </>
+                )}
                 <span className="data-text">
                   {t(strings.subscriptions.rssCount, { count: season.rss_sources })}
                 </span>
@@ -590,8 +615,13 @@ function MySubscriptionsTab() {
         )}
       </Card>
 
-      {/* 12-IA 弹窗化:添加订阅弹窗(原常驻表单卡迁入) */}
-      <AddSubscriptionDialog open={adding} onOpenChange={setAdding} onDone={reload} />
+      {/* 12-IA 弹窗化:添加订阅弹窗(原常驻表单卡迁入);key 随开关重挂载 → 重开不留旧输入/旧报错 */}
+      <AddSubscriptionDialog
+        key={adding ? 'adding-open' : 'adding-closed'}
+        open={adding}
+        onOpenChange={setAdding}
+        onDone={reload}
+      />
 
       {editingSub !== null && (
         <EditSubscriptionDrawer

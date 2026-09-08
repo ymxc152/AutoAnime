@@ -282,6 +282,8 @@ export interface SubscriptionDto {
   seasons: SeasonProgressDto[]
   /** P0-B:本次(创建)提交的 RSS 是否落库;token/URL 永不回显。列表行恒 false */
   rss_saved?: boolean
+  /** P0-B adopt:本次创建命中已有 Series 被收编时为 true(重复订阅不静默) */
+  adopted?: boolean
 }
 
 /**

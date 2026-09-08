@@ -62,11 +62,17 @@ export function SubscriptionDrawer({
             }
           : {}),
       })
-      // rss_saved=false 且填了 rss_url → 后端未挂成功,如实警告不谎报成功
+      // rss_saved=false 且填了 rss_url → 后端未挂成功,如实警告不谎报成功;
+      // 仅订阅(未挂 RSS)用专属文案,引导后续去「管理 RSS 源」补挂
       if (attach && created.rss_saved === false) {
         toast.warning(strings.uxfix.rssNotSaved)
-      } else {
+      } else if (created.adopted) {
+        // 重复订阅:后端已合并到现有条目,如实说明避免用户以为建了新条目
+        toast.success(strings.uxfix.subscribeAdopted)
+      } else if (attach) {
         toast.success(strings.uxfix.subscribeSuccess)
+      } else {
+        toast.success(strings.uxfix.subscribeOnlySuccess)
       }
       onClose()
       onSubscribed()

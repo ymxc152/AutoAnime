@@ -7,7 +7,7 @@
 export const strings = {
   app: {
     name: 'AutoAnime',
-    tagline: '本地优先的三级识别追番管线',
+    tagline: '本地优先的三级识别追番工具',
     mockMode: 'Mock 数据模式',
   },
 
@@ -72,7 +72,7 @@ export const strings = {
     pendingQueue: '待确认队列',
     pendingQueueUnit: '条待人工确认',
     llmCallRate: 'LLM 调用率',
-    levelHits: '三级管线统计',
+    levelHits: '三级识别统计',
     levelL1: 'L1 本地解析',
     levelL2: 'L2 记忆命中',
     levelL3: 'L3 LLM 兜底',
@@ -102,6 +102,7 @@ export const strings = {
       organized: '已归档',
       upgraded: '已洗版',
       ignored: '已忽略',
+      flagged: '异常',
     },
     seasonState: {
       upcoming: '未放送',
@@ -185,7 +186,7 @@ export const strings = {
     stage: '来源阶段',
     reason: '原因',
     createdAt: '提交时间',
-    parsedFields: '解析草稿(来自管线写入的 context)',
+    parsedFields: '解析草稿(来自识别流程写入的 context)',
     confirmAction: '按此结果确认',
     correctAction: '纠正',
     rejectAction: '拒绝',
@@ -221,7 +222,7 @@ export const strings = {
   },
 
   pipeline: {
-    title: '管线',
+    title: '导入与识别',
     subtitle: '文件名的识别、确认与归档,全程实时记录',
     flowSteps: '流程步骤',
     node: {
@@ -255,7 +256,7 @@ export const strings = {
       clear: '清空记录',
       recent: '最近事件',
     },
-    empty: '等待第一个文件进入管线…',
+    empty: '等待第一个文件进入识别流程…',
     manualSection: '手动操作',
     parseName: '单文件解析试跑',
     parseNameHint: 'L1 本地解析,不访问网络、不写数据库',
@@ -443,8 +444,8 @@ export const strings = {
       '对不在待确认队列里的文件名做人工确认,结果写入识别记忆,下次同类命名直接命中。',
     confirmNameField: '文件名',
     confirmNameRequired: '请填写文件名',
-    confirmNameOptionalHint: '留空 = 回退管线草稿',
-    confirmNameSegmentEmpty: '由管线判断',
+    confirmNameOptionalHint: '留空 = 回退识别草稿',
+    confirmNameSegmentEmpty: '由识别流程判断',
     submitConfirmName: '确认并学习',
     confirmNameDone: '已写入识别记忆 {entries} 条,下次同类命名直接命中',
     confirmNameArchived: '已归档到 {dst}',
@@ -494,7 +495,7 @@ export const strings = {
     unitGb: 'GB',
     numberRangeHint: '允许范围 {min} ~ {max}',
     emptyRssCta: '去「追番」创建订阅',
-    emptyPendingCta: '去「管线」试跑一个文件名',
+    emptyPendingCta: '去「导入与识别」试跑一个文件名',
     emptyLibraryHint: '添加订阅并完成导入后,归档的剧集会出现在这里',
     onboardingTitle: '三步开始使用',
     selectionKept: '已保留跨页选择的 {n} 条',
@@ -511,7 +512,7 @@ export const strings = {
     manageRss: '管理 RSS 源',
     rssSourcesAdvancedHint: 'RSS 源的高级管理入口;日常订阅在「追番」页选番即可',
     seasonCurrent: '当季',
-    seasonDegraded: '该历史季度暂不可用,可先用当季或稍后再试',
+    seasonDegraded: '该季度数据暂时不可用,请稍后再试',
     subscribeAndAttach: '订阅并挂 RSS',
     subscribeOnly: '仅订阅(RSS 稍后再挂)',
     fansubOptionalHint: '字幕组偏好(可选);不知道选什么就先留空',
@@ -525,6 +526,7 @@ export const strings = {
     pickerChoose: '选择当前目录',
     pickerEmpty: '此目录下没有子目录',
     pickerDrives: '此电脑',
+    subscribeAdopted: '已存在同名订阅,已合并到现有条目',
     // ---------- 12-IA 追加(P1-E 信息架构重构):季节切换条/选番卡片/订阅抽屉 ----------
     seasonYearLabel: '年份',
     seasonNameLabel: '季节',
@@ -538,6 +540,11 @@ export const strings = {
     ratingLabel: '评分',
     ratingScore: '{score} 分',
     rssNotSaved: '订阅成功,但 RSS 源未挂载成功,请到「管理 RSS 源」检查地址后重试',
+    // ---------- 12-UX P1 修复批(2026-09-09) ----------
+    subscribeOnlySuccess: '订阅成功。可在「我的订阅」顶部「管理 RSS 源」挂上 RSS 后自动下载',
+    onboardingStep2Note: '需先在「设置→下载器」配置 qBittorrent',
+    episodesUnknown: '集数未知',
+    notAired: '尚未放送',
   },
 } as const
 

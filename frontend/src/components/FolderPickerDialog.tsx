@@ -4,8 +4,18 @@
  * 打开时从盘符根视图(path='')开始;行点击下钻,面包屑/上一级回跳。
  * 实现注:open 时才挂载 PickerContent —— 每次打开天然回到盘符根视图,
  * 且加载 effect 内不含同步 setState(lint react-hooks/set-state-in-effect)。
+ *
+ * P0 逃生门(2026-09-09):冷会话首开间歇性永久「加载中」排查结论 ——
+ * 复现(playwright 全新 context 直开 #/pipeline 点「选择目录」)显示请求已发出但
+ * 永不 finish,而受控链路(独立 vite + 日志代理 → 后端)8/8 全部 3ms 响应,
+ * 挂起点不在本组件与后端,而在 vite dev proxy → 后端一段:后端不可达/未就绪时
+ * http-proxy 对连接失败不回错而是悬挂,浏览器侧 fetch 永不 resolve(后端就绪后
+ * 恢复正常,与「取消重开或预热后正常」一致)。api.filesystem.list 契约只收 path、
+ * 无法注入 AbortSignal,故在此做 8s Promise 竞速逃生门:超时转既有错误+重试 UI,
+ * 底层 fetch 仍由 client 的 120s 超时兜底回收;用 seq 守卫丢弃超时后才返回的
+ * 旧响应,避免陈旧数据覆盖重试结果。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp } from 'lucide-react'
 import { api } from '../api'
 import type { FilesystemListing } from '../api/types'
@@ -61,6 +71,18 @@ export interface FolderPickerDialogProps {
   onPick: (path: string) => void
 }
 
+/** P0 逃生门:加载超过该时长仍无响应即转可重试错误态(见文件头排查结论) */
+const PICKER_TIMEOUT_MS = 8_000
+
+/** 给请求 Promise 挂 8s 超时竞速;任一方先落定即清理对方计时器 */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(strings.common.loadFailed)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 export function FolderPickerDialog({ open, onClose, onPick }: FolderPickerDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)}>
@@ -80,42 +102,49 @@ function PickerContent({
   const [listing, setListing] = useState<FilesystemListing | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // P0 逃生门配套:请求代际号,超时/切换目录后丢弃旧响应,防止陈旧结果回写
+  const seqRef = useRef(0)
 
   // 只在 await 之后 setState(初始 loading=true 由 useState 初值给出),
   // 触发加载前的 loading/error 置位在事件处理器里完成。
   const fetchListing = useCallback(async (path: string): Promise<void> => {
+    const seq = seqRef.current + 1
+    seqRef.current = seq
     try {
-      const result = await api.filesystem.list(path)
+      const result = await withTimeout(api.filesystem.list(path), PICKER_TIMEOUT_MS)
+      if (seqRef.current !== seq) return
       setListing(result)
       setCurrentPath(path)
       setError(null)
+      setLoading(false)
     } catch (cause) {
+      if (seqRef.current !== seq) return
       setError(cause instanceof Error ? cause.message : strings.common.actionFailed)
-    } finally {
       setLoading(false)
     }
   }, [])
 
   // 挂载即从盘符根视图加载(PickerContent 仅在 open 时挂载);
-  // setState 全部落在 promise 回调里(effect 不做同步 setState)。
+  // setState 全部落在 promise 回调里(effect 不做同步 setState,故不直接调用
+  // fetchListing);卸载时推进代际号,在途响应一律作废。
   useEffect(() => {
-    let cancelled = false
-    api.filesystem
-      .list('')
+    const seq = seqRef.current + 1
+    seqRef.current = seq
+    withTimeout(api.filesystem.list(''), PICKER_TIMEOUT_MS)
       .then((result) => {
-        if (cancelled) return
+        if (seqRef.current !== seq) return
         setListing(result)
         setCurrentPath('')
         setError(null)
         setLoading(false)
       })
       .catch((cause: unknown) => {
-        if (cancelled) return
+        if (seqRef.current !== seq) return
         setError(cause instanceof Error ? cause.message : strings.common.actionFailed)
         setLoading(false)
       })
     return () => {
-      cancelled = true
+      seqRef.current += 1
     }
   }, [])
 

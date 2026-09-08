@@ -93,7 +93,7 @@ describe('SubscriptionsPage', () => {
     await screen.findByTestId('season-grid')
     await user.selectOptions(screen.getByTestId('season-year-select'), '2024')
     const hint = await screen.findByTestId('season-degraded')
-    expect(hint).toHaveTextContent('该历史季度暂不可用')
+    expect(hint).toHaveTextContent('该季度数据暂时不可用')
   })
 
   it('12-IA:点卡片打开订阅抽屉(标题/详情行/三个表单字段)', async () => {
@@ -156,10 +156,30 @@ describe('SubscriptionsPage', () => {
     expect(body.rss_token).toBeUndefined()
     // eps=null 的条目不传 episode_count
     expect(body.episode_count).toBeUndefined()
-    // create 有 120ms mock 延迟,toast 在 resolve 之后触发
+    // create 有 120ms mock 延迟,toast 在 resolve 之后触发;仅订阅路径用专属引导文案
     await waitFor(() =>
-      expect(successSpy).toHaveBeenCalledWith('订阅成功,可去「媒体库」查看'),
+      expect(successSpy).toHaveBeenCalledWith(
+        '订阅成功。可在「我的订阅」顶部「管理 RSS 源」挂上 RSS 后自动下载',
+      ),
     )
+    successSpy.mockRestore()
+  })
+
+  it('12-IA:重复订阅 adopted=true → toast 提示已合并到现有条目', async () => {
+    const user = userEvent.setup()
+    const successSpy = vi.spyOn(toast, 'success')
+    const createSpy = vi.spyOn(api.subscriptions, 'create').mockResolvedValueOnce({
+      ...({ id: 9, title_cn: '孤独摇滚', media_type: 'tv', status: 'active', fansub_pref: null, quality_pref: null, seasons: [], rss_saved: false, adopted: true } as never),
+    })
+    renderPage(<SubscriptionsPage />)
+    const card = await screen.findByTestId('anime-card-511103')
+    await user.click(within(card).getByRole('button'))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '仅订阅(RSS 稍后再挂)' }))
+    await waitFor(() =>
+      expect(successSpy).toHaveBeenCalledWith('已存在同名订阅,已合并到现有条目'),
+    )
+    createSpy.mockRestore()
     successSpy.mockRestore()
   })
 
@@ -261,8 +281,9 @@ describe('SubscriptionsPage', () => {
     await user.type(screen.getByLabelText('当季集数(可选)'), '12')
     await user.click(screen.getByRole('button', { name: '订阅' }))
     expect(await screen.findByText('测试番')).toBeInTheDocument()
-    // 预生成集表:全 MISSING → 已归档 0/12
-    expect(await screen.findByText('已归档 0/12 集')).toBeInTheDocument()
+    // P1-UX:mock 预生成季 status=upcoming → 行内如实显示「尚未放送」,不再显示「已归档 0/12 集」
+    expect(await screen.findByText('尚未放送')).toBeInTheDocument()
+    expect(screen.queryByText('已归档 0/12 集')).not.toBeInTheDocument()
     // 12-IA 弹窗化:提交成功后弹窗关闭
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })

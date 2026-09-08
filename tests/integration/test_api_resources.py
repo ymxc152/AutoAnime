@@ -7,6 +7,7 @@ GET/PUT、metrics 聚合。全部离线。
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import date
 from pathlib import Path
@@ -17,6 +18,7 @@ import pytest
 
 from autoanime.config import Settings
 from autoanime.core.enums import Actor, MemoryStatus
+from autoanime.core.events import EventCategory
 from autoanime.core.models import (
     AuditLog,
     ParseEvents,
@@ -78,6 +80,7 @@ async def test_subscription_create_and_series_tree(client) -> None:
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["title_cn"] == "葬送的芙莉莲"
+    assert body["adopted"] is False  # 全新订阅：非 adopt
     assert len(body["seasons"]) == 1
     season = body["seasons"][0]
     assert season["episodes_total"] == 3
@@ -133,6 +136,7 @@ async def test_subscription_adopts_imported_series_without_phantom_missing(clien
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["rss_saved"] is False
+    assert body["adopted"] is True  # adopt 命中已有 Series：响应如实标注
     season = body["seasons"][0]
     assert season["episodes_total"] == 3
     assert season["episodes_organized"] == 1  # import 归档行保留
@@ -457,6 +461,35 @@ async def test_subscription_create_requires_title_and_delete_cascades(client) ->
 # ---------------------------------------------------------------------------
 # Pending：confirm / correct / reject + 学习三件套
 # ---------------------------------------------------------------------------
+
+
+async def test_pending_confirm_archive_publishes_organize_sse_category(client) -> None:
+    """确认归档成功 → SSE 事件类别为 organize（Library 页只监听 organize/system）。"""
+    c, settings = client
+    app_state = c._transport.app.state  # type: ignore[attr-defined]
+    src_dir = settings.library_path.parent / "downloads"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    raw_name = "[SubsPlease] Frieren - 01 [1080p].mkv"
+    (src_dir / raw_name).write_bytes(b"video")
+    pending_id = await _seed_pending(
+        c,
+        app_state,
+        raw_name,
+        {"title": "Frieren", "season": 1, "episode": 1, "parent_path": str(src_dir)},
+    )
+
+    sub = app_state.bus.subscribe()
+    try:
+        resp = await c.post(
+            f"/api/pending/{pending_id}/confirm", json={"title": "葬送的芙莉莲"}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["resolution"]["archive"]["archived"] is True
+        event = await asyncio.wait_for(sub.queue.get(), timeout=2)
+        assert event.message == "pending.confirmed"  # 事件名/负载不变
+        assert event.category is EventCategory.ORGANIZE  # 类别改 organize
+    finally:
+        sub.close()
 
 
 async def test_pending_confirm_learns_parse_memory(client) -> None:

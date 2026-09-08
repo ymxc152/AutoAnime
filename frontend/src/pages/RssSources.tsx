@@ -562,8 +562,9 @@ export function RssSourcesPage() {
         )}
       </Card>
 
-      {/* 12-IA 弹窗化:添加源弹窗(原常驻表单卡迁入) */}
+      {/* 12-IA 弹窗化:添加源弹窗(原常驻表单卡迁入);key 随开关重挂载 → 重开不留旧输入/旧报错 */}
       <AddSourceDialog
+        key={adding ? 'adding-open' : 'adding-closed'}
         open={adding}
         onOpenChange={setAdding}
         onDone={reload}

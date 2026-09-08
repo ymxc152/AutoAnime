@@ -19,6 +19,7 @@ import pytest
 
 from autoanime.core.enums import EpisodeState, MediaType
 from autoanime.core.models import Episode, Season, Series
+from autoanime.memory.alias import AliasService
 from autoanime.memory.store import SqliteStorage
 from autoanime.organize.library_ingest import IngestReport, upsert_archived_file
 from autoanime.scheduler.store import LoopStore
@@ -252,6 +253,66 @@ def test_missing_row_transitions_to_organized(tmp_path: Path) -> None:
     rows = _rows(db_path, "SELECT id, state, file_path FROM episode")
     assert len(rows) == 1 and rows[0][0] == report.episode_id
     assert rows[0][1] == "organized"
+
+
+def test_flagged_row_adopted_back_to_organized(tmp_path: Path) -> None:
+    """FLAGGED 行（对账标缺）在文件重新放回时被收编 → 合法转移 ORGANIZED。
+
+    FLAGGED→ORGANIZED 本就是状态机合法转移；白名单收编 FLAGGED 后
+    import/confirm 重跑可把恢复的文件重新归位，而非「untouched」卡死。
+    """
+    db_path = tmp_path / "ingest.db"
+    restored = tmp_path / "ep01.mkv"
+    restored.write_bytes(b"restored")
+
+    async def scenario() -> IngestReport:
+        db = _make_db(db_path)
+        await db.create_all()
+        try:
+            store = LoopStore(db)
+            await store.create_subscription(
+                Series(title_cn="Bocchi the Rock", media_type=MediaType.TV),
+                Season(number=1),
+                [Episode(number=1, state=EpisodeState.FLAGGED)],
+            )
+            return await _upsert(store, file_path=str(restored))
+        finally:
+            await db.close()
+
+    report = asyncio.run(scenario())
+    assert report.ok and report.updated_file
+    assert _rows(db_path, "SELECT state, file_path FROM episode") == [
+        ("organized", str(restored))
+    ]
+
+
+# ------------------------------------------------------- 别名兜底（标题裂库缓解）
+
+
+def test_alias_title_merges_into_subscribed_series(tmp_path: Path) -> None:
+    """解析标题 = 订阅番的别名（Alias 表命中）→ 收编同一 Series，不新建。"""
+    db_path = tmp_path / "ingest.db"
+
+    async def scenario() -> IngestReport:
+        db = _make_db(db_path)
+        await db.create_all()
+        try:
+            store = LoopStore(db)
+            series = await store.create_subscription(
+                Series(title_cn="葬送的芙莉莲", media_type=MediaType.TV),
+                Season(number=1),
+                [],
+            )
+            # 用户确认/参考源回填登记的别名：解析结论标题命中别名 shape
+            await AliasService(db).add_alias(series.id, "Frieren")
+            return await _upsert(store, titles={"title_cn": "Frieren"})
+        finally:
+            await db.close()
+
+    report = asyncio.run(scenario())
+    assert report.ok and not report.created_series
+    assert report.created_episode
+    assert len(_rows(db_path, "SELECT id FROM series")) == 1
 
 
 # ---------------------------------------------------------------- 异常吞掉

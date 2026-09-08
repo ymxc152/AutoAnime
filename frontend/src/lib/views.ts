@@ -16,6 +16,10 @@ export interface StateView {
 
 /** 集状态 → 文案 + tone(未知枚举降级:label 原样、tone neutral,容忍后端新增值) */
 export function episodeStateView(state: EpisodeState): StateView {
+  // 后端可能返回 flagged(异常);前端 EpisodeState 类型尚未收录,按字符串比较兜底
+  if ((state as string) === 'flagged') {
+    return { label: strings.library.state.flagged, tone: 'danger' }
+  }
   switch (state) {
     case 'organized':
       return { label: strings.library.state.organized, tone: 'success' }

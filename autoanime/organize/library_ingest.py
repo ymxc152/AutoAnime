@@ -25,11 +25,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from autoanime.core.enums import EpisodeState, MediaType, SeasonState
-from autoanime.core.models import Episode, Season, Series
+from autoanime.core.models import Alias, Episode, Season, Series
 from autoanime.pipeline.l2.placeholders import build_title_shape
 from autoanime.scheduler.store import LoopStore
 
@@ -68,6 +70,32 @@ def _title_shapes(row: Series) -> set[str]:
         for title in (row.title_cn, row.title_jp, row.title_romaji)
         if title
     }
+
+
+async def _alias_shapes_for_incoming(
+    store: LoopStore, incoming_shapes: set[str]
+) -> dict[int, set[str]]:
+    """series_id → 与解析标题 shape 相同的别名 shape 集合（别名兜底比对用）。
+
+    别名（Alias 表）以 T1 shape 归一存储（``alias_norm`` == ``level1_key``
+    == ``build_title_shape`` 输出），可与 incoming_shapes 直接相等比对；
+    使「解析标题 = 订阅番的别名」时命中同库而不新建重复 Series。经底层
+    SqliteStorage 既有只读方法按 shape 查询（LoopStore 未透传该读侧）。
+    """
+    # LoopStore 未透传别名读侧：从底层 SqliteStorage 取既有只读方法
+    # find_aliases_by_norm（无该读侧的替身 store → 兜底关闭，返回空集）。
+    finder = cast(
+        Callable[[str], Awaitable[list[Alias]]] | None,
+        getattr(getattr(store, "_storage", None), "find_aliases_by_norm", None),
+    )
+    if finder is None:
+        return {}
+    alias_shapes: dict[int, set[str]] = {}
+    for shape in incoming_shapes:
+        rows = await finder(shape)
+        for row in rows:
+            alias_shapes.setdefault(row.series_id, set()).add(row.alias_norm)
+    return alias_shapes
 
 
 async def upsert_archived_file(
@@ -132,12 +160,16 @@ async def _upsert(
     if bangumi_id:
         series = next((row for row in rows if row.bangumi_id == bangumi_id), None)
     if series is None and incoming_shapes:
+        # 标题裂库缓解：解析标题命中某已有 Series 的别名（Alias 表）时同样
+        # 收编；media_type 仍参与比对（剧场版与 TV 同题/同别名不合并）。
+        alias_shapes = await _alias_shapes_for_incoming(store, incoming_shapes)
         series = next(
             (
                 row
                 for row in rows
                 if _enum_value(row.media_type) == media.value
-                and _title_shapes(row) & incoming_shapes
+                and (_title_shapes(row) | alias_shapes.get(row.id, set()))
+                & incoming_shapes
             ),
             None,
         )
@@ -194,9 +226,16 @@ async def _upsert(
         )
 
     # 幂等：同 series+season+number 已有行——file_path 相同 no-op；不同且新
-    # 文件在盘上才更新（MISSING→ORGANIZED / UPGRADED→ORGANIZED 均合法转移）。
+    # 文件在盘上才更新（MISSING→ORGANIZED / UPGRADED→ORGANIZED /
+    # FLAGGED→ORGANIZED 均为合法转移；FLAGGED 收编：对账标缺的文件重新
+    # 放回/手动恢复时，import 重跑按合法转移转回 ORGANIZED）。
     state = EpisodeState(_enum_value(existing.state))
-    if state not in (EpisodeState.ORGANIZED, EpisodeState.UPGRADED, EpisodeState.MISSING):
+    if state not in (
+        EpisodeState.ORGANIZED,
+        EpisodeState.UPGRADED,
+        EpisodeState.MISSING,
+        EpisodeState.FLAGGED,
+    ):
         return IngestReport(
             ok=True,
             series_id=series.id,

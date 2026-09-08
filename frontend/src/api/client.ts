@@ -136,6 +136,13 @@ function formatValidationItem(item: FastapiErrorItem): string {
   }
 }
 
+/** 非 422 HTTP 状态码 → 人话兜底文案（后端无人话 detail 时裸英文 statusText 难懂） */
+const HTTP_STATUS_MESSAGES: Record<number, string> = {
+  500: '服务器内部错误，请稍后再试或查看日志页',
+  404: '资源不存在',
+  409: '冲突：资源状态已变化',
+}
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -163,13 +170,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (cause instanceof DOMException && cause.name === 'AbortError') {
       throw cause
     }
-    throw new ApiError(0, '网络不可达:后端未启动或连接失败')
+    throw new ApiError(0, '无法连接后端，请确认服务已启动')
   } finally {
     composed.dispose()
   }
 
   if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`
+    const fallbackDetail = `${response.status} ${response.statusText}`
+    let detail = fallbackDetail
     // FastAPI 错误体:{ "detail": string } 或 422 校验错误 { "detail": [{loc,msg,type,ctx}] }
     try {
       const data = (await response.json()) as { detail?: unknown }
@@ -184,6 +192,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (response.status === 401) {
       // 统一认证错误文案：任何页面拿到 ApiError.status=401 都能给出同一可操作提示。
       throw new ApiError(401, 'API Token 无效或缺失：请在设置页检查 Token')
+    }
+    if (response.status !== 422 && detail === fallbackDetail) {
+      // 非 422 且后端未给字符串 detail（裸 "500 Internal Server Error" 等）：
+      // 已知状态码映射人话；未知状态码保留原文加中文前缀。
+      detail = HTTP_STATUS_MESSAGES[response.status] ?? `请求失败:${detail}`
     }
     throw new ApiError(response.status, detail)
   }

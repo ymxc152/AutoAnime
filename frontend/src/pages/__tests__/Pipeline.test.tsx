@@ -108,7 +108,7 @@ describe('PipelinePage', () => {
       emit({ level: 1, outcome: 'l1_high' })
       expect(await screen.findByText('测试事件')).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: '清空记录' }))
-      expect(screen.getByText('等待第一个文件进入管线…')).toBeInTheDocument()
+      expect(screen.getByText('等待第一个文件进入识别流程…')).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
     }
@@ -181,7 +181,27 @@ describe('PipelinePage', () => {
     await screen.findByTestId('pipeline-node-归档')
     fireEvent.change(screen.getByLabelText('导入目录'), { target: { value: 'D:/downloads' } })
     fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
-    expect(await screen.findByText(/已完成 · 1\/1/)).toBeInTheDocument()
+    // P1:完成态按 summary 人话汇总,不再用误导性的 processed 口径(如「0/3」)
+    expect(
+      await screen.findByText(/已完成 · 1 个文件:归档 1 · 待人工确认 0 · 跳过 0/),
+    ).toBeInTheDocument()
+  })
+
+  it('P1:完成摘要 failed >0 时追加失败计数', async () => {
+    vi.spyOn(api.pipeline, 'startImport').mockResolvedValueOnce({ task_id: 'task-3', status: 'running' })
+    vi.spyOn(api.pipeline, 'task').mockResolvedValueOnce({
+      task_id: 'task-3', kind: 'import', status: 'completed', directory: 'D:/downloads',
+      dry_run: false, created_at: '', finished_at: '', processed: 0, total: 3,
+      summary: { total: 3, scanned: 3, archived: 1, pending: 1, failed: 1, skipped: 0 },
+      error: null,
+    })
+    renderPage(<PipelinePage />, { factory: controlledFactory() })
+    await screen.findByTestId('pipeline-node-归档')
+    fireEvent.change(screen.getByLabelText('导入目录'), { target: { value: 'D:/downloads' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
+    expect(
+      await screen.findByText(/已完成 · 3 个文件:归档 1 · 待人工确认 1 · 跳过 0 · 失败 1/),
+    ).toBeInTheDocument()
   })
 
   it('手动跑一轮订阅闭环展示后端报告', async () => {

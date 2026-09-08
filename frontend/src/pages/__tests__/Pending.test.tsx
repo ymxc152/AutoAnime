@@ -59,7 +59,7 @@ describe('PendingPage', () => {
     }
     expect(await screen.findByText('队列为空,没有需要人工确认的解析结果。')).toBeInTheDocument()
     // 12-UX:空态给下一步入口 —— ghost 按钮跳转 /pipeline
-    await user.click(screen.getByRole('button', { name: '去「管线」试跑一个文件名' }))
+    await user.click(screen.getByRole('button', { name: '去「导入与识别」试跑一个文件名' }))
     expect(navigateMock).toHaveBeenCalledWith('/pipeline')
   })
 

@@ -53,6 +53,63 @@ describe('request auth handling', () => {
   })
 })
 
+describe('request non-422 HTTP error mapping', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('500 且后端无字符串 detail → 映射为服务器内部错误人话', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })))
+    const error = await request('/api/x').catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).status).toBe(500)
+    expect((error as ApiError).message).toBe('服务器内部错误，请稍后再试或查看日志页')
+  })
+
+  it('404 且后端无字符串 detail → 资源不存在', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('gone', { status: 404 })))
+    const error = await request('/api/x').catch((cause: unknown) => cause)
+    expect((error as ApiError).status).toBe(404)
+    expect((error as ApiError).message).toBe('资源不存在')
+  })
+
+  it('409 且后端无字符串 detail → 冲突文案', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('conflict', { status: 409 })))
+    const error = await request('/api/x').catch((cause: unknown) => cause)
+    expect((error as ApiError).status).toBe(409)
+    expect((error as ApiError).message).toBe('冲突：资源状态已变化')
+  })
+
+  it('未知状态码 503 → 保留原文但加中文前缀', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })))
+    const error = await request('/api/x').catch((cause: unknown) => cause)
+    // jsdom 的 Response.statusText 为空串：只断言中文前缀 + 状态码在列。
+    expect((error as ApiError).message.startsWith('请求失败:503')).toBe(true)
+  })
+
+  it('后端带字符串 detail（如 404 not found）→ 保留原文不覆盖', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ detail: 'subscription 9 not found' }), { status: 404 })),
+    )
+    const error = await request('/api/x').catch((cause: unknown) => cause)
+    expect((error as ApiError).message).toBe('subscription 9 not found')
+  })
+
+  it('fetch reject（非超时非 abort）→ 无法连接后端人话', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch')
+      }),
+    )
+    const error = await request('/api/x').catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).status).toBe(0)
+    expect((error as ApiError).message).toBe('无法连接后端，请确认服务已启动')
+  })
+})
+
 describe('request 422 validation detail formatting', () => {
   function respondWith(detail: unknown): void {
     vi.stubGlobal(

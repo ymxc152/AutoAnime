@@ -154,6 +154,7 @@ async def create_subscription(
     )
     out = await _get_subscription(store, created.id)
     out.rss_saved = upserted.rss_saved
+    out.adopted = upserted.adopted
     return out
 
 

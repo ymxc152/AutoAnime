@@ -198,6 +198,8 @@ class SubscriptionOut(BaseModel):
     seasons: list[SeasonProgressOut]
     # P0-B 一步订阅契约：token/URL 永不回显，只回「本次提交的 RSS 是否落库」。
     rss_saved: bool = False
+    # P0-B adopt：创建请求命中已有 Series 被收编时为 True（重复订阅不静默）。
+    adopted: bool = False
 
 
 class SubscriptionCreateIn(BaseModel):

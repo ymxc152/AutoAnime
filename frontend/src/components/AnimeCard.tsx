@@ -111,7 +111,7 @@ export function AnimeCard({
         rel="noreferrer"
         data-testid="anime-card-mikan-link"
         aria-label={`${strings.uxfix.mikanSearch} ${bangumiTitle(item)}`}
-        className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-black/40 px-1.5 py-0.5 text-[11px] font-medium text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-visible:opacity-100"
+        className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-black/40 px-1.5 py-0.5 text-[11px] font-medium text-white opacity-60 transition-opacity duration-200 hover:opacity-100 focus-visible:opacity-100"
       >
         <ExternalLink aria-hidden className="h-3 w-3" />
         {strings.uxfix.mikanSearch}
