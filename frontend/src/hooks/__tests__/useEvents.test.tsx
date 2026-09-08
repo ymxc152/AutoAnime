@@ -22,6 +22,8 @@ describe('useEvents', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
+    localStorage.removeItem('autoanime-api-token')
   })
 
   it('挂载后连接并收到事件', async () => {
@@ -222,6 +224,100 @@ describe('useEvents', () => {
     }
     expect(result.current.status).toBe('open')
     expect(registry.length).toBe(1)
+  })
+
+  it('12-IA P0-A:静默超时 + health 200 → 不重连,连接与状态都不动', async () => {
+    // 12-IA P0-A:注释帧心跳不触发 onMessage,健康链路会静默超时 —— 必须
+    // health 探测分流而非直接判死。mock:settings 返回心跳 30s,health 200。
+    localStorage.setItem('autoanime-api-token', 'tok-1')
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ api_sse_heartbeat_s: 30 }),
+        } as unknown as Response
+      }
+      return { ok: true, status: 200 } as unknown as Response
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const registry: FakeEventSource[] = []
+    const { result } = renderHook(() =>
+      useEvents({ onEvent: () => {}, factory: makeFactory(registry) }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const first = registry[0]!
+    act(() => first.open())
+    act(() => {
+      first.emit(sseMessage({ id: '1', category: 'system', message: '事件' }))
+    })
+    expect(result.current.status).toBe('open')
+
+    // 70s 无命名消息(超过 65s 阈值)→ 触发 /api/health 探测而非直接判死
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(70_000)
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/health',
+      expect.objectContaining({ headers: { 'X-API-Token': 'tok-1' } }),
+    )
+    // 探测成功:连接未 close、状态保持 open、attempt 不变
+    expect(first.closed).toBe(false)
+    expect(result.current.status).toBe('open')
+    expect(result.current.attempt).toBe(0)
+    expect(registry.length).toBe(1)
+
+    // 静默基准已刷新:再过 60s(health 持续 200)也不误杀
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    expect(first.closed).toBe(false)
+    expect(result.current.status).toBe('open')
+    expect(registry.length).toBe(1)
+  })
+
+  it('12-IA P0-A:静默超时 + health 失败 → 走既有退避重连', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/settings') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ api_sse_heartbeat_s: 30 }),
+        } as unknown as Response
+      }
+      throw new TypeError('health probe unreachable')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const registry: FakeEventSource[] = []
+    const { result } = renderHook(() =>
+      useEvents({ onEvent: () => {}, factory: makeFactory(registry) }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const first = registry[0]!
+    act(() => first.open())
+
+    // 70s 无消息 + health 探测 reject → 判死:close + reconnecting + attempt+1
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(70_000)
+    })
+    expect(first.closed).toBe(true)
+    expect(result.current.status).toBe('reconnecting')
+    expect(result.current.attempt).toBe(1)
+    expect(registry.length).toBe(1) // 退避期内不重连
+
+    // 1s 退避后重建连接
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(registry.length).toBe(2)
   })
 
   it('enabled=false 不建连且状态 closed', () => {

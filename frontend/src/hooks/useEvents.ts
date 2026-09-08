@@ -19,11 +19,26 @@ const RETRY_BASE_MS = 1000
 const RETRY_MAX_MS = 30_000
 
 // 12-UX:静默断链兜底 —— vite 代理 / nginx 反代下后端进程死亡时断链是静默的,
-// EventSource 收不到 onerror,UI 会永远停在「事件流已连接」。服务端心跳 30s,
-// 这里取 65s(两个心跳周期 + 余量)无任何消息即判链路已死,主动 close 并走
-// 既有退避重连路径。
-const STALE_MS = 65_000
+// EventSource 收不到 onerror,UI 会永远停在「事件流已连接」。
+// 12-IA P0-A:服务端心跳是 `: heartbeat` SSE 注释帧(autoanime/web/sse.py),
+// 原生 EventSource 不派发注释帧 → onMessage 不会因心跳刷新计时。因此静默超时
+// **不能直接判死**:先 GET /api/health 探测分流 —— 200 → 仅刷新静默基准
+// (连接与状态都不动,链路健康只是没命名事件);失败/超时/非 200 → 走既有
+// close + 退避重连路径。
+// STALE_MS 动态化:挂载时 GET /api/settings 读 api_sse_heartbeat_s(SettingsOut
+// 已有字段),取 heartbeat_s * 2 * 1000 + 5000;读取失败回落 65000。
+const DEFAULT_STALE_MS = 65_000
 const STALE_CHECK_INTERVAL_MS = 5_000
+// health/settings 探测超时;用 setTimeout + AbortController 而非 AbortSignal.timeout,
+// 以兼容 fake timers 与缺该 API 的环境
+const PROBE_TIMEOUT_MS = 5_000
+
+/** 与 api/sse.ts buildEventsUrl 同源的 token 读取;空 token 不带 header */
+function apiAuthHeaders(): Record<string, string> {
+  const token =
+    typeof localStorage !== 'undefined' ? (localStorage.getItem('autoanime-api-token') ?? '') : ''
+  return token ? { 'X-API-Token': token } : {}
+}
 
 export interface UseEventsResult {
   status: EventsStatus
@@ -77,6 +92,8 @@ export function useEvents(options: UseEventsOptions): UseEventsResult {
   const [status, setStatus] = useState<EventsStatus>('connecting')
   const [attempt, setAttempt] = useState(0)
   const [received, setReceived] = useState(0)
+  // 12-IA P0-A:in-flight 探测锁 —— 防止 5s tick 在探测未返回时叠加并发探测
+  const probeInFlight = useRef(false)
 
   useEffect(() => {
     if (!enabled) {
@@ -90,6 +107,43 @@ export function useEvents(options: UseEventsOptions): UseEventsResult {
     let lastEventId = ''
     // 12-UX:最后收到消息的时刻;connect 与每条消息都刷新,作为静默断链检测基准
     let lastMsgAt = Date.now()
+    // 12-IA P0-A:卸载时 abort 在途探测
+    let settingsAbort: AbortController | null = null
+    let probeAbort: AbortController | null = null
+
+    /** fetch + 超时 abort(相对路径,与 sse.ts /api/events 同源) */
+    const fetchTimeout = (
+      url: string,
+      setController: (c: AbortController) => void,
+    ): Promise<Response> => {
+      const controller = new AbortController()
+      setController(controller)
+      const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+      return fetch(url, { headers: apiAuthHeaders(), signal: controller.signal }).finally(() => {
+        clearTimeout(timer)
+      })
+    }
+
+    // 12-IA P0-A:动态 STALE_MS —— 挂载时读服务端心跳间隔,失败静默回落默认值
+    let staleMs = DEFAULT_STALE_MS
+    try {
+      fetchTimeout('/api/settings', (c) => {
+        settingsAbort = c
+      })
+        .then(async (res) => {
+          if (disposed || !res.ok) return
+          const body = (await res.json()) as { api_sse_heartbeat_s?: unknown }
+          const hb = body.api_sse_heartbeat_s
+          if (typeof hb === 'number' && hb > 0) {
+            staleMs = hb * 2 * 1000 + 5_000
+          }
+        })
+        .catch(() => {
+          /* 读取失败静默回落 DEFAULT_STALE_MS */
+        })
+    } catch {
+      /* fetch 同步异常(如测试环境)忽略,回落默认值 */
+    }
 
     const scheduleReconnect = (): void => {
       attempts += 1
@@ -140,21 +194,49 @@ export function useEvents(options: UseEventsOptions): UseEventsResult {
 
     connect()
 
-    // 12-UX:静默断链兜底 —— open 态超过 STALE_MS 无任何消息(正常心跳 30s)
-    // 即判链路已死:主动 close 并走与 onError 相同的退避重连路径。代理层吞掉
-    // 断链错误时这是唯一的感知手段;收到任何消息即重置计时,不误判。
-    const staleTimer = setInterval(() => {
-      if (disposed || handle === null) return
-      if (Date.now() - lastMsgAt <= STALE_MS) return
+    // 12-IA P0-A:静默超时不再直接判死 —— 注释帧心跳不触发 onMessage,健康链路
+    // 也会静默超时。先 GET /api/health 探测分流:200 → 仅刷新静默基准(连接与
+    // 状态都不动);失败/超时/非 200 → 走既有 close + 退避重连路径。
+    const probeHealth = async (): Promise<void> => {
+      let healthy = false
+      try {
+        const res = await fetchTimeout('/api/health', (c) => {
+          probeAbort = c
+        })
+        healthy = res.ok
+      } catch {
+        healthy = false
+      }
+      probeInFlight.current = false
+      probeAbort = null
+      if (disposed) return
+      if (healthy) {
+        // 链路健康只是没事件:只刷新基准,连接不动、状态不动
+        lastMsgAt = Date.now()
+        return
+      }
+      // 探测期间若有消息到达,基准已刷新,不判死
+      if (handle === null || Date.now() - lastMsgAt <= staleMs) return
       handle.close()
       handle = null
       scheduleReconnect()
+    }
+
+    const staleTimer = setInterval(() => {
+      if (disposed || handle === null) return
+      if (Date.now() - lastMsgAt <= staleMs) return
+      if (probeInFlight.current) return
+      probeInFlight.current = true
+      void probeHealth()
     }, STALE_CHECK_INTERVAL_MS)
 
     return () => {
       disposed = true
       if (retryTimer) clearTimeout(retryTimer)
       clearInterval(staleTimer)
+      settingsAbort?.abort()
+      probeAbort?.abort()
+      probeInFlight.current = false
       handle?.close()
       handle = null
     }
