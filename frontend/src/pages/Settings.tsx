@@ -9,6 +9,11 @@
  * 并发写冲突:PUT 携带 GET 的 updated_at 基线,409 settings_changed 时清草稿并 reload。
  * 单一保存按钮(页头)+ 全标签页共享一份 edit 草稿;分组 dirty 在 Tab 上显小圆点;
  * dirty 时路由离开需确认(useBlocker 拦截侧栏点击 + 浏览器返回)。
+ * 行控件统一右缘对齐:SettingRow 控件列固定宽,Input/Select 满宽天然贴右缘,
+ * 开关/徽标/按钮/只读值等小控件需显式贴同一右缘(七 tab 一致,实测反馈);
+ * qbit 测试结果以行内状态文本展示(成功含版本/失败原因),按钮任何状态下保持
+ * Button 组件形态——secondary hover 默认融进卡片底色,点击后指针未移开会呈
+ * 「无边框裸文本」,此处以 hover:border-line!/hover:bg-surface-2! 稳住形态。
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -43,6 +48,22 @@ function parseOrder(raw: string): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter((item) => item !== '')
+}
+
+/**
+ * 环境只读路径值:优先显示后端 resolve 的绝对路径(library_path_abs/download_path_abs,
+ * 用户才知道实际位置);旧后端缺省该字段时回退显示配置值;绝对路径与配置值不同时,
+ * 以 muted 小字保留原配置值便于对照。控件列内贴右缘(与各 tab 行控件对齐)。
+ */
+function EnvPathValue({ abs, raw }: { abs?: string; raw: string }): ReactNode {
+  return (
+    <div className="flex flex-col items-end gap-0.5 text-right">
+      <span className="data-text break-all text-sm text-ink">{abs ?? raw}</span>
+      {abs !== undefined && abs !== raw && (
+        <span className="break-all text-xs text-ink-secondary">配置值：{raw}</span>
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +344,8 @@ export function SettingsPage() {
   // 测试按钮 loading(测试动作不改 dirty:不触碰 edit/clearSecrets)
   const [qbitTesting, setQbitTesting] = useState(false)
   const [notifyTesting, setNotifyTesting] = useState(false)
+  // qbit 测试结果行内展示(ok=success 色 / fail=danger 色;不再走 toast 吞按钮反馈)
+  const [qbitTestResult, setQbitTestResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   const patch = (partial: SettingsDraft): void => {
     setEdit((prev) => ({ ...prev, ...partial }))
@@ -548,22 +571,32 @@ export function SettingsPage() {
     }
   }
 
-  /** qBittorrent 连接测试(不改 dirty:只外呼,不写配置) */
+  /** qBittorrent 连接测试(不改 dirty:只外呼,不写配置;结果走行内状态文本,不走 toast) */
   const runQbitTest = async (): Promise<void> => {
     setQbitTesting(true)
+    setQbitTestResult(null)
     try {
       const result = await api.settings.qbitTest()
       if (result.ok) {
-        toast.success(
-          result.version
+        setQbitTestResult({
+          ok: true,
+          text: result.version
             ? `${strings.settings.qbitTestOk}(${result.version})`
             : strings.settings.qbitTestOk,
-        )
+        })
       } else {
-        toast.error(`${strings.settings.qbitTestFail}: ${result.error ?? strings.common.unknown}`)
+        setQbitTestResult({
+          ok: false,
+          text: `${strings.settings.qbitTestFail}: ${result.error ?? strings.common.unknown}`,
+        })
       }
     } catch (cause) {
-      toast.error(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
+      setQbitTestResult({
+        ok: false,
+        text: `${strings.settings.qbitTestFail}: ${
+          cause instanceof ApiError ? cause.message : strings.common.actionFailed
+        }`,
+      })
     } finally {
       setQbitTesting(false)
     }
@@ -619,11 +652,14 @@ export function SettingsPage() {
     hint: string,
   ): ReactNode => (
     <SettingRow label={label} description={hint}>
-      <Switch
-        checked={boolValue(key)}
-        onChange={(checked) => patch({ [key]: checked })}
-        aria-label={label}
-      />
+      {/* 控件列固定宽:Input/Select 满宽贴右缘,开关小控件显式贴同一右缘(与下载器 tab 行布局一致) */}
+      <div className="flex justify-end">
+        <Switch
+          checked={boolValue(key)}
+          onChange={(checked) => patch({ [key]: checked })}
+          aria-label={label}
+        />
+      </div>
     </SettingRow>
   )
 
@@ -647,7 +683,7 @@ export function SettingsPage() {
             className="data-text"
           />
           {err !== null && (
-            <p role="alert" className="text-xs text-danger">
+            <p role="alert" className="text-sm font-medium text-danger">
               {err}
             </p>
           )}
@@ -687,7 +723,8 @@ export function SettingsPage() {
       )}
 
       <Tabs defaultValue="runtime">
-        <TabsList>
+        {/* 窄窗口(375px)七个 tab 装不下一行:允许横向滚动,宽屏不受影响 */}
+        <TabsList className="max-w-full overflow-x-auto">
           {TAB_KEYS.map((tab) => (
             <TabsTrigger key={tab} value={tab}>
               {strings.settings.tabs[tab]}
@@ -781,9 +818,11 @@ export function SettingsPage() {
               </SettingRow>
               {numFieldRow('reference_qps', strings.settings.referenceQps, strings.settings.referenceQpsHint)}
               <SettingRow label={strings.settings.tmdbApiKey} description={strings.settings.secretHint}>
-                <Badge tone={base.has_tmdb_api_key ? 'success' : 'neutral'} mark>
-                  {base.has_tmdb_api_key ? strings.settings.configured : strings.settings.notConfigured}
-                </Badge>
+                <div className="flex justify-end">
+                  <Badge tone={base.has_tmdb_api_key ? 'success' : 'neutral'} mark>
+                    {base.has_tmdb_api_key ? strings.settings.configured : strings.settings.notConfigured}
+                  </Badge>
+                </div>
               </SettingRow>
             </div>
           </Card>
@@ -843,9 +882,25 @@ export function SettingsPage() {
                 label={strings.settings.testQbit}
                 description={strings.settings.secretHint}
               >
-                <Button loading={qbitTesting} onClick={() => void runQbitTest()}>
-                  {qbitTesting ? strings.settings.qbitTesting : strings.settings.testQbit}
-                </Button>
+                <div className="flex flex-col items-end gap-1.5">
+                  {/* hover 稳住 Button 形态:secondary hover 默认融进卡片底色(实测点击后呈裸文本),
+                      无论 loading/success/fail 按钮始终带边框与背景 */}
+                  <Button
+                    loading={qbitTesting}
+                    onClick={() => void runQbitTest()}
+                    className="hover:border-line! hover:bg-surface-2!"
+                  >
+                    {qbitTesting ? strings.settings.qbitTesting : strings.settings.testQbit}
+                  </Button>
+                  {qbitTestResult !== null && (
+                    <p
+                      role="status"
+                      className={`text-sm font-medium ${qbitTestResult.ok ? 'text-success' : 'text-danger'}`}
+                    >
+                      {qbitTestResult.text}
+                    </p>
+                  )}
+                </div>
               </SettingRow>
             </div>
           </Card>
@@ -946,9 +1001,15 @@ export function SettingsPage() {
                 />
               </SettingRow>
               <SettingRow label={strings.settings.testNotify}>
-                <Button loading={notifyTesting} onClick={() => void runNotifyTest()}>
-                  {notifyTesting ? strings.settings.notifyTesting : strings.settings.testNotify}
-                </Button>
+                <div className="flex justify-end">
+                  <Button
+                    loading={notifyTesting}
+                    onClick={() => void runNotifyTest()}
+                    className="hover:border-line! hover:bg-surface-2!"
+                  >
+                    {notifyTesting ? strings.settings.notifyTesting : strings.settings.testNotify}
+                  </Button>
+                </div>
               </SettingRow>
             </div>
           </Card>
@@ -959,26 +1020,34 @@ export function SettingsPage() {
           <Card title={strings.settings.environmentSection}>
             <div className="divide-y divide-line">
               <SettingRow label={strings.settings.libraryPath}>
-                <span className="data-text break-all text-sm text-ink">{base.library_path}</span>
+                <EnvPathValue abs={base.library_path_abs} raw={base.library_path} />
               </SettingRow>
               <SettingRow label={strings.settings.downloadPath}>
-                <span className="data-text break-all text-sm text-ink">{base.download_path}</span>
+                <EnvPathValue abs={base.download_path_abs} raw={base.download_path} />
               </SettingRow>
               <SettingRow label={strings.settings.apiEndpoint}>
-                <span className="data-text text-sm text-ink">
-                  {base.api_host}:{base.api_port}
-                </span>
+                <div className="flex justify-end">
+                  <span className="data-text text-sm text-ink">
+                    {base.api_host}:{base.api_port}
+                  </span>
+                </div>
               </SettingRow>
               <SettingRow label={strings.settings.sseHeartbeat}>
-                <span className="data-text text-sm text-ink">{base.api_sse_heartbeat_s}s</span>
+                <div className="flex justify-end">
+                  <span className="data-text text-sm text-ink">{base.api_sse_heartbeat_s}s</span>
+                </div>
               </SettingRow>
               <SettingRow label={strings.settings.sseReplay}>
-                <span className="data-text text-sm text-ink">{base.api_sse_replay_limit}</span>
+                <div className="flex justify-end">
+                  <span className="data-text text-sm text-ink">{base.api_sse_replay_limit}</span>
+                </div>
               </SettingRow>
               <SettingRow label={strings.settings.apiToken} description={strings.settings.secretHint}>
-                <Badge tone={base.has_api_token ? 'success' : 'neutral'} mark>
-                  {base.has_api_token ? strings.settings.configured : strings.settings.notConfigured}
-                </Badge>
+                <div className="flex justify-end">
+                  <Badge tone={base.has_api_token ? 'success' : 'neutral'} mark>
+                    {base.has_api_token ? strings.settings.configured : strings.settings.notConfigured}
+                  </Badge>
+                </div>
               </SettingRow>
               <SettingRow
                 label={strings.settings.apiTokenInput}

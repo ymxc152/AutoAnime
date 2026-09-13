@@ -3,7 +3,9 @@
  * 保存 toast 按档位合并计数、整页 form 回车提交、数字字段范围校验禁保存、
  * 并发写冲突 409(清草稿 + reload + payload 携带 base_updated_at)、
  * 密钥留空不进 body/清除提交 null、白名单外字段不出现、
- * qbit-test/notify-test 按钮结果 toast;参考源顺序(A1)与 API Token 本端注入(A3)回归。
+ * qbit-test 行内状态文本(成功含版本/失败原因,不再走 toast)且按钮保持 Button 形态、
+ * notify-test 按钮结果 toast;环境页优先显示绝对路径(旧后端缺省回退配置值);
+ * 参考源顺序(A1)与 API Token 本端注入(A3)回归。
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,6 +14,7 @@ import { SettingsPage } from '../Settings'
 import { renderPage } from '../../test/testUtils'
 import { api, ApiError } from '../../api'
 import { createMockApi, MOCK_SETTINGS_UPDATED_AT, resetMockState } from '../../mocks/handlers'
+import { mockSettings } from '../../mocks/data'
 
 /** 切到指定标签页(先等初始加载渲染出 Tabs;dirty 圆点会追加 accessible name,故用 ^ 前缀正则) */
 async function gotoTab(user: ReturnType<typeof userEvent.setup>, tab: string): Promise<void> {
@@ -313,24 +316,28 @@ describe('SettingsPage', () => {
     updateSpy.mockRestore()
   })
 
-  it('qbit-test:成功 toast + 不产生 dirty;失败走 error toast', async () => {
+  it('qbit-test:行内状态展示成功(含版本)/失败原因,按钮保持 Button 形态且不产生 dirty', async () => {
     const user = userEvent.setup()
     renderPage(<SettingsPage />)
     await gotoTab(user, '下载器')
     const btn = await screen.findByRole('button', { name: '测试连接' })
     await user.click(btn)
-    // loading 态:请求未返回时按钮禁用
+    // loading 态:请求未返回时按钮禁用,但仍为带边框的 Button 形态(不吞样式)
     expect(btn).toBeDisabled()
-    await waitFor(() =>
-      expect(successSpy).toHaveBeenCalledWith(expect.stringContaining('qBittorrent 连接成功')),
-    )
+    expect(btn).toHaveClass('border-line')
+    // 成功:行内状态文本展示(含版本号),不再走 toast(断言只排除 qbit 测试自己的
+    // toast——相邻用例异步收尾的保存 toast 会晚到本用例的 spy,属既有时序噪声)
+    expect(await screen.findByText('qBittorrent 连接成功(v2.0.9)')).toBeInTheDocument()
+    expect(successSpy).not.toHaveBeenCalledWith(expect.stringContaining('qBittorrent 连接成功'))
+    expect(btn).toBeEnabled()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled() // 测试动作不改 dirty
-    // 失败分支:error toast 携带明细
+    // 失败分支:行内展示失败原因
     const qbitSpy = vi
       .spyOn(api.settings, 'qbitTest')
       .mockRejectedValueOnce(new ApiError(502, 'gateway unreachable'))
     await user.click(screen.getByRole('button', { name: '测试连接' }))
-    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('gateway unreachable'))
+    expect(await screen.findByText('qBittorrent 连接失败: gateway unreachable')).toBeInTheDocument()
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('qBittorrent 连接失败'))
     qbitSpy.mockRestore()
   })
 
@@ -377,14 +384,35 @@ describe('SettingsPage', () => {
     updateSpy.mockRestore()
   })
 
-  it('只读环境信息与密钥状态徽标(环境页)', async () => {
+  it('只读环境信息(旧后端缺省 abs 字段回退显示配置值)与密钥状态徽标(环境页)', async () => {
     const user = userEvent.setup()
     renderPage(<SettingsPage />)
     await gotoTab(user, '环境')
+    // mock 未返回 library_path_abs/download_path_abs → 回退显示 library_path/download_path
     expect(screen.getByText('/library')).toBeInTheDocument()
+    expect(screen.getByText('/downloads')).toBeInTheDocument()
+    expect(screen.queryByText(/配置值：/)).not.toBeInTheDocument()
     expect(screen.getByText('127.0.0.1:8000')).toBeInTheDocument()
     // mock 基线:API Token 未配置 → 徽标「未配置」
     expect(screen.getByText('未配置')).toBeInTheDocument()
+  })
+
+  it('环境页优先显示绝对路径,并以 muted 小字保留原配置值', async () => {
+    const user = userEvent.setup()
+    const getSpy = vi.spyOn(api.settings, 'get').mockResolvedValue({
+      ...mockSettings,
+      updated_at: MOCK_SETTINGS_UPDATED_AT,
+      library_path_abs: '/data/media/library',
+      download_path_abs: '/data/downloads',
+    })
+    renderPage(<SettingsPage />)
+    await gotoTab(user, '环境')
+    // 主值 = 后端 resolve 的绝对路径;原配置值以 muted 小字保留对照
+    expect(screen.getByText('/data/media/library')).toBeInTheDocument()
+    expect(screen.getByText('配置值：/library')).toBeInTheDocument()
+    expect(screen.getByText('/data/downloads')).toBeInTheDocument()
+    expect(screen.getByText('配置值：/downloads')).toBeInTheDocument()
+    getSpy.mockRestore()
   })
 
   it('回归 A3:API Token 本端注入——保存写入 localStorage 并提示,清除移除', async () => {
