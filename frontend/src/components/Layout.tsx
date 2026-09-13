@@ -2,7 +2,8 @@
  * 应用骨架(12-C 重设计):桌面 = 固定侧栏 + 内容区;移动 = 顶栏汉堡折叠侧栏。
  * 侧栏:品牌区块(渐变标记 + 标语)、带图标的导航(激活态 = 浅底 + 左侧指示条)、
  * 底部 = 主题切换 + SSE 状态 + mock 提示。
- * 主内容区顶部:SSE 断线全局警示条(reconnecting=warning,closed=danger)。
+ * 主内容区顶部:mock 演示警示条(mock 开启时常驻,warning 色调)
+ * + SSE 断线全局警示条(reconnecting=warning,closed=danger)。
  */
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
@@ -46,6 +47,24 @@ const navItems: NavItem[] = [
   { to: '/logs', label: strings.nav.logs, icon: ScrollText },
   { to: '/settings', label: strings.nav.settings, icon: SettingsIcon },
 ]
+
+/* ---------- Mock 演示警示条 ---------- */
+
+/* mock 模式下常驻内容区顶部:普通文档流内渲染,不遮挡任何交互元素;
+ * warning token 深浅色均有定义,双主题可读 */
+function MockBanner() {
+  if (!isMockMode) return null
+  return (
+    <div
+      role="alert"
+      data-testid="mock-banner"
+      className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-ink"
+    >
+      <StatusDot tone="warning" size={7} />
+      <span className="font-medium">{strings.app.mockBanner}</span>
+    </div>
+  )
+}
 
 /* ---------- SSE 断线警示条 ---------- */
 
@@ -188,14 +207,15 @@ export function Layout({ children }: { children: ReactNode }) {
 
         <main className="min-w-0 flex-1">
           <div className="mx-auto flex max-w-5xl flex-col gap-4 px-[var(--ink-layout-padding)] py-4">
+            <MockBanner />
             <SseBanner />
             {children}
           </div>
         </main>
       </div>
 
-      {/* 全局挂载:Toast 通知 + 命令式确认框(12-B) */}
-      <Toaster position="top-center" />
+      {/* 全局挂载:Toast 通知(默认 top-right + 手动关闭,见 ui/sonner) + 命令式确认框(12-B) */}
+      <Toaster />
       <ConfirmHost />
     </div>
   )

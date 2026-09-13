@@ -1,8 +1,10 @@
 /*
  * 数据层统一出口:页面只 import { api } 与 { eventSourceFactory }。
  * mock 开关(Plan §5.5「E2 未合并期间 mock 开发,合并后关」):
- *   - VITE_USE_MOCK=1/0 强制;缺省 dev 开、生产构建关
- *   - localStorage 'autoanime-use-mock' 可运行时覆盖(demo 用)
+ *   - 缺省连真实 API(dev 与生产一致,不再默认假数据);仅显式 VITE_USE_MOCK=1
+ *     才进入 mock 演示模式
+ *   - VITE_USE_MOCK=1/0 强制(环境变量优先);localStorage 'autoanime-use-mock'
+ *     可运行时覆盖(demo 用)
  */
 import * as realEndpoints from './endpoints'
 import { createMockApi } from '../mocks/handlers'
@@ -21,9 +23,10 @@ function resolveUseMock(): boolean {
     if (override === '1') return true
     if (override === '0') return false
   } catch {
-    /* 存储不可用时按环境判定 */
+    /* 存储不可用时按缺省判定 */
   }
-  return import.meta.env.DEV
+  // 缺省连真实 API:裸跑 npm run dev 不再整站展示 mock 假数据
+  return false
 }
 
 export const isMockMode = resolveUseMock()

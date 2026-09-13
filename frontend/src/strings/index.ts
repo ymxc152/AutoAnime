@@ -9,6 +9,8 @@ export const strings = {
     name: 'AutoAnime',
     tagline: '本地优先的三级识别追番工具',
     mockMode: 'Mock 数据模式',
+    mockBanner:
+      '当前展示的是内置 Mock 演示数据，不是真实媒体库。仅显式设置 VITE_USE_MOCK=1 时才会进入该模式；去掉该变量（或设为 0）即连回真实后端。',
   },
 
   nav: {

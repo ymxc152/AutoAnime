@@ -1,6 +1,8 @@
 /*
  * 全局 Toast 容器(12-B 引入 shadcn/ui,替代行内成功提示)。
  * 原版从 next-themes 取主题;本项目是 Vite + 自建 useTheme(.dark 类),改为按 dark 布尔传值。
+ * 全局默认右上角弹出且带关闭按钮:避免 toast 遮挡设置页标签栏等交互元素,
+ * 用户可手动关闭;调用方可经 props 覆盖({...props} 在默认值之后展开)。
  * 挂载点在 Layout;业务侧 `import { toast } from 'sonner'` 直接调用。
  */
 import { useTheme } from "@/hooks/useTheme"
@@ -15,6 +17,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={dark ? "dark" : "light"}
       className="toaster group"
+      position="top-right"
+      closeButton
       toastOptions={{
         classNames: {
           toast:

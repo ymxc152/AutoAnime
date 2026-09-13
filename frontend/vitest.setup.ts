@@ -2,6 +2,11 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
 
+// 测试显式固定 mock 模式:api/index 的 isMockMode 是模块级常量,在 import 时求值,
+// 缺省语义已是「连真实 API」。页面/钩子测试依赖 mock fixtures(resetMockState 复位),
+// 这里用 localStorage 运行时开关保证所有测试文件在模块加载前进入 mock 模式。
+localStorage.setItem('autoanime-use-mock', '1')
+
 afterEach(() => {
   cleanup()
 })

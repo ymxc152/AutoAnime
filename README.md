@@ -68,8 +68,8 @@ cd frontend && npm install       # 前端依赖（Windows 用 npm install 即可
 uv run python -m autoanime.api serve
 
 # 终端 2：前端 WebUI（默认 http://localhost:5173）
-# VITE_USE_MOCK=0 才连真后端（/api 代理到 8000）；缺省连内置 mock
-cd frontend && VITE_USE_MOCK=0 npm run dev
+# dev 缺省即连真实后端（/api 代理到 8000）；仅显式 VITE_USE_MOCK=1 才进入内置 mock 演示模式
+cd frontend && npm run dev
 ```
 
 ### 配置 `.env`
