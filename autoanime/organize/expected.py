@@ -50,6 +50,9 @@ class ExpectedContext:
     title_jp: str | None = None
     title_romaji: str | None = None
     fansub_pref: str | None = None
+    # 通用 RSS 规则（分号分隔关键词）;RSS 轮询侧候选前过滤
+    include_keywords: str | None = None
+    exclude_keywords: str | None = None
     torrent_hash: str | None = None
     release_record_id: int | None = None
 
@@ -270,3 +273,31 @@ def decide_mismatch(evidence: MismatchEvidence) -> MismatchDecision:
         to_pending_queue=True,
         detail="parse failed / unknown series / conflicting evidence; needs manual triage",
     )
+
+
+def rule_reject_reason(
+    title: str,
+    *,
+    include_keywords: str | None,
+    exclude_keywords: str | None,
+) -> str | None:
+    """通用 RSS 订阅规则判定（纯函数）：命中返回拒绝原因,通过返回 None。
+
+    关键词分号(或全角分号/逗号)分隔,大小写不敏感子串匹配;include 非空时
+    为白名单语义（一个都不命中即拒绝）,exclude 命中任一即拒绝。
+    """
+    def _tokens(raw: str | None) -> list[str]:
+        if raw is None or raw.strip() == "":
+            return []
+        import re as _re
+
+        return [t.strip().lower() for t in _re.split(r"[;,，；]", raw) if t.strip() != ""]
+
+    lowered = title.lower()
+    for token in _tokens(exclude_keywords):
+        if token in lowered:
+            return f"excluded_by_rule: {token}"
+    includes = _tokens(include_keywords)
+    if includes and not any(token in lowered for token in includes):
+        return "not_included_by_rule"
+    return None

@@ -42,7 +42,7 @@ from autoanime.core.models import Episode, ReleaseRecord, RssSource
 from autoanime.gateway import GatewayError
 from autoanime.gateway.rss import FeedPage, RssEntry, fetch_feed, fetch_torrent
 from autoanime.gateway.torrents import torrent_info_hash
-from autoanime.organize.expected import ExpectedContext, align_rss_entry
+from autoanime.organize.expected import ExpectedContext, align_rss_entry, rule_reject_reason
 from autoanime.organize.upgrade import decide_upgrade, score_from_title
 from autoanime.scheduler.cadence import should_poll_season
 from autoanime.scheduler.missing import EpisodeFact, season_gap, today_jst
@@ -182,6 +182,8 @@ class RssPoller:
             title_jp=series.title_jp,
             title_romaji=series.title_romaji,
             fansub_pref=series.fansub_pref,
+            include_keywords=series.include_keywords,
+            exclude_keywords=series.exclude_keywords,
         )
         context = ParseContext(
             known_series=series.id,
@@ -329,6 +331,16 @@ class RssPoller:
             rejects.append(
                 (entry, f"segment_not_supported: {parse.segment.value}", data)
             )
+            return "rejected"
+        # 通用 RSS 订阅规则（include 白名单 / exclude 黑名单,分号分隔关键词）:
+        # 命中即确定性拒绝（选番抽屉「匹配预览」展示同一套规则）
+        rule_reason = rule_reject_reason(
+            entry.title,
+            include_keywords=expected_base.include_keywords,
+            exclude_keywords=expected_base.exclude_keywords,
+        )
+        if rule_reason is not None:
+            rejects.append((entry, rule_reason, data))
             return "rejected"
         candidates.setdefault(alignment.parsed_episode, []).append(
             _Candidate(

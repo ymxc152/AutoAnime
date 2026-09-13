@@ -67,6 +67,8 @@ async def _subscription_out(store: ApiStore, rows: list[Series]) -> list[Subscri
             status=row.status,
             fansub_pref=row.fansub_pref,
             quality_pref=row.quality_pref,
+            include_keywords=row.include_keywords,
+            exclude_keywords=row.exclude_keywords,
             seasons=progress_by_series.get(row.id, []),
         )
         for row in rows
@@ -117,6 +119,8 @@ async def create_subscription(
         bangumi_id=body.bangumi_id,
         fansub_pref=body.fansub_pref,
         quality_pref=body.quality_pref,
+        include_keywords=body.include_keywords,
+        exclude_keywords=body.exclude_keywords,
         status="active",
     )
     try:

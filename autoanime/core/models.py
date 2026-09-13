@@ -58,6 +58,10 @@ class Series(Base):
     bangumi_id: Mapped[str | None] = mapped_column(String, nullable=True)
     fansub_pref: Mapped[str | None] = mapped_column(String, nullable=True)
     quality_pref: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 通用 RSS 规则（选番抽屉「匹配预览」配套）：分号分隔关键词，
+    # 大小写不敏感子串命中；include 非空 = 白名单，exclude 命中 = 拒绝。
+    include_keywords: Mapped[str | None] = mapped_column(String, nullable=True)
+    exclude_keywords: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="active")
 
 

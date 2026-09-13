@@ -5,18 +5,22 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from autoanime.config import Settings
 from autoanime.core.enums import Actor, MemorySource
 from autoanime.core.events import Event, EventCategory
 from autoanime.core.interfaces import RawName
+from autoanime.gateway.rss import fetch_feed
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.learn import StorageMemoryAccess, learn_confirmation
 from autoanime.memory.store import SqliteStorage
 from autoanime.organize import confirm_archive
+from autoanime.organize.expected import align_rss_entry, rule_reject_reason
 from autoanime.organize.poster import schedule_poster_fetch
+from autoanime.organize.upgrade import score_from_title
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.orchestrator import Orchestrator
 from autoanime.scheduler.store import LoopStore
@@ -78,6 +82,154 @@ async def _publish(
     payload: dict[str, object],
 ) -> None:
     await bus.publish(Event(EventCategory.SYSTEM, message, payload))
+
+
+class RssPreviewIn(BaseModel):
+    """通用 RSS 匹配预览请求：拉 feed 逐条试判（零落库、L1 纯本地）。"""
+
+    rss_url: str = Field(min_length=1, max_length=2000)
+    rss_token: SecretStr | None = None
+    title_cn: str | None = Field(default=None, max_length=500)
+    title_jp: str | None = Field(default=None, max_length=500)
+    title_romaji: str | None = Field(default=None, max_length=500)
+    season_number: int = Field(default=1, ge=0, le=999)
+    fansub_pref: str | None = Field(default=None, max_length=200)
+    include_keywords: str | None = Field(default=None, max_length=500)
+    exclude_keywords: str | None = Field(default=None, max_length=500)
+    limit: int = Field(default=60, ge=1, le=200)
+
+
+class RssPreviewEntryOut(BaseModel):
+    title: str
+    episode: int | None
+    verdict: str  # would_download / candidate / rejected / unparsed
+    reason: str | None
+    fansub: str | None
+    score: float
+
+
+class RssPreviewOut(BaseModel):
+    """entries_total = feed 全量;listed = 截断参与预览数;download_count = 会下载数。
+
+    同集多候选时按评分择优,只有每集最高分的一条标 would_download——与
+    RSS 轮询的下载语义一致(默认一条,不重复下载)。
+    """
+
+    entries_total: int
+    listed: int
+    download_count: int
+    entries: list[RssPreviewEntryOut]
+
+
+@router.post("/rss-preview", response_model=RssPreviewOut)
+async def rss_preview(
+    body: RssPreviewIn,
+    settings: SettingsDep,
+) -> RssPreviewOut:
+    """通用 RSS 源匹配预览（选番抽屉「匹配预览」数据源）。
+
+    与 RSS 轮询同一判定链:fetch_feed → L1 解析 → align_rss_entry 对齐 →
+    订阅规则(include/exclude) → score_from_title 择优。零落库、无 L2/L3
+    (L1-only orchestrator),预览不产生任何副作用。上游拉取失败 502。
+    """
+    expected_titles = tuple(
+        t
+        for t in (body.title_cn, body.title_jp, body.title_romaji)
+        if t is not None and t.strip() != ""
+    )
+    if not expected_titles:
+        raise HTTPException(status_code=422, detail="at least one title is required")
+
+    async with httpx.AsyncClient(
+        timeout=settings.rss_fetch_timeout_s, follow_redirects=True
+    ) as client:
+        try:
+            page = await fetch_feed(
+                client,
+                body.rss_url,
+                token=SecretStr(body.rss_token.get_secret_value())
+                if body.rss_token is not None
+                else None,
+            )
+        except Exception as exc:  # RssFetchError/feedparser 异常统一 502
+            raise HTTPException(
+                status_code=502, detail=f"rss fetch failed: {type(exc).__name__}"
+            ) from None
+
+    orchestrator = Orchestrator(LocalRecognizer(), l2_enabled=False, l3_enabled=False)
+    rows: list[RssPreviewEntryOut] = []
+    best_by_episode: dict[int, tuple[int, float]] = {}  # episode → (行索引, 分数)
+    for entry in page.entries[: body.limit]:
+        parse = await orchestrator.parse(RawName(name=entry.title))
+        alignment = align_rss_entry(
+            parse,
+            expected_titles=expected_titles,
+            season_number=body.season_number,
+        )
+        fansub = parse.fansub if parse is not None else None
+        if parse is None or alignment.verdict == "unparsed":
+            rows.append(
+                RssPreviewEntryOut(
+                    title=entry.title, episode=None, verdict="unparsed",
+                    reason="unparsed", fansub=None, score=0.0,
+                )
+            )
+            continue
+        score = score_from_title(
+            entry.title, fansub=fansub, fansub_pref=body.fansub_pref, seeders=None
+        )
+        if alignment.verdict == "conflict":
+            rows.append(
+                RssPreviewEntryOut(
+                    title=entry.title, episode=parse.episode, verdict="rejected",
+                    reason=f"expected_conflict: {alignment.detail}", fansub=fansub,
+                    score=score,
+                )
+            )
+            continue
+        if parse.segment.value != "episode" or alignment.parsed_episode is None:
+            rows.append(
+                RssPreviewEntryOut(
+                    title=entry.title, episode=parse.episode, verdict="rejected",
+                    reason=f"segment_not_supported: {parse.segment.value}",
+                    fansub=fansub, score=score,
+                )
+            )
+            continue
+        rule_reason = rule_reject_reason(
+            entry.title,
+            include_keywords=body.include_keywords,
+            exclude_keywords=body.exclude_keywords,
+        )
+        if rule_reason is not None:
+            rows.append(
+                RssPreviewEntryOut(
+                    title=entry.title, episode=alignment.parsed_episode,
+                    verdict="rejected", reason=rule_reason, fansub=fansub, score=score,
+                )
+            )
+            continue
+        idx = len(rows)
+        rows.append(
+            RssPreviewEntryOut(
+                title=entry.title, episode=alignment.parsed_episode,
+                verdict="candidate", reason=None, fansub=fansub, score=score,
+            )
+        )
+        prev = best_by_episode.get(alignment.parsed_episode)
+        if prev is None or score > prev[1]:
+            best_by_episode[alignment.parsed_episode] = (idx, score)
+
+    # 同集择优:每集最高分标 would_download(与轮询 _resolve_candidates 同语义)
+    for idx, _score in best_by_episode.values():
+        rows[idx].verdict = "would_download"
+    download_count = sum(1 for r in rows if r.verdict == "would_download")
+    return RssPreviewOut(
+        entries_total=len(page.entries),
+        listed=min(len(page.entries), body.limit),
+        download_count=download_count,
+        entries=rows,
+    )
 
 
 @router.post("/parse-preview")

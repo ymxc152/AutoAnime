@@ -391,3 +391,39 @@ async def test_poll_writes_expected_carrier_release_record() -> None:
     assert len(record.torrent_hash) == 40
     assert record.picked_at is not None
     assert record.torrent_hash == torrent_info_hash(rig.gateway.added[0])
+
+# ---------- 通用 RSS 订阅规则(include/exclude 关键词) ----------
+
+
+async def test_poll_applies_exclude_rule() -> None:
+    """exclude 命中的条目确定性拒绝;未被排除的正常择优下载。"""
+    good = "[LoliHouse] Bocchi - 01 [Baha 1080p]"
+    bad = "[LoliHouse] Bocchi - 02 [内嵌广告版]"
+    rig = await make_rig(
+        {good: _parse_result("孤独摇滚", 1), bad: _parse_result("孤独摇滚", 2)},
+        [("guid-a", good, "a.torrent"), ("guid-b", bad, "b.torrent")],
+    )
+    season, series = await rig.store.season_series(rig.season_id)
+    async with rig.storage.transaction() as session:
+        row = await session.get(Series, series.id)
+        row.exclude_keywords = "内嵌广告"
+    outcome = await rig.poller.poll_source(await rig.source(), now=NOW)
+    assert outcome.rejected == 1
+    assert outcome.picked == 1
+
+
+async def test_poll_applies_include_rule_as_whitelist() -> None:
+    """include 非空 = 白名单:全部不命中 → 全拒绝,picked=0。"""
+    a = "[LoliHouse] Bocchi - 01 [1080p]"
+    b = "[SubGroup] Bocchi - 02 [720p]"
+    rig = await make_rig(
+        {a: _parse_result("孤独摇滚", 1), b: _parse_result("孤独摇滚", 2)},
+        [("guid-a", a, "a.torrent"), ("guid-b", b, "b.torrent")],
+    )
+    season, series = await rig.store.season_series(rig.season_id)
+    async with rig.storage.transaction() as session:
+        row = await session.get(Series, series.id)
+        row.include_keywords = "简中；B-Global"
+    outcome = await rig.poller.poll_source(await rig.source(), now=NOW)
+    assert outcome.rejected == 2
+    assert outcome.picked == 0

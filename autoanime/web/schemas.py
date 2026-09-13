@@ -199,6 +199,8 @@ class SubscriptionOut(BaseModel):
     status: str
     fansub_pref: str | None
     quality_pref: str | None
+    include_keywords: str | None
+    exclude_keywords: str | None
     seasons: list[SeasonProgressOut]
     # P0-B 一步订阅契约：token/URL 永不回显，只回「本次提交的 RSS 是否落库」。
     rss_saved: bool = False
@@ -216,6 +218,9 @@ class SubscriptionCreateIn(BaseModel):
     episode_count: int | None = None
     fansub_pref: str | None = None
     quality_pref: str | None = None
+    # 通用 RSS 规则：分号分隔关键词;include 非空 = 白名单,exclude 命中 = 拒绝
+    include_keywords: str | None = None
+    exclude_keywords: str | None = None
     # P0-B 一步订阅契约：bangumi_id 作 adopt 精确键；rss_url/rss_token 提供
     # 时与订阅同一事务挂 RSS 源（token 用 SecretStr 承载、任何响应不回显）。
     bangumi_id: str | None = None
@@ -251,6 +256,8 @@ class SubscriptionUpdateIn(BaseModel):
     status: Literal["active", "paused", "finished"] | None = None
     fansub_pref: str | None = None
     quality_pref: str | None = None
+    include_keywords: str | None = None
+    exclude_keywords: str | None = None
 
     @model_validator(mode="after")
     def _status_required_if_present(self) -> SubscriptionUpdateIn:
