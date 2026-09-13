@@ -728,7 +728,7 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         }
         return delayed({ results })
       },
-      qbitTest: () => delayed({ ok: true, version: 'v2.0.9', error: null }),
+      qbitTest: () => delayed({ ok: true, version: 'v2.0.9', save_path: 'C:/downloads', error: null }),
     },
   }
 }

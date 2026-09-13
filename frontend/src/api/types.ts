@@ -534,6 +534,9 @@ export interface SettingsUpdateBody {
   reference_qps?: number
   pending_backlog_alert_threshold?: number
   log_level?: string
+  // 路径类(立即生效;绝对路径,二者必须不同)
+  library_path?: string
+  download_path?: string
   // 调度类(重建 loop 生效)
   scheduler_enabled?: boolean
   rss_poll_interval_minutes?: number
@@ -600,6 +603,8 @@ export interface NotifyTestOut {
 export interface QbitTestOut {
   ok: boolean
   version: string | null
+  /** qB 全局默认保存路径(拿不到为 null) */
+  save_path: string | null
   error: string | null
 }
 

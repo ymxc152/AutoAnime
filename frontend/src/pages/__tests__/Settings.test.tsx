@@ -327,7 +327,10 @@ describe('SettingsPage', () => {
     expect(btn).toHaveClass('border-line')
     // 成功:行内状态文本展示(含版本号),不再走 toast(断言只排除 qbit 测试自己的
     // toast——相邻用例异步收尾的保存 toast 会晚到本用例的 spy,属既有时序噪声)
-    expect(await screen.findByText('qBittorrent 连接成功(v2.0.9)')).toBeInTheDocument()
+    const okLine = await screen.findByText(/qBittorrent 连接成功\(v2\.0\.9\)/)
+    expect(okLine).toBeInTheDocument()
+    // 保存路径不一致提示(mock save_path=C:/downloads ≠ download_path=/downloads)
+    expect(okLine).toHaveTextContent(/与「下载目录」不一致/)
     expect(successSpy).not.toHaveBeenCalledWith(expect.stringContaining('qBittorrent 连接成功'))
     expect(btn).toBeEnabled()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled() // 测试动作不改 dirty
@@ -384,20 +387,36 @@ describe('SettingsPage', () => {
     updateSpy.mockRestore()
   })
 
-  it('只读环境信息(旧后端缺省 abs 字段回退显示配置值)与密钥状态徽标(环境页)', async () => {
+  it('环境路径可编辑(旧后端缺省 abs 字段回退 placeholder 配置值)与密钥状态徽标', async () => {
     const user = userEvent.setup()
     renderPage(<SettingsPage />)
     await gotoTab(user, '环境')
-    // mock 未返回 library_path_abs/download_path_abs → 回退显示 library_path/download_path
-    expect(screen.getByText('/library')).toBeInTheDocument()
-    expect(screen.getByText('/downloads')).toBeInTheDocument()
-    expect(screen.queryByText(/配置值：/)).not.toBeInTheDocument()
+    // 路径行现为可编辑输入;mock 未返回 *_abs → abs 小字不显示,placeholder 回退配置值
+    const libInput = screen.getByLabelText('媒体库路径')
+    expect(libInput).toHaveValue('/library')
+    expect(screen.queryByText('/library')).not.toBeInTheDocument() // 不再是纯文本展示
+    const dlInput = screen.getByLabelText('下载目录')
+    expect(dlInput).toHaveValue('/downloads')
     expect(screen.getByText('127.0.0.1:8000')).toBeInTheDocument()
     // mock 基线:API Token 未配置 → 徽标「未配置」
     expect(screen.getByText('未配置')).toBeInTheDocument()
+    // 编辑 → dirty;保存 payload 带路径字段
+    const saveSpy = vi.spyOn(api.settings, 'update').mockResolvedValue({
+      ...mockSettings,
+      updated_at: MOCK_SETTINGS_UPDATED_AT + '-x',
+      applied: {},
+      warnings: [],
+    } as never)
+    await user.type(libInput, 'X')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(saveSpy).toHaveBeenCalled())
+    const body = saveSpy.mock.calls[0]![0]
+    expect(body.library_path).toBe('/libraryX')
+    saveSpy.mockRestore()
   })
 
-  it('环境页优先显示绝对路径,并以 muted 小字保留原配置值', async () => {
+  it('环境路径输入带绝对路径说明(abs 以 muted 小字保留对照)', async () => {
     const user = userEvent.setup()
     const getSpy = vi.spyOn(api.settings, 'get').mockResolvedValue({
       ...mockSettings,
@@ -407,11 +426,11 @@ describe('SettingsPage', () => {
     })
     renderPage(<SettingsPage />)
     await gotoTab(user, '环境')
-    // 主值 = 后端 resolve 的绝对路径;原配置值以 muted 小字保留对照
+    // 输入框 value = 配置值;resolve 后的绝对路径以 muted 小字保留对照
+    expect(screen.getByLabelText('媒体库路径')).toHaveValue('/library')
     expect(screen.getByText('/data/media/library')).toBeInTheDocument()
-    expect(screen.getByText('配置值：/library')).toBeInTheDocument()
+    expect(screen.getByLabelText('下载目录')).toHaveValue('/downloads')
     expect(screen.getByText('/data/downloads')).toBeInTheDocument()
-    expect(screen.getByText('配置值：/downloads')).toBeInTheDocument()
     getSpy.mockRestore()
   })
 

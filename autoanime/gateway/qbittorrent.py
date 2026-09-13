@@ -142,6 +142,25 @@ class QbittorrentGateway:
 
         return await self._call("qbittorrent_version", _read)
 
+    async def default_save_path(self) -> str | None:
+        """qB 全局默认保存路径（/app/preferences.save_path）。
+
+        供设置页与 download_path 比对提示对齐;读不到(None)不作为连接失败。
+        """
+        await self.ping()
+        client: Any = self._get_client()
+
+        def _read() -> str:
+            prefs = client.app_preferences  # 属性式 dict(同步取自缓存会话)
+            if callable(prefs):
+                prefs = prefs()
+            return str((prefs or {}).get("save_path", "") or "")
+
+        try:
+            return await self._call("app_preferences", _read)
+        except GatewayError:
+            return None
+
     # --- submission ---------------------------------------------------------
 
     async def add_torrent_bytes(self, data: bytes, *, save_path: str | None = None) -> str:

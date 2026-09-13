@@ -416,6 +416,9 @@ class SettingsUpdateIn(BaseModel):
     download_poll_interval_s: int | None = None
     download_max_retries: int | None = None
     collected_check_days: int | None = None
+    # 立即生效（路径类:绝对路径校验在路由层;需与下载器保存路径对齐）
+    library_path: str | None = None
+    download_path: str | None = None
     # 重启生效（连接/密钥类）
     llm_base_url: str | None = None
     llm_api_key: SecretStr | None = None
@@ -460,10 +463,15 @@ class NotifyTestOut(BaseModel):
 
 
 class QbitTestOut(BaseModel):
-    """qbit-test 结果（version 为 qBittorrent 服务端版本号）。"""
+    """qbit-test 结果（version 为 qBittorrent 服务端版本号）。
+
+    save_path = qB 全局默认保存路径（/app/preferences），供前端与
+    download_path 比对提示对齐；拿不到为 None，不作为 ok 的条件。
+    """
 
     ok: bool
     version: str | None = None
+    save_path: str | None = None
     error: str | None = None
 
 

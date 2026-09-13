@@ -60,9 +60,11 @@ class DownloadPoller:
         max_retries: int = 2,
         on_completed: CompletedCallback | None = None,
         torrent_refetch: Callable[[str], Awaitable[bytes | None]] | None = None,
+        save_path: str | None = None,
     ) -> None:
         self._store = store
         self._gateway = gateway
+        self._save_path = save_path
         self._bus = bus
         self._max_retries = max_retries
         self._on_completed = on_completed
@@ -175,7 +177,7 @@ class DownloadPoller:
         add = self._gateway.add_torrent_bytes
         try:
             assert data is not None
-            await add(data)
+            await add(data, save_path=self._save_path)
         except GatewayError as exc:
             logger.warning("retry add failed for %s: %s", torrent_hash, exc)
             await self._store.transition_release(

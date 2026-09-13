@@ -421,6 +421,9 @@ class _FakeQbitGateway:
             raise GatewayError("qbittorrent version failed: ConnectError")
         return "v5.1.2"
 
+    async def default_save_path(self) -> str | None:
+        return "C:/downloads" if not type(self).fail else None
+
 
 async def test_qbit_test_success(client, monkeypatch: pytest.MonkeyPatch) -> None:
     c, _, _ = client
@@ -431,7 +434,7 @@ async def test_qbit_test_success(client, monkeypatch: pytest.MonkeyPatch) -> Non
     resp = await c.post("/api/settings/qbit-test")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body == {"ok": True, "version": "v5.1.2", "error": None}
+    assert body == {"ok": True, "version": "v5.1.2", "save_path": "C:/downloads", "error": None}
     args, kwargs = _FakeQbitGateway.init_args
     # 合并配置（此处 = 默认 Settings）传入网关构造
     assert args == ("127.0.0.1", 8080, "admin", Settings().qbittorrent_password)
@@ -507,3 +510,62 @@ def test_asgi_scheduler_rebuild_on_scheduler_tier_put(
         assert new_scheduler.running is True  # 重建后不中断调度
         assert settings.rss_poll_interval_minutes == 7  # 新 loop 按新间隔装配
     assert new_scheduler.running is False
+
+# ---------------------------------------------------------------------------
+# 路径字段(library_path/download_path):立即档 + 校验
+# ---------------------------------------------------------------------------
+
+
+async def test_put_paths_updates_immediately_and_persists(client) -> None:
+    c, settings, _mp = client
+    resp = await c.put(
+        "/api/settings",
+        json={"library_path": "D:/media/library", "download_path": "D:/media/downloads"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"]["library_path"] == "immediate"
+    assert body["applied"]["download_path"] == "immediate"
+    # 运行时实例立即生效;GET 回显新值
+    assert str(settings.library_path) == "D:/media/library"
+    after = await c.get("/api/settings")
+    assert after.json()["library_path"] == "D:/media/library"
+    assert after.json()["library_path_abs"].endswith("library")
+
+
+async def test_put_paths_relative_is_422(client) -> None:
+    c, _, _ = client
+    resp = await c.put("/api/settings", json={"library_path": "library"})
+    assert resp.status_code == 422
+    assert "absolute" in resp.json()["detail"]
+
+
+async def test_put_paths_same_dir_is_422(client) -> None:
+    c, _, _ = client
+    resp = await c.put(
+        "/api/settings",
+        json={"library_path": "D:/media/same", "download_path": "D:/media/same"},
+    )
+    assert resp.status_code == 422
+    assert "must differ" in resp.json()["detail"]
+
+
+async def test_put_paths_cross_drive_warns(client) -> None:
+    c, _, _ = client
+    resp = await c.put(
+        "/api/settings",
+        json={"library_path": "D:/media/library", "download_path": "C:/downloads"},
+    )
+    assert resp.status_code == 200
+    assert any("copy" in w for w in resp.json()["warnings"])
+
+async def test_put_paths_null_clears_override_and_falls_back(client) -> None:
+    c, settings, _mp = client
+    resp = await c.put(chr(47)+'api/settings', json={'library_path': 'D:/media/library', 'download_path': 'D:/media/downloads'})
+    assert resp.status_code == 200
+    resp = await c.put(chr(47)+'api/settings', json={'library_path': None})
+    assert resp.status_code == 200, resp.text
+    after = await c.get(chr(47)+'api/settings')
+    assert after.status_code == 200
+    assert after.json()['library_path'] == 'library'
+    assert after.json()['library_path_abs'].endswith('library')

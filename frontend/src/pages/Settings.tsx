@@ -55,16 +55,7 @@ function parseOrder(raw: string): string[] {
  * 用户才知道实际位置);旧后端缺省该字段时回退显示配置值;绝对路径与配置值不同时,
  * 以 muted 小字保留原配置值便于对照。控件列内贴右缘(与各 tab 行控件对齐)。
  */
-function EnvPathValue({ abs, raw }: { abs?: string; raw: string }): ReactNode {
-  return (
-    <div className="flex flex-col items-end gap-0.5 text-right">
-      <span className="data-text break-all text-sm text-ink">{abs ?? raw}</span>
-      {abs !== undefined && abs !== raw && (
-        <span className="break-all text-xs text-ink-secondary">配置值：{raw}</span>
-      )}
-    </div>
-  )
-}
+
 
 // ---------------------------------------------------------------------------
 // 12-E:草稿与字段分组(标签页 dirty 追踪)
@@ -89,6 +80,8 @@ interface SettingsDraft {
   downloader?: string
   qbittorrent_host?: string
   qbittorrent_username?: string
+  library_path?: string
+  download_path?: string
   notify_telegram_chat_id?: string
   upgrade_copy_policy?: string
   naming_title_language?: string
@@ -168,7 +161,7 @@ const TAB_FIELD_KEYS: Record<TabKey, readonly string[]> = {
     'pending_backlog_alert_threshold',
   ],
   notify: ['notify_enabled', 'notify_webhook_url', 'notify_telegram_bot_token', 'notify_telegram_chat_id'],
-  env: [],
+  env: ['library_path', 'download_path'],
 }
 
 /** 允许小数点的数字字段(其余按整数过滤) */
@@ -246,6 +239,8 @@ const TEXT_KEYS = [
   'downloader',
   'qbittorrent_host',
   'qbittorrent_username',
+  'library_path',
+  'download_path',
   'notify_telegram_chat_id',
   'upgrade_copy_policy',
   'naming_title_language',
@@ -346,6 +341,7 @@ export function SettingsPage() {
   const [notifyTesting, setNotifyTesting] = useState(false)
   // qbit 测试结果行内展示(ok=success 色 / fail=danger 色;不再走 toast 吞按钮反馈)
   const [qbitTestResult, setQbitTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const [qbSavePath, setQbSavePath] = useState('')
 
   const patch = (partial: SettingsDraft): void => {
     setEdit((prev) => ({ ...prev, ...partial }))
@@ -436,7 +432,7 @@ export function SettingsPage() {
   // ---- 展示值:编辑草稿优先,否则回显当前基线 ----
   const boolValue = (key: 'dry_run' | 'l2_enabled' | 'llm_enabled' | 'reference_enabled' | 'scheduler_enabled' | 'notify_enabled'): boolean =>
     edit[key] ?? base[key]
-  const textValue = (key: 'llm_model' | 'llm_base_url' | 'downloader' | 'qbittorrent_host' | 'qbittorrent_username' | 'notify_telegram_chat_id' | 'upgrade_copy_policy' | 'naming_title_language' | 'log_level'): string => {
+  const textValue = (key: 'llm_model' | 'llm_base_url' | 'downloader' | 'qbittorrent_host' | 'qbittorrent_username' | 'library_path' | 'download_path' | 'notify_telegram_chat_id' | 'upgrade_copy_policy' | 'naming_title_language' | 'log_level'): string => {
     const draft = edit[key]
     if (draft !== undefined) return draft
     const value = base[key]
@@ -578,12 +574,19 @@ export function SettingsPage() {
     try {
       const result = await api.settings.qbitTest()
       if (result.ok) {
-        setQbitTestResult({
-          ok: true,
-          text: result.version
+        const parts = [
+          result.version
             ? `${strings.settings.qbitTestOk}(${result.version})`
             : strings.settings.qbitTestOk,
-        })
+        ]
+        // 下载目录 vs qB 默认保存路径:不一致提示外部 RSS 下载不会被自动扫描看到
+        const dlPath = (edit.download_path ?? base.download_path ?? '').trim()
+        const qbPath = (result.save_path ?? '').trim()
+        if (qbPath !== '' && qbPath !== dlPath) {
+          parts.push(strings.settings.qbSavePathMismatch)
+        }
+        setQbitTestResult({ ok: true, text: parts.join('。') })
+        if (qbPath !== '') setQbSavePath(qbPath)
       } else {
         setQbitTestResult({
           ok: false,
@@ -1018,12 +1021,51 @@ export function SettingsPage() {
         {/* ---- 环境(只读 + API Token 本端注入,保持现状) ---- */}
         <TabsContent value="env">
           <Card title={strings.settings.environmentSection}>
+            {qbSavePath !== '' && qbSavePath !== (edit.download_path ?? base.download_path ?? '').trim() && (
+              <p
+                role="status"
+                data-testid="qb-save-path-warning"
+                className="mb-3 rounded-sm border border-line bg-surface-2 px-3 py-2 text-xs text-ink-secondary"
+              >
+                {strings.settings.qbSavePath}: {qbSavePath}。{strings.settings.qbSavePathMismatch}
+              </p>
+            )}
             <div className="divide-y divide-line">
-              <SettingRow label={strings.settings.libraryPath}>
-                <EnvPathValue abs={base.library_path_abs} raw={base.library_path} />
+              <SettingRow
+                label={strings.settings.libraryPath}
+                description={strings.settings.envPathHint}
+                htmlFor="settings-library-path"
+              >
+                <Input
+                  id="settings-library-path"
+                  value={textValue('library_path')}
+                  onChange={(e) => patch({ library_path: e.target.value })}
+                  placeholder={base.library_path}
+                  className="data-text"
+                />
+                {base.library_path_abs !== undefined && (
+                  <span className="mt-1 block text-right text-xs text-ink-muted">
+                    {base.library_path_abs}
+                  </span>
+                )}
               </SettingRow>
-              <SettingRow label={strings.settings.downloadPath}>
-                <EnvPathValue abs={base.download_path_abs} raw={base.download_path} />
+              <SettingRow
+                label={strings.settings.downloadPath}
+                description={strings.settings.envPathHint}
+                htmlFor="settings-download-path"
+              >
+                <Input
+                  id="settings-download-path"
+                  value={textValue('download_path')}
+                  onChange={(e) => patch({ download_path: e.target.value })}
+                  placeholder={base.download_path}
+                  className="data-text"
+                />
+                {base.download_path_abs !== undefined && (
+                  <span className="mt-1 block text-right text-xs text-ink-muted">
+                    {base.download_path_abs}
+                  </span>
+                )}
               </SettingRow>
               <SettingRow label={strings.settings.apiEndpoint}>
                 <div className="flex justify-end">

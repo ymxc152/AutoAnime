@@ -116,10 +116,14 @@ class RssPoller:
         rss_token: SecretStr | None = None,
         sleeper: Callable[[float], Awaitable[None]] | None = None,
         rng: random.Random | None = None,
+        save_path: str | None = None,
     ) -> None:
         self._store = store
         self._orchestrator = orchestrator
         self._gateway = gateway
+        # 显式下发保存路径:系统自己的任务恒落 settings.download_path
+        # (qB 默认保存路径可能不同;与「下载目录」配置保持一致)
+        self._save_path = save_path
         self._bus = bus
         self._fetch_retries = fetch_retries
         self._fetch_timeout_s = fetch_timeout_s
@@ -477,7 +481,7 @@ class RssPoller:
             return False  # 撞哈希：并发/重复提交，唯一约束兜底生效
         try:
             add = self._gateway.add_torrent_bytes
-            await add(candidate.data)
+            await add(candidate.data, save_path=self._save_path)
         except GatewayError as exc:
             logger.warning("gateway add failed for %s: %s", candidate.infohash, exc)
             await self._store.transition_release(

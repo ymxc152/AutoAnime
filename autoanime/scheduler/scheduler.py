@@ -202,6 +202,7 @@ def build_loop(
         upgrade_max_per_episode=settings.upgrade_max_per_episode,
         client_factory=client_factory,
         rss_token=None,  # per-source token 在 rss_sources 行内；此为兜底位
+        save_path=str(settings.download_path),
     )
     download_poller = DownloadPoller(
         store,
@@ -210,6 +211,7 @@ def build_loop(
         max_retries=settings.download_max_retries,
         on_completed=on_completed if on_completed is not None else archive_service.handle_completed,
         torrent_refetch=_refetch,
+        save_path=str(settings.download_path),
     )
     return LoopComponents(
         store=store,

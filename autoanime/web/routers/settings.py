@@ -63,6 +63,8 @@ logger = logging.getLogger(__name__)
 #: 立即生效（进程内 setattr，v1 六项 + 12-D 增量）。
 _IMMEDIATE_FIELDS = frozenset(
     {
+        "library_path",
+        "download_path",
         "dry_run",
         "l2_enabled",
         "llm_enabled",
@@ -157,7 +159,14 @@ _REFERENCE_CHAIN_FIELDS = frozenset(
 #: 非密钥可空字段：显式 null = 清除覆盖项（删 app_settings 行，回落默认/
 #: 下一优先级），语义对齐密钥字段的 null 清除；其余非密钥 null = 不修改。
 _NULLABLE_CLEAR_FIELDS = frozenset(
-    {"llm_model", "reference_qps", "llm_base_url", "notify_telegram_chat_id"}
+    {
+        "llm_model",
+        "reference_qps",
+        "llm_base_url",
+        "notify_telegram_chat_id",
+        "library_path",
+        "download_path",
+    }
 )
 
 
@@ -318,6 +327,32 @@ async def update_settings(
         current_updated_at = await storage.app_settings_updated_at()
         if current_updated_at != base_updated_at:
             raise HTTPException(status_code=409, detail="settings_changed")
+
+    # 路径类字段前置校验(在任何写入之前):绝对路径 + 两者不同;
+    # 跨盘只警告不拒绝(hardlink 降级 copy 由 D9 策略兜底)。
+    path_cross_drive = False
+    # 只校验用户显式提供的新值(历史相对默认不拦:用户没改过路径不该被拒);
+    # sibling 缺省沿用运行时现值参与同目录/跨盘判定(相对现值判定不了就跳过)。
+    lib_value = supplied.get("library_path")
+    dl_value = supplied.get("download_path")
+    if lib_value is not None and not Path(lib_value).is_absolute():
+        raise HTTPException(status_code=422, detail="library_path must be an absolute path")
+    if dl_value is not None and not Path(dl_value).is_absolute():
+        raise HTTPException(status_code=422, detail="download_path must be an absolute path")
+    if lib_value is not None or dl_value is not None:
+        effective_lib = lib_value if lib_value is not None else str(settings.library_path)
+        effective_dl = dl_value if dl_value is not None else str(settings.download_path)
+        try:
+            lib_abs = Path(effective_lib).resolve()
+            dl_abs = Path(effective_dl).resolve()
+        except (OSError, RuntimeError):
+            lib_abs = dl_abs = None
+        if lib_abs is not None and lib_abs == dl_abs:
+            raise HTTPException(
+                status_code=422, detail="library_path and download_path must differ"
+            )
+        if lib_abs is not None and Path(lib_abs).anchor and Path(dl_abs).anchor:
+            path_cross_drive = Path(lib_abs).anchor != Path(dl_abs).anchor
     applied: dict[str, SettingEffect] = {}
     scheduler_touched = False
     reference_chain_touched = False
@@ -336,12 +371,17 @@ async def update_settings(
         elif value is None:
             if key in _NULLABLE_CLEAR_FIELDS:
                 # 非密钥可空字段显式 null = 清除覆盖项（删行回落默认/下一
-                # 优先级，对齐密钥 null 清除）。运行时同步回落 None：immediate
-                # 字段立即生效，restart 字段使 GET 立即显示「无覆盖」（消费方
-                # 已固化，运行期行为不变）。
+                # 优先级，对齐密钥 null 清除）。路径类字段回落 env/toml 默认
+                # （Path 类型不接受 None，置 None 会让 Path(...) 崩）；
+                # 其余立即生效字段同步置 None（消费方已固化或可空）。
                 await storage.put_app_setting(key, None)
                 applied[key] = _effect_for(key)
-                setattr(settings, key, None)
+                if key in ("library_path", "download_path"):
+                    from autoanime.config import Settings as _Settings
+
+                    setattr(settings, key, getattr(_Settings(), key))
+                else:
+                    setattr(settings, key, None)
                 scheduler_touched = (
                     scheduler_touched or key in _ORCHESTRATOR_IMMEDIATE_FIELDS
                 )
@@ -364,6 +404,10 @@ async def update_settings(
             )
 
     warnings: list[str] = []
+    if path_cross_drive:
+        warnings.append(
+            "library 与 download 不在同一盘:hardlink 不可用,整理将按 copy 策略降级(大文件 IO 翻倍)"
+        )
     if reference_chain_touched:
         # confirm/correct 回填链：ReferenceChain 构造即冻结 order/enabled，
         # 重建后重赋 app.state.reference_chain（poster 的 chain_provider 动态
@@ -517,6 +561,11 @@ async def qbit_test(
             actor=Actor.MANUAL,
         )
         return QbitTestOut(ok=False, error=str(exc))
+    save_path: str | None = None
+    try:
+        save_path = await gateway.default_save_path()
+    except GatewayError:
+        save_path = None
     await governance.record_audit(
         operation_id=uuid4().hex,
         entity="settings",
@@ -524,7 +573,7 @@ async def qbit_test(
         instruction={"ok": True},
         actor=Actor.MANUAL,
     )
-    return QbitTestOut(ok=True, version=version)
+    return QbitTestOut(ok=True, version=version, save_path=save_path)
 
 
 __all__ = ["router", "settings_out"]
