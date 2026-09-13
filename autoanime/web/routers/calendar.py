@@ -17,7 +17,6 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from autoanime.gateway.bangumi_calendar import (
-    BangumiFetchError,
     BangumiItem,
     SeasonBrowseResult,
 )
@@ -26,6 +25,18 @@ from autoanime.web.deps import BangumiCalendarDep, GovernanceDep
 router = APIRouter(tags=["calendar"])
 
 SeasonName = Literal["winter", "spring", "summer", "fall"]
+
+
+def _current_season(now: datetime) -> tuple[int, SeasonName]:
+    """当前年/季(与前端选番页同规则:12/1/2=winter,3-5=spring,6-8=summer,9-11=fall)。"""
+    month = now.month
+    season: SeasonName = (
+        "spring" if 3 <= month <= 5
+        else "summer" if 6 <= month <= 8
+        else "fall" if month >= 9
+        else "winter"
+    )
+    return now.year, season
 """季名枚举：非法值由 FastAPI 校验层直接 422。"""
 
 
@@ -82,16 +93,20 @@ def _items_result(items: tuple[BangumiItem, ...]) -> SeasonBrowseResult:
 async def season_calendar(
     gateway: BangumiCalendarDep, governance: GovernanceDep
 ) -> SeasonBrowseOut:
-    """每日放送时间表（网关缓存 6h；拉取失败降级为空表，不 500）。"""
-    try:
-        out = _out(_items_result(await gateway.fetch_calendar()))
-    except BangumiFetchError as exc:
-        out = SeasonBrowseOut(items=[], degraded=True, reason=exc.detail)
+    """当季选番（缓存 30min；拉取失败降级为空表，不 500）。
+
+    数据源走 v0 搜索路径（fetch_season）而非 legacy /calendar：前者条目带
+    platform/tags（选番页地区/特别篇过滤的数据源），legacy 日历条目没有
+    这些字段（实测）。响应形状与历史季一致。
+    """
+    year, season = _current_season(datetime.now(UTC))
+    result = await gateway.fetch_season(year, season)
+    out = _out(result)
     await governance.record_audit(
         operation_id=uuid4().hex,
         entity="season_calendar",
         action="season_calendar_viewed",
-        instruction={"scope": "daily"},
+        instruction={"scope": "season-search", "year": year, "season": season},
     )
     return out
 

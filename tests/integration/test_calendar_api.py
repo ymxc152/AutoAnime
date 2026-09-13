@@ -46,9 +46,13 @@ class _StubGateway:
         return self._calendar_items
 
     async def fetch_season(self, year: int, season: str) -> SeasonBrowseResult:
+        # 当季路由自 v0 搜索路径取数(带 platform/region):注入同 stub 结果
         self.season_calls.append((year, season))
-        assert self._season_result is not None
-        return self._season_result
+        if self._season_result is not None:
+            return self._season_result
+        if self._calendar_error is not None:
+            return SeasonBrowseResult(items=[], degraded=True, reason=self._calendar_error.detail)
+        return SeasonBrowseResult(items=self._calendar_items, degraded=False, reason=None)
 
     async def aclose(self) -> None:
         return None
@@ -93,6 +97,7 @@ async def test_season_calendar_returns_items(env) -> None:
     stub = _StubGateway(calendar_items=(_item(1, "葬送的芙莉莲"), _item(2, "孤独摇滚！")))
     app.state.bangumi_calendar = stub
     resp = await client.get("/api/season-calendar")
+    assert stub.season_calls, "当季应走 fetch_season(v0 搜索路径,带 platform/region)"
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["degraded"] is False
