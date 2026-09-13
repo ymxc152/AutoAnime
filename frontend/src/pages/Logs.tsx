@@ -1,9 +1,17 @@
 /*
- * Logs —— 审计时间线 + 撤销整理(对齐后端契约):
+ * Logs —— 用户可读的审计时间线 + 撤销整理(对齐后端契约):
  * 组列表来自 GET /api/audit/operations(后端已按 operation_id 分组,最新组在前);
  * 展开时按 operation_id 拉取明细行(GET /api/audit?operation_id=…);
  * 撤销 POST /api/organize/{id}/rollback 的 {id} 是数值 audit 行 id,
  * 组级撤销取该组最新一条 audit 行 id(last_audit_id)。404/409 语义由后端给。
+ *
+ * 普通用户可读化改造:
+ *  - 时间列:组行 last_created_at / 明细行 created_at,本地时区 'MM-DD HH:mm';
+ *    字段未上线(0008 迁移前历史行/旧后端)为 null/undefined → 显示「—」,不报错。
+ *  - 中文事件:entity/action 本地映射(枚举以 autoanime 后端实际写入值为准),
+ *    展示形态「动作 · 对象」(如「归档 · 剧集」);未知值原样回退英文。
+ *  - operation_id 降级:主视觉不再是哈希,只保留 8 位前缀次要文本
+ *    (title 悬浮看完整值,复制按钮保留);行内主信息 = 时间 + 中文事件 + 条数。
  */
 import { useCallback, useState } from 'react'
 import { Copy, Undo2 } from 'lucide-react'
@@ -22,16 +30,107 @@ import {
   Input,
   PageTitle,
   StatusMark,
-  type Tone,
 } from '../components'
 import type { AuditDto, OperationGroupDto } from '../api/types'
 
-/** 动作徽标语义色:organize/upgrade=info、rollback/reverse=warning,其余中性 */
-function actionBadgeTone(action: string): Tone {
-  const lower = action.toLowerCase()
-  if (lower.includes('organize') || lower.includes('upgrade')) return 'info'
-  if (lower.includes('rollback') || lower.includes('reverse')) return 'warning'
-  return 'neutral'
+// ---------- 中文事件映射(枚举对齐 autoanime 后端实际写入值;未知值原样回退英文) ----------
+
+/** 对象(entity)→ 中文 */
+const ENTITY_LABELS: Record<string, string> = {
+  episode: '剧集',
+  series: '订阅',
+  pending_queue: '待确认',
+  parse_memory: '识别记忆',
+  bypass_list: '例外名单',
+  release: '发布物',
+  arbiter: '仲裁',
+  settings: '设置',
+  rss_sources: 'RSS 源',
+  season_calendar: '选番日历',
+}
+
+/** 动作(action)→ 中文 */
+const ACTION_LABELS: Record<string, string> = {
+  // 整理 / 归档(organize/archive.py、CLI import、reparse)
+  'episode.organized': '归档',
+  'organize.skipped': '跳过归档',
+  'upgrade.completed': '洗版完成',
+  'upgrade.rejected': '放弃洗版',
+  'mismatch.reattached': '错配修正',
+  'mismatch.quarantined': '错配隔离',
+  subscribed_fast_path: '订阅直通',
+  // 识别 / 学习(memory/governance.py、web/learning.py、pending)
+  memory_hit: '命中记忆',
+  demote_pending: '降级待确认',
+  deprecate: '弃用记忆',
+  bypass_add: '登记例外',
+  pending_confirm: '确认识别',
+  pending_correct: '纠正识别',
+  pending_reject: '拒绝识别',
+  rollback: '撤销整理',
+  // 订阅(subscriptions.py)
+  subscription_created: '添加订阅',
+  subscription_updated: '更新订阅',
+  subscription_deleted: '删除订阅',
+  // RSS 源(rss_sources.py)
+  rss_source_created: '添加 RSS 源',
+  rss_source_updated: '更新 RSS 源',
+  rss_source_deleted: '删除 RSS 源',
+  rss_source_polled: '轮询 RSS 源',
+  // 设置(settings.py)
+  'settings.updated': '更新设置',
+  'settings.notify_test': '通知通道测试',
+  'settings.qbit_test': '下载器测试',
+  // 季度选番(calendar.py)
+  season_calendar_viewed: '查看选番日历',
+  season_browse_viewed: '浏览季度番剧',
+  // 仲裁审计(pipeline/l3/arbiter.py R8 枚举)
+  field_conflict: '字段冲突仲裁',
+  level_upgraded: '置信升档',
+  season_disambiguated: '季数消歧',
+  season_disambiguation_rejected: '季数消歧否决',
+  l3_unavailable: 'L3 不可用',
+}
+
+/** 未知值原样回退英文,容忍后端新增枚举 */
+function entityLabel(entity: string): string {
+  return ENTITY_LABELS[entity] ?? entity
+}
+
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action
+}
+
+/** 明细行事件:「动作 · 对象」(如「归档 · 剧集」);entity 为空时只显示动作 */
+function eventLabel(action: string, entity: string): string {
+  const entityText = entityLabel(entity)
+  return entityText === '' ? actionLabel(action) : `${actionLabel(action)} · ${entityText}`
+}
+
+/** 组级事件摘要:组内动作/对象各取并集(通常各 1 项) */
+function eventSummary(actions: string[], entities: string[]): string {
+  const actionText = actions.map(actionLabel).join('、')
+  const entityText = entities.map(entityLabel).filter(Boolean).join('、')
+  return entityText === '' ? actionText : `${actionText} · ${entityText}`
+}
+
+// ---------- 时间格式化 ----------
+
+/** 时间缺省占位符(后端 created_at 未上线/0008 迁移前历史行;strings 无对应键,取字面量) */
+const TIME_FALLBACK = '—'
+
+/** ISO → 本地时区 'MM-DD HH:mm';null/undefined → '—';非法串原样展示(便于排查) */
+function formatLogTime(iso: string | null | undefined): string {
+  if (!iso) return TIME_FALLBACK
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** 32 位哈希降级为 8 位前缀(完整值走 title 悬浮);短 id 原样 */
+function shortOperationId(operationId: string): string {
+  return operationId.length <= 8 ? operationId : operationId.slice(0, 8)
 }
 
 function JsonBlock({ label, value }: { label: string; value: Record<string, unknown> }) {
@@ -87,7 +186,7 @@ function GroupEntries({
   }
 
   if (error !== null) {
-    return <p className="text-xs text-danger">{error}</p>
+    return <p className="text-sm font-medium text-danger">{error}</p>
   }
   if (loading) {
     return <p className="text-xs text-ink-secondary">{strings.common.loading}</p>
@@ -98,11 +197,18 @@ function GroupEntries({
       {entries.map((entry) => (
         <li key={entry.id} className="flex flex-col gap-1.5 border-l border-line pl-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-ink">{entry.action}</span>
-            <Badge>
-              {strings.logs.entity}: {entry.entity}
-              {entry.entity_id !== null ? `#${entry.entity_id}` : ''}
-            </Badge>
+            <span
+              className="data-text shrink-0 text-xs text-ink-secondary"
+              title={strings.logs.time}
+            >
+              {formatLogTime(entry.created_at)}
+            </span>
+            <span className="text-sm text-ink">{eventLabel(entry.action, entry.entity)}</span>
+            {entry.entity_id !== null && (
+              <Badge title={`${strings.logs.entity} #${entry.entity_id}`}>
+                #{entry.entity_id}
+              </Badge>
+            )}
             <Badge tone={entry.actor === 'manual' ? 'warning' : 'neutral'} mark>
               {entry.actor === 'manual' ? strings.logs.actorManual : strings.logs.actorAuto}
             </Badge>
@@ -178,10 +284,22 @@ function GroupRow({
           className="flex min-w-0 items-center gap-2 text-left"
         >
           <StatusMark tone={expanded ? 'primary' : 'neutral'} size={7} />
-          <span className="data-text truncate text-sm text-ink" title={group.operation_id}>
-            {group.operation_id}
+          <span
+            className="data-text shrink-0 text-xs text-ink-secondary"
+            title={strings.logs.time}
+          >
+            {formatLogTime(group.last_created_at)}
+          </span>
+          <span className="truncate text-sm text-ink">
+            {eventSummary(group.actions, group.entities)}
           </span>
           <Badge>{group.rows}</Badge>
+          <span
+            className="data-text truncate text-xs text-ink-secondary"
+            title={group.operation_id}
+          >
+            {shortOperationId(group.operation_id)}
+          </span>
           {expanded ? (
             <span className="text-xs text-ink-secondary">{strings.logs.collapseGroup}</span>
           ) : (
@@ -200,13 +318,6 @@ function GroupRow({
         >
           <Copy aria-hidden className="h-3.5 w-3.5" />
         </Button>
-        <span className="flex flex-wrap gap-1">
-          {group.actions.map((action) => (
-            <Badge key={action} tone={actionBadgeTone(action)}>
-              {action}
-            </Badge>
-          ))}
-        </span>
         {rollbackMessage !== null && (
           <span className="text-xs text-success">{rollbackMessage}</span>
         )}
@@ -264,6 +375,7 @@ export function LogsPage() {
   const [rollbackError, setRollbackError] = useState<string | null>(null)
 
   const groups = data?.items ?? []
+  // 搜索仍按原始 operation_id / entity / action 值过滤(与后端存储口径一致)
   const visible = filter === ''
     ? groups
     : groups.filter((g) => {
