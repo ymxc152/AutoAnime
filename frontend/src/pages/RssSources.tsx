@@ -286,7 +286,7 @@ function EditSourceDrawer({
           <Switch checked={enabled} onChange={setEnabled} aria-label={`${strings.common.enable} edit`} />
         </div>
         {error !== null && (
-          <p role="alert" className="text-xs text-danger">
+          <p role="alert" className="text-sm font-medium text-danger">
             {error}
           </p>
         )}

@@ -141,7 +141,7 @@ function CorrectDrawer({ item, onDone, onClose }: { item: PendingItemDto; onDone
         <section>
           <h3 className="text-sm font-medium text-ink">{strings.pending.correctFormTitle}</h3>
           <p className="mt-0.5 text-xs text-ink-secondary">{strings.pending.correctFormHint}</p>
-          {error !== null && <p className="mt-2 text-xs text-danger">{error}</p>}
+          {error !== null && <p className="mt-2 text-sm font-medium text-danger">{error}</p>}
           <form
             className="mt-3 grid grid-cols-2 gap-3"
             onSubmit={(e) => {
@@ -622,7 +622,16 @@ export function PendingPage() {
               />
             }
             footer={
-              <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={changePage} />
+              // 12-UX:空表(total=0)不渲染分页条 —— 「共 0 条 / 第 1/1 页 / 上一页下一页」
+              // 无信息量;空态引导文案仍由 empty 属性保留
+              total > 0 ? (
+                <Pagination
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  total={total}
+                  onPageChange={changePage}
+                />
+              ) : undefined
             }
           />
         )}

@@ -11,7 +11,7 @@ import { SubscriptionsPage } from '../Subscriptions'
 import { renderPage } from '../../test/testUtils'
 import { api, ApiError } from '../../api'
 import { mockCalendarItems } from '../../mocks/data'
-import type { SeasonBrowseOut, SeasonName } from '../../api/types'
+import type { SeasonBrowseOut, SeasonName, SubscriptionDto } from '../../api/types'
 import { resetMockState } from '../../mocks/handlers'
 
 /** 与页面同规则:当前月 → 默认季名(用于断言 season-browse 查询参数,避免跨月脆弱) */
@@ -46,8 +46,9 @@ describe('SubscriptionsPage', () => {
     const grid = await screen.findByTestId('season-grid')
     expect(within(grid).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(mockCalendarItems.length)
     expect(screen.getByText('孤独摇滚')).toBeInTheDocument()
-    // 评分 Badge 与集数(mock 唯一 13 集条目 = 魔法使いの夜 7.9 分)
-    expect(screen.getByText('7.9 分')).toBeInTheDocument()
+    // 评分与集数(mock 唯一 13 集条目 = 魔法使いの夜 7.9 分);12-UX:评分为实心 Star 图标 + 文本,不再是方块 mark 徽标
+    const rating = screen.getByText('7.9 分')
+    expect(rating.previousElementSibling?.tagName.toLowerCase()).toBe('svg')
     expect(screen.getByText('13 集')).toBeInTheDocument()
     // 网格不串台:Tab2 的订阅列表此时不渲染
     expect(screen.queryByText('药屋少女的呢喃')).not.toBeInTheDocument()
@@ -168,9 +169,21 @@ describe('SubscriptionsPage', () => {
   it('12-IA:重复订阅 adopted=true → toast 提示已合并到现有条目', async () => {
     const user = userEvent.setup()
     const successSpy = vi.spyOn(toast, 'success')
-    const createSpy = vi.spyOn(api.subscriptions, 'create').mockResolvedValueOnce({
-      ...({ id: 9, title_cn: '孤独摇滚', media_type: 'tv', status: 'active', fansub_pref: null, quality_pref: null, seasons: [], rss_saved: false, adopted: true } as never),
-    })
+    // 直接用 SubscriptionDto 类型字面量(rss_saved/adopted 为可选回显字段),不再 as never 展开
+    const adoptedSub: SubscriptionDto = {
+      id: 9,
+      title_cn: '孤独摇滚',
+      title_jp: null,
+      title_romaji: null,
+      media_type: 'tv',
+      status: 'active',
+      fansub_pref: null,
+      quality_pref: null,
+      seasons: [],
+      rss_saved: false,
+      adopted: true,
+    }
+    const createSpy = vi.spyOn(api.subscriptions, 'create').mockResolvedValueOnce(adoptedSub)
     renderPage(<SubscriptionsPage />)
     const card = await screen.findByTestId('anime-card-511103')
     await user.click(within(card).getByRole('button'))
@@ -205,6 +218,8 @@ describe('SubscriptionsPage', () => {
     expect(await screen.findByText('药屋少女的呢喃')).toBeInTheDocument()
     expect(screen.getByText('已归档 15/24 集')).toBeInTheDocument()
     expect(screen.getByText('缺 8 集')).toBeInTheDocument()
+    // 12-UX 口径修复只影响「全部季未放送」的订阅:mock 订阅已有放送内容,徽章仍显示「连载中」
+    expect(screen.getAllByText('连载中').length).toBeGreaterThan(0)
     // 药屋与迷宫饭各挂 1 条 RSS 源
     expect(screen.getAllByText('RSS 源 1').length).toBe(2)
     expect(screen.getByText('迷宫饭')).toBeInTheDocument()
@@ -284,6 +299,10 @@ describe('SubscriptionsPage', () => {
     // P1-UX:mock 预生成季 status=upcoming → 行内如实显示「尚未放送」,不再显示「已归档 0/12 集」
     expect(await screen.findByText('尚未放送')).toBeInTheDocument()
     expect(screen.queryByText('已归档 0/12 集')).not.toBeInTheDocument()
+    // 12-UX 口径修复:新订 active 且唯一季未放送 → 卡片徽章与季行同为「未放送」,不得宣称「连载中」
+    const newRow = (await screen.findByText('测试番')).closest('div.border-b') as HTMLElement
+    expect(within(newRow).getAllByText('未放送').length).toBeGreaterThanOrEqual(2)
+    expect(within(newRow).queryByText('连载中')).not.toBeInTheDocument()
     // 12-IA 弹窗化:提交成功后弹窗关闭
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
@@ -349,5 +368,7 @@ describe('SubscriptionsPage', () => {
     await user.click(within(dialog).getByRole('button', { name: '保存' }))
     const alert = await within(screen.getByRole('dialog')).findByRole('alert')
     expect(alert).toHaveTextContent('status locked')
+    // 12-UX:校验错误文字 text-sm font-medium(深色模式可读),不再用 text-xs
+    expect(alert).toHaveClass('text-sm', 'font-medium', 'text-danger')
   })
 })

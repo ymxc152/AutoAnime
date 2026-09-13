@@ -165,7 +165,7 @@ export function SubscriptionDrawer({
             />
           </Field>
           {error !== null && (
-            <p role="alert" className="text-xs text-danger">
+            <p role="alert" className="text-sm font-medium text-danger">
               {error}
             </p>
           )}

@@ -58,7 +58,11 @@ describe('PendingPage', () => {
       await waitFor(() => expect(screen.queryByText(name)).not.toBeInTheDocument())
     }
     expect(await screen.findByText('队列为空,没有需要人工确认的解析结果。')).toBeInTheDocument()
-    // 12-UX:空态给下一步入口 —— ghost 按钮跳转 /pipeline
+    // 12-UX:空表不渲染分页条(共 0 条 / 上一页 / 下一页 都不该出现)
+    expect(screen.queryByText(/共 0 条/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '上一页' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下一页' })).not.toBeInTheDocument()
+    // 空态引导保留:ghost 按钮跳转 /pipeline
     await user.click(screen.getByRole('button', { name: '去「导入与识别」试跑一个文件名' }))
     expect(navigateMock).toHaveBeenCalledWith('/pipeline')
   })

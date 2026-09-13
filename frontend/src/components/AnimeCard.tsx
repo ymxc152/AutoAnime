@@ -1,13 +1,13 @@
 /*
  * AnimeCard —— P1-E 季度选番卡片(Bangumi 规范化条目):
  * 封面(加载占位 Film 图标 / 失败回退标题首字)+ 标题(cn 优先 jp 兜底)+
- * 评分 Badge + 放送月日 + 集数。卡片整体可点(选番 → 订阅抽屉);
+ * 评分(实心 Star 图标 + 文本,12-UX:替代方块 mark 徽标,视觉不再像「■ 5.0 分」乱码)+
+ * 放送月日 + 集数。卡片整体可点(选番 → 订阅抽屉);
  * 「在 Mikan 搜索」外链是卡片的兄弟节点(绝对定位右上角),天然不冒泡进卡片点击。
  */
 import { useState } from 'react'
-import { ExternalLink, Film } from 'lucide-react'
+import { ExternalLink, Film, Star } from 'lucide-react'
 import { strings, t } from '../strings'
-import { Badge } from './Badge'
 import type { BangumiItemDto } from '../api/types'
 
 /** 选番展示标题:title_cn 缺失时用 title_jp 兜底(后端 title_jp 必有) */
@@ -93,9 +93,14 @@ export function AnimeCard({
           </p>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-secondary">
             {item.rating !== null && (
-              <Badge mark title={strings.uxfix.ratingLabel}>
-                <span className="data-text">{t(strings.uxfix.ratingScore, { score: item.rating.toFixed(1) })}</span>
-              </Badge>
+              // 12-UX:评分 = 实心 Star(fill-current 跟随文字色)+ 分数文本;
+              // 颜色用现有 warning token(amber,明暗主题自适应),不再用方块 mark 徽标
+              <span className="inline-flex items-center gap-1" title={strings.uxfix.ratingLabel}>
+                <Star aria-hidden className="h-3.5 w-3.5 fill-current text-warning" />
+                <span className="data-text">
+                  {t(strings.uxfix.ratingScore, { score: item.rating.toFixed(1) })}
+                </span>
+              </span>
             )}
             <span className="data-text">{monthDay(item.air_date)}</span>
             {item.eps !== null && item.eps > 0 && (

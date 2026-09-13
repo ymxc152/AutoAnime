@@ -331,10 +331,12 @@ export function DashboardPage() {
       {/* 12-UX:首次使用(订阅数 0)时的新手三步引导卡,位于指标卡之上 */}
       <OnboardingCard />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {/* 12-UX 双口径去歧义:本卡为「周期人工介入率」(label 已改名),hint 注明统计范围,
+            与下方「识别指标」的累计口径「人工介入率」区分(strings 冻结,口径文案用字面量) */}
         <MetricCard
           label={strings.dashboard.manualInterventionRate}
           value={data.intervention_rate === null ? '—' : formatPercent(data.intervention_rate)}
-          hint={`${strings.dashboard.auditManual} ${data.audit_manual} / ${strings.dashboard.auditTotal} ${data.audit_total}`}
+          hint={`近几个审计周期 · ${strings.dashboard.auditManual} ${data.audit_manual} / ${strings.dashboard.auditTotal} ${data.audit_total}`}
           icon={UserRoundCog}
         />
         <MetricCard

@@ -183,6 +183,25 @@ function subscriptionStatusTone(status: string): 'success' | 'warning' | 'neutra
 }
 
 /**
+ * 12-UX 卡片徽章与季行同口径:订阅 active 但所追季全部未放送(upcoming)时,
+ * 徽章不得宣称「连载中」,与季行「未放送」一致;其余情况
+ * (已有放送内容的 active / paused / finished)保持原状态逻辑不变。
+ */
+function subscriptionBadgeView(sub: SubscriptionDto): {
+  label: string
+  tone: 'success' | 'warning' | 'neutral'
+} {
+  const allUpcoming =
+    sub.status === 'active' &&
+    sub.seasons.length > 0 &&
+    sub.seasons.every((season) => season.status === 'upcoming')
+  if (allUpcoming) {
+    return { label: strings.library.seasonState.upcoming, tone: 'neutral' }
+  }
+  return { label: subscriptionStatusLabel(sub.status), tone: subscriptionStatusTone(sub.status) }
+}
+
+/**
  * 添加订阅弹窗(12-IA 弹窗化:原常驻 AddSubscriptionForm 卡片整体迁入,
  * 字段/校验/mock 行为不变,仅容器从卡片变居中 Dialog;提交成功后关闭并刷新)。
  */
@@ -384,7 +403,8 @@ function EditSubscriptionDrawer({
           />
         </Field>
         {error !== null && (
-          <p role="alert" className="text-xs text-danger">
+          // 12-UX:校验错误文字升级 text-sm font-medium,深色模式下 text-xs 偏细难读
+          <p role="alert" className="text-sm font-medium text-danger">
             {error}
           </p>
         )}
@@ -414,14 +434,14 @@ function SubscriptionRow({
 }) {
   // P1-UX:每行给「在 Mikan 搜索」小外链(触屏用户也可直达),按标题拼接搜索地址
   const mikanSearchUrl = `${MIKAN_URL}/Home/Search?searchstr=${encodeURIComponent(subscriptionTitle(sub))}`
+  // 12-UX:徽章与季行同口径(全未放送时显示「未放送」而非「连载中」)
+  const badge = subscriptionBadgeView(sub)
   return (
     <div className="flex flex-col gap-2 border-b border-line px-4 py-2.5 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-ink">{subscriptionTitle(sub)}</span>
         <Badge>{mediaTypeLabel(sub.media_type)}</Badge>
-        <Badge tone={subscriptionStatusTone(sub.status)}>
-          {subscriptionStatusLabel(sub.status)}
-        </Badge>
+        <Badge tone={badge.tone}>{badge.label}</Badge>
         <Badge>{sub.fansub_pref ?? strings.subscriptions.noFansub}</Badge>
         <span className="ml-auto flex items-center gap-1.5">
           {/* P1-UX:「在 Mikan 搜索」小外链(新窗口打开,不冒泡) */}

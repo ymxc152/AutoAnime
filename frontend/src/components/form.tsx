@@ -27,7 +27,7 @@ export function Field({ label, htmlFor, description, error, children, className 
       </label>
       {description !== undefined && <p className="text-xs text-ink-secondary">{description}</p>}
       {children}
-      {error !== undefined && <p className="text-xs text-danger">{error}</p>}
+      {error !== undefined && <p className="text-sm font-medium text-danger">{error}</p>}
     </div>
   )
 }

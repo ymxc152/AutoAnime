@@ -150,9 +150,11 @@ describe('RssSourcesPage', () => {
     const dialog = await screen.findByRole('dialog')
     await user.type(within(dialog).getByLabelText('地址'), 'https://mikanani.me/RSS/Bangumi?subgroupid=583')
     await user.click(within(dialog).getByRole('button', { name: '添加' }))
-    // 错误文案与下拉占位同串:限定 Field 的错误 <p>
+    // 错误文案与下拉占位同串:限定 Field 的错误 <p>(text-sm font-medium text-danger)
     expect(
-      await within(dialog).findByText('请选择关联季', { selector: 'p.text-xs' }),
+      await within(dialog).findByText('请选择关联季', {
+        selector: 'p.text-sm.font-medium.text-danger',
+      }),
     ).toBeInTheDocument()
   })
 

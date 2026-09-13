@@ -381,14 +381,22 @@ export function LibraryPage() {
       <PageTitle
         title={strings.library.title}
         actions={
-          <Input
-            type="search"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder={strings.library.searchPlaceholder}
-            aria-label={strings.library.searchPlaceholder}
-            className="w-56"
-          />
+          <>
+            <Input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={strings.library.searchPlaceholder}
+              aria-label={strings.library.searchPlaceholder}
+              className="w-56"
+            />
+            {/* 12-UX:总数计数与搜索框同行(工具栏右侧);空态/有数据行为一致,不再孤挂卡片下方 */}
+            {data !== null && (
+              <span className="whitespace-nowrap text-xs text-ink-secondary data-text">
+                {t(strings.common.total, { count: data.total })}
+              </span>
+            )}
+          </>
         }
       />
 
@@ -404,10 +412,9 @@ export function LibraryPage() {
         <Card>
           <div className="flex flex-col items-center py-2 text-center">
             <LibraryBig aria-hidden className="mb-3 h-10 w-10 text-ink-muted" />
-            <EmptyState
-              title={strings.library.empty}
-              description={strings.uxfix.emptyLibraryHint}
-            />
+            {/* 12-UX 空态去重:strings.library.empty 已含标题+一句成因,
+                不再叠加 uxfix.emptyLibraryHint(同一句话渲染两遍) */}
+            <EmptyState title={strings.library.empty} />
             {/* 12-UX:空态不再止步于文案,给一条去追番页的直达路径 */}
             <Link
               to="/subscriptions"
@@ -470,12 +477,6 @@ export function LibraryPage() {
           total={data.total}
           onPageChange={setPage}
         />
-      )}
-
-      {data !== null && (
-        <p className="text-xs text-ink-secondary data-text">
-          {t(strings.common.total, { count: data.total })}
-        </p>
       )}
 
       {selected !== null && (

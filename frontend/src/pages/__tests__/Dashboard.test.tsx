@@ -13,9 +13,12 @@ describe('DashboardPage', () => {
     resetMockState()
   })
 
-  it('渲染三个核心指标卡(人工介入率/待确认队列/LLM 调用率)', async () => {
+  it('渲染三个核心指标卡(周期人工介入率/待确认队列/LLM 调用率)', async () => {
     renderPage(<DashboardPage />)
-    expect(await screen.findByText('人工介入率')).toBeInTheDocument()
+    // 12-UX 双口径去歧义:上方指标卡改用「周期人工介入率」标签,并在 hint 注明统计范围,
+    // 与下方「识别指标」块的累计口径「人工介入率」(ops12f.reportInterventionRate)区分
+    expect(await screen.findByText('周期人工介入率')).toBeInTheDocument()
+    expect(screen.getByText('近几个审计周期 · 人工 3 / 总审计 62')).toBeInTheDocument()
     expect(screen.getByText('待确认队列')).toBeInTheDocument()
     expect(screen.getByText('LLM 调用率')).toBeInTheDocument()
     await waitFor(() => {
@@ -96,8 +99,8 @@ describe('DashboardPage', () => {
     vi.spyOn(api.report, 'get').mockRejectedValueOnce(new Error('report unavailable'))
     renderPage(<DashboardPage />)
     expect(await screen.findByText(/识别指标加载失败/)).toBeInTheDocument()
-    // 其余区块不受影响
-    expect(screen.getByText('人工介入率')).toBeInTheDocument()
+    // 其余区块不受影响(上方周期口径指标卡仍在)
+    expect(screen.getByText('周期人工介入率')).toBeInTheDocument()
   })
 
   it('uxfix:订阅数为 0 时顶部显示三步引导卡,三个步骤分别跳转对应页面(12-IA 新流程)', async () => {
@@ -130,7 +133,7 @@ describe('DashboardPage', () => {
 
   it('uxfix:已有订阅时不显示三步引导卡', async () => {
     renderPage(<DashboardPage />)
-    await screen.findByText('人工介入率')
+    await screen.findByText('周期人工介入率')
     await waitFor(() => {
       expect(screen.queryByText('三步开始使用')).not.toBeInTheDocument()
     })

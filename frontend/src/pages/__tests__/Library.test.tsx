@@ -76,7 +76,7 @@ describe('LibraryPage', () => {
     expect(within(dialog).getAllByText(/E04/).length).toBeGreaterThan(0)
   })
 
-  it('uxfix:空库文案不再引用字幕组 hint,并给出「去追番」直达入口', async () => {
+  it('uxfix:空态去重 —— 保留标题+一句成因+去追番 CTA,重复句不再渲染;计数在搜索框同行工具栏', async () => {
     vi.spyOn(api.series, 'list').mockResolvedValueOnce({
       total: 0,
       limit: 24,
@@ -84,16 +84,30 @@ describe('LibraryPage', () => {
       items: [],
     })
     renderPage(<LibraryPage />)
-    // 新文案:讲清空库的成因,而非「每番只订一个字幕组」
+    // 保留:strings.library.empty(标题 + 一句成因)
     expect(
-      await screen.findByText('添加订阅并完成导入后,归档的剧集会出现在这里'),
+      await screen.findByText('媒体库为空。添加订阅后,归档的剧集会出现在这里。'),
     ).toBeInTheDocument()
+    // 去重:原 description(uxfix.emptyLibraryHint)与标题句重复,不再渲染
+    expect(
+      screen.queryByText('添加订阅并完成导入后,归档的剧集会出现在这里'),
+    ).not.toBeInTheDocument()
     expect(screen.queryByText(/每番只订一个字幕组/)).not.toBeInTheDocument()
     // 空态卡下方的直达链接指向追番页
     expect(screen.getByRole('link', { name: '去「追番」创建订阅' })).toHaveAttribute(
       'href',
       '/subscriptions',
     )
+    // 计数归位:空态时「共 0 条」也在搜索框同行工具栏(行为与有数据时一致)
+    const toolbar = screen.getByRole('searchbox').parentElement as HTMLElement
+    expect(within(toolbar).getByText('共 0 条')).toBeInTheDocument()
+  })
+
+  it('uxfix:总数计数显示在搜索框同行工具栏右侧,不再孤挂网格下方', async () => {
+    renderPage(<LibraryPage />)
+    await screen.findByText('葬送的芙莉莲')
+    const toolbar = screen.getByRole('searchbox').parentElement as HTMLElement
+    expect(within(toolbar).getByText('共 6 条')).toBeInTheDocument()
   })
 
   it('12-F:重新识别 —— 先 dry-run 预览展示解析结果与目标路径,确认执行二次确认后移动', async () => {

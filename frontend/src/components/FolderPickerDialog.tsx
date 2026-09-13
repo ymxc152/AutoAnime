@@ -213,7 +213,7 @@ function PickerContent({
             <p className="px-3 py-4 text-sm text-ink-secondary">{strings.common.loading}</p>
           ) : error !== null ? (
             <div className="flex items-center justify-between gap-2 px-3 py-3">
-              <p role="alert" className="text-xs text-danger">{error}</p>
+              <p role="alert" className="text-sm font-medium text-danger">{error}</p>
               <Button size="sm" variant="secondary" onClick={() => navigate(currentPath)}>
                 {strings.common.retry}
               </Button>
