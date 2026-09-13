@@ -10,6 +10,7 @@ from autoanime.web.routers.episodes import router as episodes_router
 from autoanime.web.routers.events_sse import router as events_router
 from autoanime.web.routers.filesystem import router as filesystem_router
 from autoanime.web.routers.metrics import router as metrics_router
+from autoanime.web.routers.mikan import router as mikan_router
 from autoanime.web.routers.organize import router as organize_router
 from autoanime.web.routers.pending import router as pending_router
 from autoanime.web.routers.pipeline import router as pipeline_router
@@ -32,6 +33,7 @@ api_router.include_router(subscriptions_router)
 api_router.include_router(rss_sources_router)
 api_router.include_router(settings_router)
 api_router.include_router(calendar_router)
+api_router.include_router(mikan_router)
 api_router.include_router(events_router)
 api_router.include_router(filesystem_router)
 

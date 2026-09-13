@@ -74,7 +74,11 @@ class BangumiFetchError(Exception):
 
 @dataclass(frozen=True)
 class BangumiItem:
-    """规范化后的番剧条目（时间表/季浏览共用）。"""
+    """规范化后的番剧条目（时间表/季浏览共用）。
+
+    platform = Bangumi 原样（TV/OVA/ONA/剧场版…，可空）；region 由 tags 里的
+    地区标签推导（jp/cn/kr/us，可空）——前端据此做地区/特别篇过滤。
+    """
 
     subject_id: int
     title_cn: str | None
@@ -84,6 +88,8 @@ class BangumiItem:
     air_date: str | None
     eps: int | None
     mikan_search_url: str
+    platform: str | None
+    region: str | None
 
 
 @dataclass(frozen=True)
@@ -98,6 +104,33 @@ class SeasonBrowseResult:
 def mikan_search_url(title: str) -> str:
     """标题 → Mikan 搜索外链（纯函数，供测试）。"""
     return MIKAN_SEARCH_URL_TEMPLATE.format(query=quote(title))
+
+#: tags 里的地区标签名 → 规范 region 码（Bangumi 惯例：地区作为高票 tag 存在）
+_REGION_TAG_NAMES: tuple[tuple[str, str], ...] = (
+    ("日本", "jp"),
+    ("中国", "cn"),
+    ("国产", "cn"),
+    ("韩国", "kr"),
+    ("美国", "us"),
+    ("北美", "us"),
+)
+
+
+def derive_region(tags: object) -> str | None:
+    """subject.tags([{name,count}…] 或 [str…]) → 地区码；无地区标签返回 None。
+
+    Bangumi tags 按票数降序，首个命中的地区标签即认定（纯函数，供测试）。
+    """
+    if not isinstance(tags, list):
+        return None
+    for tag in tags:
+        name = tag.get("name") if isinstance(tag, dict) else tag
+        if not isinstance(name, str):
+            continue
+        for key, code in _REGION_TAG_NAMES:
+            if key in name:
+                return code
+    return None
 
 
 def _positive_int(value: object) -> int | None:
@@ -150,6 +183,7 @@ def map_subject(raw: object) -> BangumiItem | None:
         return None
     title_cn_raw = str(raw.get("name_cn") or "").strip()
     search_title = title_cn_raw or title_jp
+    platform_raw = str(raw.get("platform") or "").strip()
     return BangumiItem(
         subject_id=subject_id,
         title_cn=title_cn_raw or None,
@@ -159,6 +193,8 @@ def map_subject(raw: object) -> BangumiItem | None:
         air_date=_subject_air_date(raw),
         eps=_positive_int(raw.get("eps")),
         mikan_search_url=mikan_search_url(search_title),
+        platform=platform_raw or None,
+        region=derive_region(raw.get("tags")),
     )
 
 

@@ -64,6 +64,8 @@ def _item(subject_id: int, title_cn: str) -> BangumiItem:
         air_date="2026-07-05",
         eps=12,
         mikan_search_url=f"https://mikanani.me/Home/Search?searchstr={title_cn}",
+        platform="TV",
+        region="jp",
     )
 
 

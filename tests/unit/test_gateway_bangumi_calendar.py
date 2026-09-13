@@ -256,3 +256,39 @@ async def test_fetch_season_cache_hit_no_extra_calls() -> None:
     assert not other.degraded
     assert [item.air_date for item in other.items] == ["2026-07-10"]
     await gateway.aclose()
+
+
+# ---------- platform/region 字段(选番页地区/特别篇过滤的数据源) ----------
+
+
+def test_derive_region_from_tags() -> None:
+    from autoanime.gateway.bangumi_calendar import derive_region
+
+    assert derive_region([{"name": "日本", "count": 999}]) == "jp"
+    assert derive_region([{"name": "原创", "count": 5}, {"name": "中国", "count": 88}]) == "cn"
+    assert derive_region(["国产", "玄幻"]) == "cn"
+    assert derive_region([{"name": "韩国", "count": 3}]) == "kr"
+    assert derive_region([{"name": "北美", "count": 3}]) == "us"
+    assert derive_region([{"name": "原创", "count": 3}]) is None
+    assert derive_region(None) is None
+
+
+def test_map_subject_carries_platform_and_region() -> None:
+    from autoanime.gateway.bangumi_calendar import map_subject
+
+    raw = {
+        "id": 123,
+        "name": "テスト",
+        "name_cn": "测试",
+        "platform": "OVA",
+        "tags": [{"name": "日本", "count": 50}],
+    }
+    item = map_subject(raw)
+    assert item is not None
+    assert item.platform == "OVA"
+    assert item.region == "jp"
+
+    bare = map_subject({"id": 124, "name": "最低限"})
+    assert bare is not None
+    assert bare.platform is None
+    assert bare.region is None

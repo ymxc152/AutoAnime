@@ -40,6 +40,8 @@ class BangumiItemOut(BaseModel):
     air_date: str | None
     eps: int | None
     mikan_search_url: str
+    platform: str | None
+    region: str | None
 
 
 class SeasonBrowseOut(BaseModel):
@@ -62,6 +64,8 @@ def _out(result: SeasonBrowseResult) -> SeasonBrowseOut:
                 air_date=item.air_date,
                 eps=item.eps,
                 mikan_search_url=item.mikan_search_url,
+                platform=item.platform,
+                region=item.region,
             )
             for item in result.items
         ],
