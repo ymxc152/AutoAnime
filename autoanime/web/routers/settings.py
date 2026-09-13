@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -252,6 +253,9 @@ def settings_out(
         llm_base_url=_val("llm_base_url"),
         library_path=str(settings.library_path),
         download_path=str(settings.download_path),
+        # 环境信息补充（只读）：resolve 后的绝对路径，前端在相对路径旁显示实际位置。
+        library_path_abs=str(Path(settings.library_path).resolve()),
+        download_path_abs=str(Path(settings.download_path).resolve()),
         api_host=settings.api_host,
         api_port=settings.api_port,
         api_cors_dev_origins=list(settings.api_cors_dev_origins),

@@ -156,6 +156,8 @@ class AuditOut(BaseModel):
     instruction: dict[str, object]
     reverse: dict[str, object]
     actor: str
+    #: 行写入时刻（0008 迁移新增）；迁移前的历史行为 null。
+    created_at: datetime | None = None
 
 
 class OperationGroupOut(BaseModel):
@@ -167,6 +169,8 @@ class OperationGroupOut(BaseModel):
     actions: list[str]
     first_audit_id: int
     last_audit_id: int
+    #: 组内 last_audit_id 行的写入时刻；历史行为 None。
+    last_created_at: datetime | None = None
     #: 以组内最新行判定；UI 据此隐藏不可撤销操作，避免无意义 409。
     rollbackable: bool
 
@@ -346,6 +350,9 @@ class SettingsOut(BaseModel):
     # --- 环境（只读，v1 保持） ---
     library_path: str
     download_path: str
+    #: 只读，resolve 后的绝对路径（相对路径展示不够定位时前端取用）。
+    library_path_abs: str
+    download_path_abs: str
     api_host: str
     api_port: int
     api_cors_dev_origins: list[str]

@@ -210,6 +210,9 @@ class AuditLog(Base):
     instruction: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     reverse: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     actor: Mapped[Actor] = mapped_column(_enum(Actor), default=Actor.AUTO)
+    # 行写入时刻（Logs 页"几点发生了什么"）；列可空 + ORM default：
+    # 新行由 default=datetime.now 自动带时间，迁移前的历史行保持 NULL。
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.now)
 
 
 class RssSource(Base):

@@ -41,11 +41,12 @@ async def list_audit_operations(
     groups, total = await store.list_audit_operations(
         limit=pagination.limit, offset=pagination.offset
     )
-    return Page(
-        total=total,
-        limit=pagination.limit,
-        offset=pagination.offset,
-        items=[
+    items: list[OperationGroupOut] = []
+    for group in groups:
+        # last_created_at = 组内 last_audit_id 那行的写入时刻（历史行为 None）；
+        # 分组聚合在 ApiStore（E1 冻结），这里按组主键回查补齐时间列。
+        last_row = await store.get_audit(group.last_audit_id)
+        items.append(
             OperationGroupOut(
                 operation_id=group.operation_id,
                 rows=group.rows,
@@ -53,8 +54,13 @@ async def list_audit_operations(
                 actions=group.actions,
                 first_audit_id=group.first_audit_id,
                 last_audit_id=group.last_audit_id,
+                last_created_at=last_row.created_at if last_row is not None else None,
                 rollbackable=group.rollbackable,
             )
-            for group in groups
-        ],
+        )
+    return Page(
+        total=total,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        items=items,
     )
