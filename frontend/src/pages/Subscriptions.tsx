@@ -521,6 +521,8 @@ function EditSubscriptionDrawer({
   const [status, setStatus] = useState(sub.status)
   const [fansub, setFansub] = useState(sub.fansub_pref ?? '')
   const [quality, setQuality] = useState(sub.quality_pref ?? '')
+  const [includeKw, setIncludeKw] = useState(sub.include_keywords ?? '')
+  const [excludeKw, setExcludeKw] = useState(sub.exclude_keywords ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -533,6 +535,8 @@ function EditSubscriptionDrawer({
         status,
         fansub_pref: fansub.trim() === '' ? null : fansub.trim(),
         quality_pref: quality.trim() === '' ? null : quality.trim(),
+        include_keywords: includeKw.trim() === '' ? null : includeKw.trim(),
+        exclude_keywords: excludeKw.trim() === '' ? null : excludeKw.trim(),
       })
       onDone()
       onClose()
@@ -586,6 +590,30 @@ function EditSubscriptionDrawer({
             onChange={(e) => setQuality(e.target.value)}
           />
         </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field
+            label={strings.subscriptions.ruleInclude}
+            description={strings.subscriptions.ruleHint}
+            htmlFor="subscription-edit-include"
+          >
+            <Input
+              id="subscription-edit-include"
+              value={includeKw}
+              onChange={(e) => setIncludeKw(e.target.value)}
+              placeholder={strings.subscriptions.rulePlaceholder}
+              autoComplete="off"
+            />
+          </Field>
+          <Field label={strings.subscriptions.ruleExclude} htmlFor="subscription-edit-exclude">
+            <Input
+              id="subscription-edit-exclude"
+              value={excludeKw}
+              onChange={(e) => setExcludeKw(e.target.value)}
+              placeholder={strings.subscriptions.rulePlaceholder}
+              autoComplete="off"
+            />
+          </Field>
+        </div>
         {error !== null && (
           // 12-UX:校验错误文字升级 text-sm font-medium,深色模式下 text-xs 偏细难读
           <p role="alert" className="text-sm font-medium text-danger">

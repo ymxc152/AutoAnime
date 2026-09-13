@@ -4,6 +4,7 @@
  */
 import type {
   MikanGroupsDto,
+  RssPreviewResponse,
   AuditDto,
   BangumiItemDto,
   EpisodeDto,
@@ -341,6 +342,8 @@ export const mockSubscriptions: SubscriptionDto[] = [
     status: 'active',
     fansub_pref: 'Kamigakari',
     quality_pref: '1080p',
+    include_keywords: null,
+    exclude_keywords: null,
     seasons: [
       {
         season_id: 2,
@@ -362,6 +365,8 @@ export const mockSubscriptions: SubscriptionDto[] = [
     status: 'active',
     fansub_pref: 'NC-Raws',
     quality_pref: '1080p',
+    include_keywords: null,
+    exclude_keywords: null,
     seasons: [
       {
         season_id: 6,
@@ -383,6 +388,8 @@ export const mockSubscriptions: SubscriptionDto[] = [
     status: 'active',
     fansub_pref: '栀次元字幕组',
     quality_pref: '1080p',
+    include_keywords: null,
+    exclude_keywords: null,
     seasons: [
       {
         season_id: 1,
@@ -583,6 +590,46 @@ export const mockSeasonBrowse: SeasonBrowseOut = {
 }
 
 /** Mikan 字幕组发现(GET /api/mikan/subtitle_groups;mock 两个字幕组选项) */
+export const mockRssPreview: RssPreviewResponse = {
+  entries_total: 4,
+  listed: 4,
+  download_count: 1,
+  entries: [
+    {
+      title: '[LoliHouse] 孤独摇滚 - 01 [Baha 1080p][简中]',
+      episode: 1,
+      verdict: 'would_download',
+      reason: null,
+      fansub: 'LoliHouse',
+      score: 8.5,
+    },
+    {
+      title: '[SubPl] 孤独摇滚 - 01 [720p HDTV]',
+      episode: 1,
+      verdict: 'candidate',
+      reason: null,
+      fansub: 'SubPl',
+      score: 4.0,
+    },
+    {
+      title: '[SubPl] 孤独摇滚 - 02 [内嵌广告][1080p]',
+      episode: 2,
+      verdict: 'rejected',
+      reason: 'excluded_by_rule: 内嵌广告',
+      fansub: 'SubPl',
+      score: 3.2,
+    },
+    {
+      title: '[别的组] 完全无关的番剧 - 01 [1080p]',
+      episode: 1,
+      verdict: 'rejected',
+      reason: 'expected_conflict: title mismatch',
+      fansub: '别的组',
+      score: 2.0,
+    },
+  ],
+}
+
 export const mockMikanGroups: MikanGroupsDto = {
   matched_title: '孤独摇滚!',
   bangumi_id: 3281,

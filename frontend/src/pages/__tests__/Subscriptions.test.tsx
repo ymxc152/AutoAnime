@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { SubscriptionsPage } from '../Subscriptions'
 import { renderPage } from '../../test/testUtils'
 import { api, ApiError } from '../../api'
+import { strings } from '../../strings'
 import { mockCalendarItems, mockSubscriptions } from '../../mocks/data'
 import type { SeasonBrowseOut, SeasonName, SubscriptionDto } from '../../api/types'
 import { resetMockState } from '../../mocks/handlers'
@@ -176,6 +177,50 @@ describe('SubscriptionsPage', () => {
     )
   })
 
+  it('12-UX:抽屉填通用 RSS 后可跑匹配预览(将下载/备选/已排除),创建带规则', async () => {
+    const user = userEvent.setup()
+    const previewSpy = vi.spyOn(api.pipeline, 'rssPreview')
+    const createSpy = vi.spyOn(api.subscriptions, 'create')
+    renderPage(<SubscriptionsPage />)
+    const card = await screen.findByTestId('anime-card-511100')
+    await user.click(within(card).getByRole('button'))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(
+      within(dialog).getByLabelText('RSS'),
+      'https://rss.example.com/api/rss/fetch?pageSize=50',
+    )
+    await user.type(within(dialog).getByLabelText('必须排除关键词'), '内嵌广告')
+    await user.click(within(dialog).getByRole('button', { name: '匹配预览' }))
+    await waitFor(() => expect(previewSpy).toHaveBeenCalledTimes(1))
+    const previewBody = previewSpy.mock.calls[0]![0]
+    expect(previewBody.rss_url).toContain('rss.example.com')
+    expect(previewBody.exclude_keywords).toBe('内嵌广告')
+    const box = await within(dialog).findByTestId('rss-preview')
+    expect(within(box).getByText(/4 条中 1 条会被下载/)).toBeInTheDocument()
+    expect(within(box).getAllByText(/将下载/).length).toBe(1)
+    expect(within(box).getAllByText(/备选/).length).toBeGreaterThan(0)
+    expect(within(box).getAllByText(/已排除/).length).toBe(2)
+    await user.click(within(dialog).getByRole('button', { name: '订阅并挂 RSS' }))
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1))
+    expect(createSpy.mock.calls[0]![0].exclude_keywords).toBe('内嵌广告')
+  })
+
+  it('12-UX:编辑抽屉可更新 include/exclude 规则', async () => {
+    const user = userEvent.setup()
+    renderPage(<SubscriptionsPage />)
+    await openMineTab(user)
+    const row = (await screen.findByText('药屋少女的呢喃')).closest(
+      'div.border-b',
+    ) as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '编辑' }))
+    const dialog = screen.getByRole('dialog')
+    const updateSpy = vi.spyOn(api.subscriptions, 'update')
+    await user.type(within(dialog).getByLabelText('必须包含关键词'), '简中;B-Global')
+    await user.click(within(dialog).getByRole('button', { name: strings.common.save }))
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1))
+    expect(updateSpy.mock.calls[0]![1].include_keywords).toBe('简中;B-Global')
+  })
+
   it('12-UX:已在订阅中的番剧,选番卡片显示「已订阅」角标', async () => {
     vi.spyOn(api.subscriptions, 'list').mockResolvedValue({
       items: [{ ...mockSubscriptions[0]!, title_cn: '孤独摇滚', title_jp: 'ぼっち・ざ・ろっく!' }],
@@ -294,6 +339,8 @@ describe('SubscriptionsPage', () => {
       status: 'active',
       fansub_pref: null,
       quality_pref: null,
+      include_keywords: null,
+      exclude_keywords: null,
       seasons: [],
       rss_saved: false,
       adopted: true,
@@ -465,6 +512,8 @@ describe('SubscriptionsPage', () => {
       status: 'paused',
       fansub_pref: 'LoliHouse',
       quality_pref: null,
+      include_keywords: null,
+      exclude_keywords: null,
     })
     // 断言收窄到行内:抽屉 select 的 option 也含「暂停」文案,全局查询会提前命中
     const updatedRow = (await screen.findByText('药屋少女的呢喃')).closest('div.border-b') as HTMLElement

@@ -283,6 +283,8 @@ export interface SubscriptionDto {
   status: string
   fansub_pref: string | null
   quality_pref: string | null
+  include_keywords: string | null
+  exclude_keywords: string | null
   seasons: SeasonProgressDto[]
   /** P0-B:本次(创建)提交的 RSS 是否落库;token/URL 永不回显。列表行恒 false */
   rss_saved?: boolean
@@ -301,6 +303,9 @@ export interface SubscriptionUpdateBody {
   fansub_pref?: string | null
   /** 显式传 null = 清除偏好 */
   quality_pref?: string | null
+  /** 通用 RSS 规则:分号分隔关键词;显式传 null = 清除 */
+  include_keywords?: string | null
+  exclude_keywords?: string | null
 }
 
 export interface SubscriptionCreateBody {
@@ -312,6 +317,9 @@ export interface SubscriptionCreateBody {
   episode_count?: number | null
   fansub_pref?: string | null
   quality_pref?: string | null
+  /** 通用 RSS 规则:分号分隔关键词;include 非空=白名单,exclude 命中=拒绝 */
+  include_keywords?: string | null
+  exclude_keywords?: string | null
   /** P0-B 一步订阅:Bangumi subject_id 作 adopt 精确键(字符串透传) */
   bangumi_id?: string
   /** P0-B 一步订阅:提供时与订阅同一事务挂 RssSource;响应 rss_saved 表示是否落库 */
@@ -782,4 +790,36 @@ export interface MikanGroupsDto {
   matched_title: string
   bangumi_id: number
   groups: MikanGroupOptionDto[]
+}
+
+// ---------- 通用 RSS 匹配预览(POST /api/pipeline/rss-preview) ----------
+
+export interface RssPreviewBody {
+  rss_url: string
+  rss_token?: string
+  title_cn?: string
+  title_jp?: string
+  title_romaji?: string
+  season_number?: number
+  fansub_pref?: string | null
+  include_keywords?: string | null
+  exclude_keywords?: string | null
+  limit?: number
+}
+
+/** verdict: would_download(将下载,每集评分最优唯一) / candidate / rejected / unparsed */
+export interface RssPreviewEntryDto {
+  title: string
+  episode: number | null
+  verdict: 'would_download' | 'candidate' | 'rejected' | 'unparsed'
+  reason: string | null
+  fansub: string | null
+  score: number
+}
+
+export interface RssPreviewResponse {
+  entries_total: number
+  listed: number
+  download_count: number
+  entries: RssPreviewEntryDto[]
 }

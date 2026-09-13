@@ -12,7 +12,11 @@ import { strings, t } from '../strings'
 import { Badge, Button, Drawer, Field, Input } from './'
 import { BangumiPoster } from './AnimeCard'
 import { formatDate } from '../lib/views'
-import type { BangumiItemDto, MikanGroupOptionDto } from '../api/types'
+import type {
+  BangumiItemDto,
+  MikanGroupOptionDto,
+  RssPreviewResponse,
+} from '../api/types'
 
 /** 抽屉展示标题:title_cn 缺失时用 title_jp 兜底(与 AnimeCard 同规则) */
 function bangumiTitle(item: BangumiItemDto): string {
@@ -43,6 +47,10 @@ export function SubscriptionDrawer({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Mikan 字幕组自动发现:打开抽屉即拉取,点选直接填 RSS(也可手动粘贴)
+  const [includeKw, setIncludeKw] = useState('')
+  const [excludeKw, setExcludeKw] = useState('')
+  const [preview, setPreview] = useState<RssPreviewResponse | null>(null)
+  const [previewPhase, setPreviewPhase] = useState<'idle' | 'loading' | 'error'>('idle')
   const [groups, setGroups] = useState<MikanGroupOptionDto[] | null>(null)
   const [groupsPhase, setGroupsPhase] = useState<'loading' | 'error' | 'miss' | 'done'>('loading')
 
@@ -89,6 +97,8 @@ export function SubscriptionDrawer({
         bangumi_id: String(item.subject_id),
         ...(item.eps !== null && item.eps > 0 ? { episode_count: item.eps } : {}),
         ...(fansub.trim() !== '' ? { fansub_pref: fansub.trim() } : {}),
+        ...(includeKw.trim() !== '' ? { include_keywords: includeKw.trim() } : {}),
+        ...(excludeKw.trim() !== '' ? { exclude_keywords: excludeKw.trim() } : {}),
         ...(attach
           ? {
               rss_url: rssUrl.trim(),
@@ -114,6 +124,27 @@ export function SubscriptionDrawer({
       setError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const runPreview = async (): Promise<void> => {
+    if (rssUrl.trim() === '') return
+    setPreviewPhase('loading')
+    try {
+      const d = await api.pipeline.rssPreview({
+        rss_url: rssUrl.trim(),
+        title_cn: item.title_cn ?? undefined,
+        title_jp: item.title_jp,
+        season_number: 1,
+        fansub_pref: fansub.trim() === '' ? null : fansub.trim(),
+        include_keywords: includeKw.trim() === '' ? null : includeKw.trim(),
+        exclude_keywords: excludeKw.trim() === '' ? null : excludeKw.trim(),
+      })
+      setPreview(d)
+      setPreviewPhase('idle')
+    } catch {
+      setPreview(null)
+      setPreviewPhase('error')
     }
   }
 
@@ -232,17 +263,113 @@ export function SubscriptionDrawer({
               </div>
             )}
           </div>
+          {/* 通用 RSS 规则:include 白名单 / exclude 黑名单(与轮询下载同一套规则) */}
+          <div className="grid grid-cols-2 gap-2">
+            <Field
+              label={strings.subscriptions.ruleInclude}
+              description={strings.subscriptions.ruleHint}
+              htmlFor="season-drawer-include"
+            >
+              <Input
+                id="season-drawer-include"
+                value={includeKw}
+                onChange={(e) => setIncludeKw(e.target.value)}
+                placeholder={strings.subscriptions.rulePlaceholder}
+                autoComplete="off"
+              />
+            </Field>
+            <Field label={strings.subscriptions.ruleExclude} htmlFor="season-drawer-exclude">
+              <Input
+                id="season-drawer-exclude"
+                value={excludeKw}
+                onChange={(e) => setExcludeKw(e.target.value)}
+                placeholder={strings.subscriptions.rulePlaceholder}
+                autoComplete="off"
+              />
+            </Field>
+          </div>
           {/* RSS 地址按密钥对待(type=password):Mikan 地址常内嵌 token */}
           <Field label="RSS" description={strings.uxfix.drawerRssHint} htmlFor="season-drawer-rss">
             <Input
               id="season-drawer-rss"
               type="password"
               value={rssUrl}
-              onChange={(e) => setRssUrl(e.target.value)}
+              onChange={(e) => {
+                setRssUrl(e.target.value)
+                setPreview(null)
+                setPreviewPhase('idle')
+              }}
               autoComplete="off"
               className="data-text"
             />
           </Field>
+          {/* 匹配预览:填了 RSS 才可用;展示每条判定与「将下载」标记 */}
+          {rssUrl.trim() !== '' && (
+            <div className="flex flex-col gap-1.5">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => void runPreview()}
+                loading={previewPhase === 'loading'}
+              >
+                {previewPhase === 'loading'
+                  ? strings.subscriptions.previewing
+                  : strings.subscriptions.previewBtn}
+              </Button>
+              {previewPhase === 'error' && (
+                <p role="alert" className="text-sm font-medium text-danger">
+                  {strings.subscriptions.previewFailed}
+                </p>
+              )}
+              {preview !== null && (
+                <div
+                  className="rounded-sm border border-line bg-surface-2 px-2 py-2"
+                  data-testid="rss-preview"
+                >
+                  <p className="text-xs text-ink-secondary">
+                    {t(strings.subscriptions.previewSummary, {
+                      total: String(preview.entries_total),
+                      dl: String(preview.download_count),
+                    })}
+                  </p>
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {preview.entries.map((e) => (
+                      <li
+                        key={e.title}
+                        className={`flex items-start justify-between gap-2 rounded-sm px-1.5 py-1 text-xs ${
+                          e.verdict === 'would_download' ? 'bg-primary/10' : ''
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1 break-all text-ink-secondary">
+                          {e.title}
+                        </span>
+                        <span
+                          className={`shrink-0 rounded-sm px-1 text-[10px] font-medium ${
+                            e.verdict === 'would_download'
+                              ? 'bg-primary text-white'
+                              : e.verdict === 'candidate'
+                                ? 'border border-line text-ink-secondary'
+                                : 'border border-line text-ink-muted'
+                          }`}
+                          title={e.reason ?? undefined}
+                        >
+                          {e.verdict === 'would_download'
+                            ? strings.subscriptions.previewWouldDownload
+                            : e.verdict === 'candidate'
+                              ? strings.subscriptions.previewCandidate
+                              : e.verdict === 'rejected'
+                                ? strings.subscriptions.previewRejected
+                                : strings.subscriptions.previewUnparsed}
+                          {e.episode !== null ? ` · EP${e.episode}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
           <Field
             label={strings.rssSources.token}
             htmlFor="season-drawer-token"

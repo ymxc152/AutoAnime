@@ -34,6 +34,8 @@ import type {
   SchedulerRunResponse,
   SchedulerScope,
   MikanGroupsDto,
+  RssPreviewBody,
+  RssPreviewResponse,
   SeasonBrowseOut,
   SeasonName,
   SeriesDto,
@@ -156,6 +158,9 @@ export const endpoints = {
     // 12-F:库外人工确认命名(学习三件套 + pending 收尾 + 归档;422 = 校验失败)
     confirmName: (body: ConfirmNameBody) =>
       request<ConfirmNameOut>('/api/pipeline/confirm-name', { method: 'POST', body }),
+    // 通用 RSS 匹配预览(选番抽屉):拉 feed 逐条试判,零落库;502=拉取失败
+    rssPreview: (body: RssPreviewBody) =>
+      request<RssPreviewResponse>('/api/pipeline/rss-preview', { method: 'POST', body }),
   },
 
   /** GET /api/filesystem —— 目录浏览(P1-D):path 缺省 = 盘符根视图,仅列子目录 */

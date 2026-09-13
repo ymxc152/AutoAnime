@@ -11,6 +11,7 @@ import {
   mockFilesystemListing,
   mockMetrics,
   mockMikanGroups,
+  mockRssPreview,
   mockPending,
   mockRssSources,
   mockSeasonBrowse,
@@ -38,6 +39,7 @@ import type {
   SettingEffect,
   SubscriptionCreateBody,
   SubscriptionDto,
+  RssPreviewBody,
   SubscriptionUpdateBody,
 } from '../api/types'
 
@@ -347,6 +349,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           title_jp: body.title_jp ?? null,
           title_romaji: body.title_romaji ?? null,
           media_type: body.media_type ?? 'tv',
+          include_keywords: body.include_keywords ?? null,
+          exclude_keywords: body.exclude_keywords ?? null,
           status: 'active',
           fansub_pref: body.fansub_pref ?? null,
           quality_pref: body.quality_pref ?? null,
@@ -603,6 +607,7 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         }
         return delayed(result)
       },
+      rssPreview: (_body: RssPreviewBody) => delayed(clone(mockRssPreview)),
     },
 
     scheduler: {
