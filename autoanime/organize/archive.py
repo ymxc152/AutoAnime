@@ -210,6 +210,25 @@ class ArchiveService:
             result is not None
             and title_matches(result.title, expected.titles())
         )
+        # 多语言命名（真机实测 2026-09）：种子内部文件名常只带 romaji/英文
+        # 名（feed 标题是多语言并列），与订阅标题集不同名——但本文件来自
+        # 轮询阶段已按 feed 标题对齐过的 release（episode_id 绑定，
+        # content_path 即本种子内容），按 release 绑定的期望集走状态路由
+        # （downloaded→归档 / organized→洗版闸门），不误判 conflict。
+        if (
+            not title_match
+            and result is not None
+            and release.episode_id is not None
+        ):
+            report.notes.append(
+                f"release-vetted: file title '{result.title}' differs from "
+                "subscription titles; route via poll-vetted release"
+            )
+            await self._route_by_episode_state(
+                video, release=release, expected=expected, season=season,
+                series=series, result=result, report=report,
+            )
+            return False
         season_match = bool(
             result is None or result.season is None or result.season == expected.season_number
         )
@@ -684,6 +703,12 @@ class ArchiveService:
 
     @staticmethod
     def _scan_videos(content_dir: Path) -> list[Path]:
+        # 单文件种子的 content_path 是文件本身（Mikan 动画种子绝大多数为
+        # 单文件）——直接作为视频返回；目录则递归扫视频。
+        if content_dir.is_file():
+            return (
+                [content_dir] if content_dir.suffix.lower() in VIDEO_SUFFIXES else []
+            )
         if not content_dir.exists():
             return []
         found = [

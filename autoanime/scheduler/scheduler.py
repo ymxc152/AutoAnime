@@ -183,6 +183,9 @@ def build_loop(
         store, orchestrator, gateway,
         settings=settings, governance=governance, bus=bus,
     )
+    # 相对 download_path 解析为绝对路径再下发 qB:qB 会把相对路径拼到它
+    # 自己的默认保存盘(实测 downloads → D:\qb\downloads),与整理目录错位。
+    download_save_path = str(Path(settings.download_path).resolve())
     reconciler = LibraryReconciler(store, settings, bus=bus)
     autoscan = LibraryAutoScanner(
         store, storage, settings, bus=bus,
@@ -202,7 +205,7 @@ def build_loop(
         upgrade_max_per_episode=settings.upgrade_max_per_episode,
         client_factory=client_factory,
         rss_token=None,  # per-source token 在 rss_sources 行内；此为兜底位
-        save_path=str(settings.download_path),
+        save_path=download_save_path,
     )
     download_poller = DownloadPoller(
         store,
@@ -211,7 +214,7 @@ def build_loop(
         max_retries=settings.download_max_retries,
         on_completed=on_completed if on_completed is not None else archive_service.handle_completed,
         torrent_refetch=_refetch,
-        save_path=str(settings.download_path),
+        save_path=download_save_path,
     )
     return LoopComponents(
         store=store,

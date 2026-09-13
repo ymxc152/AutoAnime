@@ -57,3 +57,9 @@ scripts/test_nvidia_api.py
 scripts/ui-review/
 *.db-shm
 *.db-wal
+
+# 运行期数据（测试/使用产物，永不入库）
+downloads/
+library/
+quarantine/
+*.db

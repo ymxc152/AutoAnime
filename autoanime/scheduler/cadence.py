@@ -2,9 +2,12 @@
 
 - 轮询默认 30min ± 10% 抖动（整点齐射打源站；APScheduler IntervalTrigger
   自带 ``jitter`` 参数承接，本模块的纯函数用于单测钉死与 CLI rerun 汇报）；
-- 降频（ARCHITECTURE §1/§2 + D15）：AIRING 每次轮询都到；COLLECTED 只在
-  距上次轮询超过 ``collected_days`` 才再查（仅洗版机会检查）；UPCOMING/
-  ENDED 不轮询（v1 无主动搜索，ENDED 有缺也等不来种子，如实跳过）。
+- 降频（ARCHITECTURE §1/§2 + D15）：AIRING/UPCOMING 每次轮询都到；
+  COLLECTED 只在距上次轮询超过 ``collected_days`` 才再查（仅洗版机会检查）；
+  ENDED 不轮询（v1 无主动搜索，有缺也等不来种子，如实跳过）。
+  UPCOMING 参与轮询（2026-09 真机实测修订）：季中订阅正在播的番时季状态
+  可能因放送日期缺失被误判为 upcoming，不轮询会让订阅闭环卡死；用户显式
+  订阅并挂 RSS 即明确意图，且拉取成本低。
 """
 
 from __future__ import annotations
@@ -37,7 +40,7 @@ def should_poll_season(
     collected_days: int = _DEFAULT_COLLECTED_DAYS,
 ) -> bool:
     """按季状态判定本轮是否轮询（降频核心，注入 now 单测）。"""
-    if season_status is SeasonState.AIRING:
+    if season_status in (SeasonState.AIRING, SeasonState.UPCOMING):
         return True
     if season_status is SeasonState.COLLECTED:
         if last_polled_at is None:

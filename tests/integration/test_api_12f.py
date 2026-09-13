@@ -102,14 +102,14 @@ async def _create_subscription_and_source(
 
 
 async def test_poll_source_success_not_due(client) -> None:
-    """UPCOMING 季不轮询（cadence 与 rerun 同判定）：200 + skipped_not_due。"""
+    """UPCOMING 季正常轮询（2026-09 修订：季中订阅可能被误判 upcoming，不轮询会卡死闭环）——200 且不跳过。"""
     c, _ = client
     _, source = await _create_subscription_and_source(c)
     resp = await c.post(f"/api/rss_sources/{source['id']}/poll")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["source_id"] == source["id"]
-    assert body["skipped_not_due"] is True
+    assert body["skipped_not_due"] is False
     assert body["picked"] == 0
     assert body["download"]["checked"] == 0
     # audit + SSE 事件留痕

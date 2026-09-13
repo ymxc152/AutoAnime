@@ -40,6 +40,7 @@ from autoanime.organize import confirm_archive, mover
 from autoanime.organize.library_ingest import upsert_archived_file
 from autoanime.organize.naming import NamingInput, relative_path
 from autoanime.organize.poster import PosterService
+from autoanime.organize.upgrade import score_from_title
 from autoanime.pipeline.l1_local import LocalRecognizer
 from autoanime.pipeline.l3 import ReferenceChain
 from autoanime.pipeline.l3_llm import LlmFallbackRecognizer
@@ -419,6 +420,13 @@ async def _archive_confirmed_file(
             season_number=confirmed.season,
             episode_number=confirmed.episode,
             file_path=str(outcome.dst),
+            # 质量分基线:缺失会让 RSS 洗版闸门(分差>=阈值)对导入集永远放行
+            quality_score=score_from_title(
+                file_path.name,
+                fansub=confirmed.fansub,
+                fansub_pref=None,
+                seeders=None,
+            ),
         )
     return outcome
 
@@ -1116,6 +1124,13 @@ async def _handle_import_outcome(
         season_number=result.season,
         episode_number=result.episode,
         file_path=str(executed.dst_paths[0]),
+        # 质量分基线:缺失会让 RSS 洗版闸门(分差>=阈值)对导入集永远放行
+        quality_score=score_from_title(
+            file.name,
+            fansub=result.fansub,
+            fansub_pref=None,
+            seeders=None,
+        ),
     )
     if ingest.ok:
         item["series_id"] = ingest.series_id

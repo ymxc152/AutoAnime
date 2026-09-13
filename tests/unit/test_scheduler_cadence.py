@@ -54,6 +54,8 @@ def test_collected_throttles_to_monthly() -> None:
     assert never_polled is True
 
 
-def test_ended_and_upcoming_never_poll() -> None:
-    for status in (SeasonState.ENDED, SeasonState.UPCOMING):
-        assert not should_poll_season(season_status=status, last_polled_at=None, now=NOW)
+def test_ended_never_poll_upcoming_polls() -> None:
+    # 2026-09 真机实测修订:upcoming 与 airing 同频(季中订阅的番可能被误判
+    # upcoming,不轮询会卡死订阅闭环);只有 ENDED 不轮询。
+    assert not should_poll_season(season_status=SeasonState.ENDED, last_polled_at=None, now=NOW)
+    assert should_poll_season(season_status=SeasonState.UPCOMING, last_polled_at=None, now=NOW)
