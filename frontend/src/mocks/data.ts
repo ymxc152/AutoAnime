@@ -652,6 +652,7 @@ export const mockFilesystemListing: FilesystemListing = {
   path: '',
   parent: null,
   directories: ['C:\\', 'D:\\'],
+  files: [],
 }
 
 // ---- metrics(对齐 MetricsOut) ----

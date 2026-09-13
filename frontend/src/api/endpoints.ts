@@ -163,9 +163,12 @@ export const endpoints = {
       request<RssPreviewResponse>('/api/pipeline/rss-preview', { method: 'POST', body }),
   },
 
-  /** GET /api/filesystem —— 目录浏览(P1-D):path 缺省 = 盘符根视图,仅列子目录 */
+  /** GET /api/filesystem —— 目录浏览(P1-D):path 缺省 = 盘符根视图;include_files 列文件(文件选择模式) */
   filesystem: {
-    list: (path?: string) => request<FilesystemListing>('/api/filesystem', { query: { path } }),
+    list: (path?: string, includeFiles?: boolean) =>
+      request<FilesystemListing>('/api/filesystem', {
+        query: { path, ...(includeFiles ? { include_files: true } : {}) },
+      }),
   },
 
   /** Scheduler D:手动触发一轮订阅闭环 */

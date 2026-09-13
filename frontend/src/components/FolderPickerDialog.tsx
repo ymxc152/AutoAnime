@@ -69,6 +69,9 @@ export interface FolderPickerDialogProps {
   onClose: () => void
   /** 选中「当前目录」回调(盘符根视图下不可选,path 为空不回调) */
   onPick: (path: string) => void
+  /** 'file' 模式:列出文件,点击文件回调 onPickFile(完整路径) */
+  mode?: 'directory' | 'file'
+  onPickFile?: (path: string) => void
 }
 
 /** P0 逃生门:加载超过该时长仍无响应即转可重试错误态(见文件头排查结论) */
@@ -83,10 +86,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
-export function FolderPickerDialog({ open, onClose, onPick }: FolderPickerDialogProps) {
+export function FolderPickerDialog({
+  open,
+  onClose,
+  onPick,
+  mode = 'directory',
+  onPickFile,
+}: FolderPickerDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)}>
-      {open && <PickerContent onClose={onClose} onPick={onPick} />}
+      {open && <PickerContent onClose={onClose} onPick={onPick} mode={mode} onPickFile={onPickFile} />}
     </Dialog>
   )
 }
@@ -94,10 +103,15 @@ export function FolderPickerDialog({ open, onClose, onPick }: FolderPickerDialog
 function PickerContent({
   onClose,
   onPick,
+  mode,
+  onPickFile,
 }: {
   onClose: () => void
   onPick: (path: string) => void
+  mode: 'directory' | 'file'
+  onPickFile?: (path: string) => void
 }) {
+  const fileMode = mode === 'file' && onPickFile !== undefined
   const [currentPath, setCurrentPath] = useState('')
   const [listing, setListing] = useState<FilesystemListing | null>(null)
   const [loading, setLoading] = useState(true)
@@ -111,7 +125,11 @@ function PickerContent({
     const seq = seqRef.current + 1
     seqRef.current = seq
     try {
-      const result = await withTimeout(api.filesystem.list(path), PICKER_TIMEOUT_MS)
+      // 目录模式保持单参调用(旧断言/旧行为不变);文件模式才带 include_files
+      const result = await withTimeout(
+        fileMode ? api.filesystem.list(path, true) : api.filesystem.list(path),
+        PICKER_TIMEOUT_MS,
+      )
       if (seqRef.current !== seq) return
       setListing(result)
       setCurrentPath(path)
@@ -130,7 +148,7 @@ function PickerContent({
   useEffect(() => {
     const seq = seqRef.current + 1
     seqRef.current = seq
-    withTimeout(api.filesystem.list(''), PICKER_TIMEOUT_MS)
+    withTimeout(fileMode ? api.filesystem.list('', true) : api.filesystem.list(''), PICKER_TIMEOUT_MS)
       .then((result) => {
         if (seqRef.current !== seq) return
         setListing(result)
@@ -159,7 +177,9 @@ function PickerContent({
   return (
     <DialogContent className="max-w-lg" data-testid="folder-picker-dialog">
       <DialogHeader>
-        <DialogTitle>{strings.uxfix.pickerTitle}</DialogTitle>
+        <DialogTitle>
+          {fileMode ? strings.uxfix.pickerTitleFile : strings.uxfix.pickerTitle}
+        </DialogTitle>
       </DialogHeader>
 
       <div className="flex min-h-0 flex-col gap-2">
@@ -218,12 +238,14 @@ function PickerContent({
                 {strings.common.retry}
               </Button>
             </div>
-          ) : listing !== null && listing.directories.length === 0 ? (
-            <p className="px-3 py-4 text-sm text-ink-secondary">{strings.uxfix.pickerEmpty}</p>
+          ) : listing !== null && listing.directories.length === 0 && (listing.files?.length ?? 0) === 0 ? (
+            <p className="px-3 py-4 text-sm text-ink-secondary">
+              {fileMode ? strings.uxfix.pickerFileEmpty : strings.uxfix.pickerEmpty}
+            </p>
           ) : (
             <ul className="flex flex-col">
               {listing?.directories.map((name) => (
-                <li key={name}>
+                <li key={`dir-${name}`}>
                   <button
                     type="button"
                     data-testid={`picker-row-${name}`}
@@ -234,6 +256,19 @@ function PickerContent({
                   </button>
                 </li>
               ))}
+              {fileMode &&
+                (listing?.files ?? []).map((name) => (
+                  <li key={`file-${name}`}>
+                    <button
+                      type="button"
+                      data-testid={`picker-file-${name}`}
+                      className="w-full truncate rounded-sm bg-surface-2/40 px-3 py-1.5 text-left text-sm text-ink hover:bg-surface-2"
+                      onClick={() => onPickFile?.(joinChild(currentPath, name))}
+                    >
+                      {name}
+                    </button>
+                  </li>
+                ))}
             </ul>
           )}
         </div>
@@ -248,7 +283,7 @@ function PickerContent({
           disabled={atDrivesRoot || loading || error !== null}
           onClick={() => onPick(currentPath)}
         >
-          {strings.uxfix.pickerChoose}
+          {!fileMode && strings.uxfix.pickerChoose}
         </Button>
       </DialogFooter>
     </DialogContent>

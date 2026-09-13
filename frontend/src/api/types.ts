@@ -747,13 +747,15 @@ export interface ReportOut {
 
 // ---------- 目录浏览:GET /api/filesystem(P1-D) ----------
 
-/** GET /api/filesystem 响应(= 后端 FilesystemListing,仅子目录,截断 500) */
+/** GET /api/filesystem 响应(= 后端 FilesystemListing;files 仅 include_files 时填充) */
 export interface FilesystemListing {
   /** 当前目录(resolve 后);空串 = Windows 盘符根视图 */
   path: string
   /** 上一级目录;根目录(null)时「上一级」禁用 */
   parent: string | null
   directories: string[]
+  /** 文件名(include_files=true 时填充;文件选择模式用) */
+  files: string[]
 }
 
 // ---------- SSE:GET /api/events ----------

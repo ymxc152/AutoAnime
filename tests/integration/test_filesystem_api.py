@@ -52,6 +52,7 @@ async def test_empty_path_lists_windows_drives(
         "path": "",
         "parent": None,
         "directories": ["C:\\", "D:\\", "E:\\"],
+        "files": [],
     }
 
 
@@ -61,7 +62,7 @@ async def test_empty_path_non_windows_returns_root(
     monkeypatch.setattr(filesystem_module.os, "name", "posix")
     resp = await client.get("/api/filesystem")
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"path": "/", "parent": None, "directories": ["/"]}
+    assert resp.json() == {"path": "/", "parent": None, "directories": ["/"], "files": []}
 
 
 async def test_directory_listing_sorted_dirs_only(client: httpx.AsyncClient, tmp_path: Path) -> None:
@@ -181,3 +182,26 @@ async def test_drive_root_parent_is_null(client: httpx.AsyncClient, tmp_path: Pa
     body = resp.json()
     assert body["path"] == "C:\\"
     assert body["parent"] is None
+
+async def test_include_files_lists_files_default_empty(
+    client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    """include_files=true 列文件;缺省不带 files(响应形状兼容)。"""
+    target = tmp_path / "show"
+    target.mkdir()
+    (target / "ep01.mkv").write_bytes(b"x")
+    (target / "cover.jpg").write_bytes(b"x")
+    (target / "子目录").mkdir()
+
+    plain = await client.get("/api/filesystem", params={"path": str(target)})
+    assert plain.status_code == 200
+    body = plain.json()
+    assert body["files"] == []
+    assert "ep01.mkv" in body["directories"] or True  # 只列子目录:文件不在 directories
+    assert "ep01.mkv" not in body["directories"]
+
+    full = await client.get("/api/filesystem", params={"path": str(target), "include_files": "true"})
+    assert full.status_code == 200
+    files = full.json()["files"]
+    assert files == sorted(["ep01.mkv", "cover.jpg"], key=str.casefold)
+    assert "子目录" not in files

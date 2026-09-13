@@ -30,11 +30,16 @@ _MAX_ENTRIES = 500
 
 
 class FilesystemListing(BaseModel):
-    """GET /api/filesystem 响应（前端 FilesystemListing 同构）。"""
+    """GET /api/filesystem 响应（前端 FilesystemListing 同构）。
+
+    files 仅在 ``include_files=true`` 时填充（选番抽屉的文件选择模式）；
+    默认空列表保持既有响应形状不变。
+    """
 
     path: str
     parent: str | None
     directories: list[str]
+    files: list[str] = []
 
 
 def _list_drives() -> list[str]:
@@ -65,7 +70,10 @@ def _list_subdirectories(resolved: Path) -> list[str]:
 
 
 @router.get("", response_model=FilesystemListing)
-async def browse(path: str = Query(default="")) -> FilesystemListing:
+async def browse(
+    path: str = Query(default=""),
+    include_files: bool = Query(default=False),
+) -> FilesystemListing:
     if path.strip() == "":
         if os.name == "nt":
             return FilesystemListing(path="", parent=None, directories=_list_drives())
@@ -84,7 +92,24 @@ async def browse(path: str = Query(default="")) -> FilesystemListing:
         path=str(resolved),
         parent=parent,
         directories=_list_subdirectories(resolved),
+        files=_list_files(resolved) if include_files else [],
     )
+
+
+def _list_files(resolved: Path) -> list[str]:
+    """列文件名（非目录项）；单条 OSError 跳过，scandir 整体失败 → 空表。"""
+    files: list[str] = []
+    try:
+        with os.scandir(resolved) as it:
+            for entry in it:
+                try:
+                    if not entry.is_dir(follow_symlinks=False):
+                        files.append(entry.name)
+                except OSError:
+                    continue
+    except OSError:
+        return []
+    return sorted(files, key=str.casefold)[:_MAX_ENTRIES]
 
 
 __all__ = ["FilesystemListing", "router"]

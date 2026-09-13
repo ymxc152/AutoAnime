@@ -486,10 +486,18 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
       subtitleGroups: (_title: string) => delayed(clone(mockMikanGroups)),
     },
 
-    // P1-D 目录浏览(最小 stub:path 缺省 = 盘符根视图)
+    // P1-D 目录浏览(最小 stub:path 缺省 = 盘符根视图;includeFiles 附文件清单)
     filesystem: {
-      list: (path?: string) =>
-        delayed(clone({ ...mockFilesystemListing, ...(path === undefined ? {} : { path }) })),
+      list: (path?: string, includeFiles?: boolean) =>
+        delayed(
+          clone({
+            ...mockFilesystemListing,
+            ...(path === undefined ? {} : { path }),
+            files: includeFiles
+              ? ['[LoliHouse] 孤独摇滚 - 01 [1080p][简中].mkv', 'README.md']
+              : [],
+          }),
+        ),
     },
 
     // 12-F:集重新识别(对齐后端两步契约:dry_run=true 预览 / false 执行)

@@ -361,12 +361,16 @@ describe('PipelinePage', () => {
   it('P1-D:点浏览打开目录弹窗,下钻后选择回填导入路径', async () => {
     const list = vi
       .spyOn(api.filesystem, 'list')
-      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\', 'D:\\'] })
-      .mockResolvedValueOnce({ path: 'D:\\', parent: 'D:\\', directories: ['番剧'] })
-      .mockResolvedValueOnce({ path: 'D:\\番剧', parent: 'D:\\', directories: ['Show'] })
+      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\', 'D:\\'], files: [] })
+      .mockResolvedValueOnce({ path: 'D:\\', parent: 'D:\\', directories: ['番剧'], files: [] })
+      .mockResolvedValueOnce({ path: 'D:\\番剧', parent: 'D:\\', directories: ['Show'], files: [] })
     renderPage(<PipelinePage />, { factory: controlledFactory() })
     await screen.findByTestId('pipeline-node-归档')
-    await userEvent.setup().click(screen.getByRole('button', { name: '选择目录' }))
+    // 限定到「导入目录」字段的按钮(解析试跑的目录/文件字段也有同名按钮)
+    const importDirField = screen.getByLabelText('导入目录').closest('div.flex')
+    await userEvent
+      .setup()
+      .click(within(importDirField?.parentElement ?? document.body).getByRole('button', { name: '选择目录' }))
     // 打开时从盘符根视图加载
     expect(await screen.findByTestId('picker-row-D:\\')).toBeInTheDocument()
     // 下钻:此电脑 → D:\ → 番剧

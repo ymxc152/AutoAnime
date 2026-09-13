@@ -21,8 +21,8 @@ describe('FolderPickerDialog', () => {
   it('打开时加载盘符根视图;点击盘符行下钻', async () => {
     const list = vi
       .spyOn(api.filesystem, 'list')
-      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\', 'D:\\'] })
-      .mockResolvedValueOnce({ path: 'D:\\', parent: 'D:\\', directories: [] })
+      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\', 'D:\\'], files: [] })
+      .mockResolvedValueOnce({ path: 'D:\\', parent: 'D:\\', directories: [], files: [] })
     mount()
     expect(await screen.findByTestId('picker-row-C:\\')).toBeInTheDocument()
     // 初始加载 path 缺省(空串)
@@ -35,9 +35,9 @@ describe('FolderPickerDialog', () => {
   it('盘符根视图:上一级与选择当前目录均禁用;下钻后可选择并回调', async () => {
     const onPick = vi.fn()
     vi.spyOn(api.filesystem, 'list')
-      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'] })
-      .mockResolvedValueOnce({ path: 'C:\\', parent: 'C:\\', directories: ['data'] })
-      .mockResolvedValueOnce({ path: 'C:\\data', parent: 'C:\\', directories: [] })
+      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'], files: [] })
+      .mockResolvedValueOnce({ path: 'C:\\', parent: 'C:\\', directories: ['data'], files: [] })
+      .mockResolvedValueOnce({ path: 'C:\\data', parent: 'C:\\', directories: [], files: [] })
     mount({ onPick })
     await screen.findByTestId('picker-row-C:\\')
     expect(screen.getByRole('button', { name: '选择当前目录' })).toBeDisabled()
@@ -53,10 +53,10 @@ describe('FolderPickerDialog', () => {
 
   it('面包屑「此电脑」可回跳盘符根;上一级按钮跳 parent', async () => {
     vi.spyOn(api.filesystem, 'list')
-      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'] })
-      .mockResolvedValueOnce({ path: 'C:\\a', parent: 'C:\\', directories: ['b'] })
-      .mockResolvedValueOnce({ path: 'C:\\', parent: 'C:\\', directories: ['a'] })
-      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'] })
+      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'], files: [] })
+      .mockResolvedValueOnce({ path: 'C:\\a', parent: 'C:\\', directories: ['b'], files: [] })
+      .mockResolvedValueOnce({ path: 'C:\\', parent: 'C:\\', directories: ['a'], files: [] })
+      .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'], files: [] })
     mount()
     await screen.findByTestId('picker-row-C:\\')
     fireEvent.click(screen.getByTestId('picker-row-C:\\'))
@@ -73,7 +73,7 @@ describe('FolderPickerDialog', () => {
     const list = vi
       .spyOn(api.filesystem, 'list')
       .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce({ path: '', parent: null, directories: [] })
+      .mockResolvedValueOnce({ path: '', parent: null, directories: [], files: [] })
     mount()
     expect(await screen.findByRole('alert')).toHaveTextContent('boom')
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
@@ -87,7 +87,7 @@ describe('FolderPickerDialog', () => {
         .spyOn(api.filesystem, 'list')
         // 第一次永不 resolve(模拟 vite proxy 悬挂),重试后正常返回
         .mockReturnValueOnce(new Promise(() => {}))
-        .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'] })
+        .mockResolvedValueOnce({ path: '', parent: null, directories: ['C:\\'], files: [] })
       render(<FolderPickerDialog open onClose={vi.fn()} onPick={vi.fn()} />)
       // 推进 8s:超时竞速触发,转错误态而非永久「加载中」
       await act(async () => {
@@ -110,6 +110,7 @@ describe('FolderPickerDialog', () => {
       path: 'C:\\empty',
       parent: 'C:\\',
       directories: [],
+      files: [],
     })
     mount()
     expect(await screen.findByText('此目录下没有子目录')).toBeInTheDocument()

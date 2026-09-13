@@ -173,6 +173,35 @@ function ManualOperations() {
   // 12-F:parse-preview 恢复 folder/parent 可选上下文输入(后端 ParsePreviewIn.folder/parent)
   const [parseFolder, setParseFolder] = useState('')
   const [parseParent, setParseParent] = useState('')
+  // 文件/目录选择器(复用 P1-D 目录浏览端点;file 模式列文件)
+  const [pickerTarget, setPickerTarget] = useState<'file' | 'folder' | 'parent' | null>(null)
+
+  const splitPath = (path: string): { dir: string; folderName: string } => {
+    const sep = path.includes('\\') ? '\\' : '/'
+    const idx = path.lastIndexOf(sep)
+    if (idx <= 0) return { dir: '', folderName: '' } // 无目录段(根视图直选)
+    const dir = path.slice(0, idx)
+    const folderName = dir.split(sep).filter(Boolean).pop() ?? ''
+    return { dir, folderName }
+  }
+
+  const pickFile = (path: string): void => {
+    setParseName(path)
+    const { dir, folderName } = splitPath(path)
+    setParseFolder(folderName)
+    setParseParent(dir)
+    setPickerTarget(null)
+  }
+
+  const pickFolder = (path: string, target: 'folder' | 'parent'): void => {
+    if (target === 'folder') {
+      const sep = path.includes('\\') ? '\\' : '/'
+      setParseFolder(path.split(sep).filter(Boolean).pop() ?? '')
+    } else {
+      setParseParent(path)
+    }
+    setPickerTarget(null)
+  }
   const [preview, setPreview] = useState<ParsePreviewResponse | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -284,30 +313,68 @@ function ManualOperations() {
             htmlFor="pipeline-parse-name"
             error={parseNameError}
           >
-            <Input
-              id="pipeline-parse-name"
-              value={parseName}
-              onChange={(e) => setParseName(e.target.value)}
-              placeholder="Show S01E01 1080p.mkv"
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                id="pipeline-parse-name"
+                value={parseName}
+                onChange={(e) => setParseName(e.target.value)}
+                placeholder="Show S01E01 1080p.mkv"
+                className="min-w-0 flex-1"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => setPickerTarget('file')}
+              >
+                {strings.uxfix.selectFileBtn}
+              </Button>
+            </div>
+            {parseName.includes('\\') || parseName.includes('/') ? null : (
+              <p className="mt-0.5 text-xs text-ink-muted">{strings.pipeline.parsePickHint}</p>
+            )}
           </Field>
           {/* 12-F:folder = 文件所在目录名,parent = 包含该文件的完整目录路径,均可选 */}
           <Field label={strings.pipeline.parseFolder} description={strings.pipeline.parseFolderHint} htmlFor="pipeline-parse-folder">
-            <Input
-              id="pipeline-parse-folder"
-              value={parseFolder}
-              onChange={(e) => setParseFolder(e.target.value)}
-              placeholder={strings.pipeline.parseFolderPlaceholder}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                id="pipeline-parse-folder"
+                value={parseFolder}
+                onChange={(e) => setParseFolder(e.target.value)}
+                placeholder={strings.pipeline.parseFolderPlaceholder}
+                className="min-w-0 flex-1"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => setPickerTarget('folder')}
+              >
+                {strings.uxfix.selectDirBtn}
+              </Button>
+            </div>
           </Field>
           <Field label={strings.pipeline.parseParent} description={strings.pipeline.parseParentHint} htmlFor="pipeline-parse-parent">
-            <Input
-              id="pipeline-parse-parent"
-              value={parseParent}
-              onChange={(e) => setParseParent(e.target.value)}
-              placeholder={strings.pipeline.parseParentPlaceholder}
-              className="data-text"
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                id="pipeline-parse-parent"
+                value={parseParent}
+                onChange={(e) => setParseParent(e.target.value)}
+                placeholder={strings.pipeline.parseParentPlaceholder}
+                className="data-text min-w-0 flex-1"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => setPickerTarget('parent')}
+              >
+                {strings.uxfix.selectDirBtn}
+              </Button>
+            </div>
           </Field>
           <Button type="submit" variant="secondary" loading={previewBusy}>
             <FlaskConical aria-hidden className="h-4 w-4" />
@@ -316,6 +383,16 @@ function ManualOperations() {
           {previewError !== null && <p role="alert" className="text-sm font-medium text-danger">{previewError}</p>}
           {preview !== null && <PreviewResult preview={preview} />}
         </form>
+
+      {pickerTarget !== null && (
+        <FolderPickerDialog
+          open
+          mode={pickerTarget === 'file' ? 'file' : 'directory'}
+          onClose={() => setPickerTarget(null)}
+          onPick={(path) => pickFolder(path, pickerTarget === 'parent' ? 'parent' : 'folder')}
+          onPickFile={pickFile}
+        />
+      )}
 
         <form
           className="flex flex-col gap-2"
@@ -506,8 +583,26 @@ function ConfirmNameCard() {
     }
   }
 
+  const fillExample = (): void => {
+    setName('[LoliHouse] 孤独摇滚 - 01 [Baha 1080p][简中]')
+    setTitle('孤独摇滚')
+    setSeason('1')
+    setEpisode('1')
+    setFansub('LoliHouse')
+    setError(null)
+  }
+
   return (
-    <Card title={strings.ops12f.confirmNameTitle} description={strings.ops12f.confirmNameHint} className="mb-4">
+    <Card
+      title={strings.ops12f.confirmNameTitle}
+      description={strings.ops12f.confirmNameHint}
+      className="mb-4"
+      actions={
+        <Button type="button" size="sm" variant="ghost" onClick={fillExample}>
+          {strings.ops12f.confirmExampleBtn}
+        </Button>
+      }
+    >
       <form
         className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-6 lg:items-start"
         onSubmit={(e) => {
@@ -517,6 +612,7 @@ function ConfirmNameCard() {
       >
         <Field
           label={strings.ops12f.confirmNameField}
+          description={strings.ops12f.confirmNameFileHint}
           htmlFor="confirm-name-file"
           className="lg:col-span-2"
           error={error}
@@ -530,7 +626,11 @@ function ConfirmNameCard() {
             className="data-text"
           />
         </Field>
-        <Field label={strings.pending.fieldTitle} htmlFor="confirm-name-title">
+        <Field
+          label={strings.pending.fieldTitle}
+          description={strings.ops12f.confirmTitleHint}
+          htmlFor="confirm-name-title"
+        >
           <Input
             id="confirm-name-title"
             value={title}

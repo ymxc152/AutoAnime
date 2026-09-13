@@ -37,7 +37,7 @@ function MetricCard({
 }) {
   return (
     <Card className="transition-shadow hover:shadow-soft-md">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2 pt-3">
         <p className="text-xs text-ink-secondary">{label}</p>
         <span
           aria-hidden
