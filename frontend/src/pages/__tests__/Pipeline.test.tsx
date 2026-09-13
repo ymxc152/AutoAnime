@@ -123,6 +123,12 @@ describe('PipelinePage', () => {
     expect(screen.getByText('7')).toBeInTheDocument()
   })
 
+  it('UXfix:桌面流程图卡片带「识别流程」标题与说明(此前全页唯一无标题卡片)', async () => {
+    renderPage(<PipelinePage />)
+    expect(await screen.findByRole('heading', { name: '识别流程' })).toBeInTheDocument()
+    expect(screen.getByText('SSE 事件沿识别路径实时点亮,节点数字为累计通过数')).toBeInTheDocument()
+  })
+
   it('手动解析试跑调用 pipeline API 并展示结果', async () => {
     const parsePreviewSpy = vi.spyOn(api.pipeline, 'parsePreview').mockResolvedValueOnce({
       route: 'archive',

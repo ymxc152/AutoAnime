@@ -209,26 +209,51 @@ export function activeEdgesOf(tokens: Token[]): Set<string> {
 
 // ---------- 节点/边静态定义 ----------
 
+/**
+ * 紧凑分层布局(4 列枢纽式,适配 ~700×420 卡片):
+ *   col1 输入 → col2 L1 → col3 L2(上)/L3(下) → col4 仲裁
+ *   仲裁向上出「归档」、向下出「人工确认」;L1→仲裁横穿 L2/L3 之间的走廊。
+ * 节点 160×~84(w-40),内容包围盒 700×364 —— 700×420 视口 + padding 0.1
+ * fitView 后 zoom ≈ 0.91(旧布局 1020 宽被迫压到 minZoom,文字不可读)。
+ * 注意:键序 = 移动端纵向列表的展示顺序,不要重排。
+ */
 export const NODE_META: Record<
   PipelineNodeId,
   { title: string; desc: string; x: number; y: number }
 > = {
-  input: { title: strings.pipeline.node.input, desc: strings.pipeline.nodeDesc.input, x: 0, y: 130 },
-  l1: { title: strings.pipeline.node.l1, desc: strings.pipeline.nodeDesc.l1, x: 210, y: 130 },
-  l2: { title: strings.pipeline.node.l2, desc: strings.pipeline.nodeDesc.l2, x: 420, y: 130 },
-  l3: { title: strings.pipeline.node.l3, desc: strings.pipeline.nodeDesc.l3, x: 420, y: 0 },
-  arbiter: { title: strings.pipeline.node.arbiter, desc: strings.pipeline.nodeDesc.arbiter, x: 640, y: 130 },
-  organize: { title: strings.pipeline.node.organize, desc: strings.pipeline.nodeDesc.organize, x: 860, y: 40 },
-  pending: { title: strings.pipeline.node.pending, desc: strings.pipeline.nodeDesc.pending, x: 860, y: 220 },
+  input: { title: strings.pipeline.node.input, desc: strings.pipeline.nodeDesc.input, x: 0, y: 150 },
+  l1: { title: strings.pipeline.node.l1, desc: strings.pipeline.nodeDesc.l1, x: 180, y: 150 },
+  l2: { title: strings.pipeline.node.l2, desc: strings.pipeline.nodeDesc.l2, x: 360, y: 20 },
+  l3: { title: strings.pipeline.node.l3, desc: strings.pipeline.nodeDesc.l3, x: 360, y: 280 },
+  arbiter: { title: strings.pipeline.node.arbiter, desc: strings.pipeline.nodeDesc.arbiter, x: 540, y: 150 },
+  organize: { title: strings.pipeline.node.organize, desc: strings.pipeline.nodeDesc.organize, x: 540, y: 0 },
+  pending: { title: strings.pipeline.node.pending, desc: strings.pipeline.nodeDesc.pending, x: 540, y: 280 },
 }
 
-export const EDGE_DEFS: Array<{ id: string; source: PipelineNodeId; target: PipelineNodeId }> = [
-  { id: 'e-input-l1', source: 'input', target: 'l1' },
-  { id: 'e-l1-arbiter', source: 'l1', target: 'arbiter' },
-  { id: 'e-l1-l2', source: 'l1', target: 'l2' },
-  { id: 'e-l2-l3', source: 'l2', target: 'l3' },
-  { id: 'e-l2-arbiter', source: 'l2', target: 'arbiter' },
-  { id: 'e-l3-arbiter', source: 'l3', target: 'arbiter' },
-  { id: 'e-arbiter-organize', source: 'arbiter', target: 'organize' },
-  { id: 'e-arbiter-pending', source: 'arbiter', target: 'pending' },
+/** 节点设计宽度 = 自定义节点的 w-40(160px),预声明让首帧 fitView 不依赖测量 */
+export const NODE_WIDTH = 160
+
+export interface EdgeDef {
+  id: string
+  source: PipelineNodeId
+  target: PipelineNodeId
+  /** xyflow 命名锚点(见 PipelineNodeView 的隐藏 Handle):out-* 为源端口,in-* 为目标端口 */
+  sourceHandle?: string
+  targetHandle?: string
+}
+
+/**
+ * 业务流向边(与 pathForEvent 的全部路径段一一对应,共 8 条)。
+ * 同列的上下边(l2→l3)与枢纽上下行(仲裁→归档/人工确认)必须用
+ * 顶/底锚点,否则左右中点连线会出现反向绕行。
+ */
+export const EDGE_DEFS: EdgeDef[] = [
+  { id: 'e-input-l1', source: 'input', target: 'l1', sourceHandle: 'out-r', targetHandle: 'in-l' },
+  { id: 'e-l1-l2', source: 'l1', target: 'l2', sourceHandle: 'out-r', targetHandle: 'in-b' },
+  { id: 'e-l1-arbiter', source: 'l1', target: 'arbiter', sourceHandle: 'out-r', targetHandle: 'in-l' },
+  { id: 'e-l2-l3', source: 'l2', target: 'l3', sourceHandle: 'out-b', targetHandle: 'in-t' },
+  { id: 'e-l2-arbiter', source: 'l2', target: 'arbiter', sourceHandle: 'out-r', targetHandle: 'in-t' },
+  { id: 'e-l3-arbiter', source: 'l3', target: 'arbiter', sourceHandle: 'out-r', targetHandle: 'in-b' },
+  { id: 'e-arbiter-organize', source: 'arbiter', target: 'organize', sourceHandle: 'out-t', targetHandle: 'in-b' },
+  { id: 'e-arbiter-pending', source: 'arbiter', target: 'pending', sourceHandle: 'out-b', targetHandle: 'in-t' },
 ]

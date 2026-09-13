@@ -8,6 +8,9 @@ import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
+  Handle,
+  MarkerType,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
@@ -40,6 +43,7 @@ import {
   passingNodes,
   pipelineBaseline,
   NODE_META,
+  NODE_WIDTH,
   EDGE_DEFS,
   type PipelineNodeData,
   type PipelineNodeId,
@@ -52,6 +56,17 @@ import type {
   SseEvent,
 } from '../api/types'
 
+/**
+ * 边锚点:自定义节点必须渲染 Handle,xyflow 才能算出边的起止点
+ * (无 Handle 时 getEdgePosition 报 error 008、整条边不渲染)。
+ * 每个节点统一挂 6 个隐藏锚点(out-r/out-t/out-b 源,in-l/in-t/in-b 目标),
+ * 具体边用哪个由 EDGE_DEFS 的 sourceHandle/targetHandle 指定。
+ */
+const hiddenHandleProps = {
+  isConnectable: false,
+  style: { opacity: 0 },
+} as const
+
 function PipelineNodeView({ data }: NodeProps<Node<PipelineNodeData>>) {
   const rate = data.entered > 0 ? Math.round((data.passed / data.entered) * 100) : null
   return (
@@ -61,6 +76,12 @@ function PipelineNodeView({ data }: NodeProps<Node<PipelineNodeData>>) {
         data.passing > 0 ? 'border-primary' : 'border-line'
       }`}
     >
+      <Handle id="in-l" type="target" position={Position.Left} {...hiddenHandleProps} />
+      <Handle id="in-t" type="target" position={Position.Top} {...hiddenHandleProps} />
+      <Handle id="in-b" type="target" position={Position.Bottom} {...hiddenHandleProps} />
+      <Handle id="out-r" type="source" position={Position.Right} {...hiddenHandleProps} />
+      <Handle id="out-t" type="source" position={Position.Top} {...hiddenHandleProps} />
+      <Handle id="out-b" type="source" position={Position.Bottom} {...hiddenHandleProps} />
       <p className="text-sm font-medium text-ink">{data.title}</p>
       <p className="mt-0.5 text-xs text-ink-secondary">{data.desc}</p>
       <div className="mt-1.5 flex items-center gap-1.5">
@@ -292,7 +313,7 @@ function ManualOperations() {
             <FlaskConical aria-hidden className="h-4 w-4" />
             {strings.pipeline.parsePreview}
           </Button>
-          {previewError !== null && <p role="alert" className="text-xs text-danger">{previewError}</p>}
+          {previewError !== null && <p role="alert" className="text-sm font-medium text-danger">{previewError}</p>}
           {preview !== null && <PreviewResult preview={preview} />}
         </form>
 
@@ -579,12 +600,18 @@ export function PipelinePage() {
     }
   }, [metrics])
 
+  // P2:tick 门控 —— 仅在有 token 在途时才挂 900ms 步进定时器;空闲
+  // (tokens 为空)不注册 interval,页面零重渲染。SSE 事件生成 token 后
+  // tokens.length 0→n 触发本 effect 重新挂载,动画照常推进;全部 token
+  // 抵达终点后 n→0 自动卸载。
+  const hasActiveTokens = state.tokens.length > 0
   useEffect(() => {
+    if (!hasActiveTokens) return
     const timer = setInterval(() => {
       dispatch({ type: 'tick' })
     }, STEP_MS)
     return () => clearInterval(timer)
-  }, [])
+  }, [hasActiveTokens])
 
   const nodes = useMemo<Node<PipelineNodeData>[]>(() => {
     const passing = passingNodes(state.tokens)
@@ -594,6 +621,7 @@ export function PipelinePage() {
         id,
         type: 'pipeline' as const,
         position: { x: meta.x, y: meta.y },
+        width: NODE_WIDTH,
         data: {
           title: meta.title,
           desc: meta.desc,
@@ -607,18 +635,22 @@ export function PipelinePage() {
 
   const activeEdges = useMemo(() => activeEdgesOf(state.tokens), [state.tokens])
 
+  // UXfix:非激活边从 --ink-border(几乎与底色同色)加深为 --ink-text-muted
+  // 并加粗到 2px;激活边主紫 2.5px;统一加 closed arrow 标明流向。
   const edges = useMemo<Edge[]>(
     () =>
       EDGE_DEFS.map((def) => {
         const active = activeEdges.has(def.id)
+        const color = active ? 'var(--ink-primary)' : 'var(--ink-text-muted)'
         return {
           id: def.id,
           source: def.source,
           target: def.target,
+          sourceHandle: def.sourceHandle,
+          targetHandle: def.targetHandle,
           animated: active,
-          style: active
-            ? { stroke: 'var(--ink-primary)', strokeWidth: 2 }
-            : { stroke: 'var(--ink-border)', strokeWidth: 1.5 },
+          style: { stroke: color, strokeWidth: active ? 2.5 : 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color },
         }
       }),
     [activeEdges],
@@ -648,7 +680,13 @@ export function PipelinePage() {
       <ConfirmNameCard />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_280px]">
-        <Card flush className="hidden overflow-hidden lg:block">
+        {/* UXfix:补齐标题与说明(此前全页唯一无标题卡片);紧凑布局见 pipelineFlow.ts */}
+        <Card
+          title="识别流程"
+          description="SSE 事件沿识别路径实时点亮,节点数字为累计通过数"
+          flush
+          className="hidden overflow-hidden lg:block"
+        >
           <div className="h-[420px]">
             <ReactFlow
               nodes={nodes}
@@ -658,7 +696,7 @@ export function PipelinePage() {
               nodesConnectable={false}
               elementsSelectable={false}
               fitView
-              fitViewOptions={{ padding: 0.15 }}
+              fitViewOptions={{ padding: 0.1 }}
               minZoom={0.4}
             >
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
