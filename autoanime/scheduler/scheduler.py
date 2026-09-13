@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -43,6 +44,7 @@ from autoanime.providers import (
 )
 from autoanime.scheduler.clock import SystemClock
 from autoanime.scheduler.download_poller import CompletedCallback, DownloadPoller
+from autoanime.scheduler.library_autoscan import LibraryAutoScanner
 from autoanime.scheduler.library_reconcile import LibraryReconciler
 from autoanime.scheduler.rss_poller import RssPoller
 from autoanime.scheduler.store import LoopStore
@@ -132,6 +134,7 @@ class LoopComponents:
         bus: EventBus,
         archive_service: ArchiveService | None = None,
         reconciler: LibraryReconciler | None = None,
+        autoscan: LibraryAutoScanner | None = None,
         notify_dispatcher: Any | None = None,
         own_storage: bool = False,
     ) -> None:
@@ -144,6 +147,7 @@ class LoopComponents:
         self.bus = bus
         self.archive_service = archive_service
         self.reconciler = reconciler
+        self.autoscan = autoscan
         self.notify_dispatcher = notify_dispatcher
         self.own_storage = own_storage
 
@@ -180,6 +184,10 @@ def build_loop(
         settings=settings, governance=governance, bus=bus,
     )
     reconciler = LibraryReconciler(store, settings, bus=bus)
+    autoscan = LibraryAutoScanner(
+        store, storage, settings, bus=bus,
+        scan_root=Path(settings.download_path),
+    )
     registry = Registry()
     notify_dispatcher = register_notify(registry, settings)
 
@@ -213,6 +221,7 @@ def build_loop(
         bus=bus,
         archive_service=archive_service,
         reconciler=reconciler,
+        autoscan=autoscan,
         notify_dispatcher=notify_dispatcher,
         own_storage=own_storage,
     )
@@ -317,6 +326,17 @@ class SubscriptionScheduler:
             max_instances=1,
             coalesce=True,
         )
+        # 库外自动入库:qB 自带 RSS 下载器等外部下载源 → 命中已有订阅的文件
+        # 自动归档进媒体库(只收命中项;未命中忽略;全局 dry_run 时只计数)。
+        if self._settings.library_autoscan_enabled:
+            scheduler.add_job(
+                self._run_library_autoscan,
+                "interval",
+                minutes=self._settings.library_autoscan_interval_min,
+                id="library_autoscan",
+                max_instances=1,
+                coalesce=True,
+            )
         self._scheduler = scheduler
         scheduler.start()
         self._start_notify_pump()
@@ -357,6 +377,16 @@ class SubscriptionScheduler:
             await self._components.download_poller.poll_once(now=now)
         except GatewayError as exc:
             logger.warning("first download poll skipped: %s", exc)
+        if self._components.autoscan is not None:
+            try:
+                report = await self._components.autoscan.scan_and_ingest(now=now)
+                if report.fresh:
+                    logger.info(
+                        "library autoscan: fresh=%s matched=%s archived=%s",
+                        report.fresh, report.matched, report.archived,
+                    )
+            except Exception:  # noqa: BLE001 — 对账失败不阻塞启动
+                logger.exception("library autoscan failed")
 
     def _start_notify_pump(self) -> None:
         """通知泵（D3/D16）：进程内总线 → NotifyDispatcher 白名单扇出。
@@ -391,6 +421,18 @@ class SubscriptionScheduler:
             )
         except Exception:  # noqa: BLE001 — 调度任务永不向上抛
             logger.exception("rss poll job failed")
+
+    async def _run_library_autoscan(self) -> None:
+        if self._components.autoscan is None:
+            return
+        report = await self._components.autoscan.scan_and_ingest(
+            now=self._clock().now() if hasattr(self, "_clock") else __import__("autoanime.scheduler.clock", fromlist=["SystemClock"]).SystemClock().now()
+        )
+        if report.fresh:
+            logger.info(
+                "library autoscan: fresh=%s matched=%s archived=%s pending=%s",
+                report.fresh, report.matched, report.archived, report.pending,
+            )
 
     async def _run_download_poll(self) -> None:
         try:

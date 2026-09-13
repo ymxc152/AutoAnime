@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # 留超时。下载器轮询间隔（秒）与单任务失败重试上界（≤2）。
     rss_fetch_timeout_s: float = 30.0
     download_poll_interval_s: int = 30
+    # 库外自动入库:扫描 downloads 目录,把命中已有订阅的新文件收入媒体库
+    # (qB 自带 RSS 下载器等不经本系统的下载源);未命中订阅的文件忽略不动。
+    library_autoscan_enabled: bool = True
+    library_autoscan_interval_min: int = 30
     download_max_retries: int = 2
     # COLLECTED 降频检查周期（天，D15/ARCHITECTURE §1：每月仅洗版机会检查）。
     collected_check_days: int = 30

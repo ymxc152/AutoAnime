@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from autoanime.gateway.bangumi_calendar import (
+    BangumiFetchError,
     BangumiItem,
     SeasonBrowseResult,
 )
@@ -95,13 +96,33 @@ async def season_calendar(
 ) -> SeasonBrowseOut:
     """当季选番（缓存 30min；拉取失败降级为空表，不 500）。
 
-    数据源走 v0 搜索路径（fetch_season）而非 legacy /calendar：前者条目带
-    platform/tags（选番页地区/特别篇过滤的数据源），legacy 日历条目没有
-    这些字段（实测）。响应形状与历史季一致。
+    双源合并：legacy /calendar（全量在播，条目无 platform/tags）∪ v0 季搜索
+    （条目带 platform/tags，是选番页过滤的数据源）。按 subject_id 富化——
+    日历保完整性（111 条级），搜索补字段；搜索独有的条目（如尚未进入每日
+    时间表的新番）也并入。两源都失败才降级空表。
     """
     year, season = _current_season(datetime.now(UTC))
-    result = await gateway.fetch_season(year, season)
-    out = _out(result)
+    degraded_reason: str | None = None
+    calendar_items: list[BangumiItem] = []
+    try:
+        calendar_items = list(await gateway.fetch_calendar())
+    except BangumiFetchError as exc:
+        degraded_reason = exc.detail
+    season_result = await gateway.fetch_season(year, season)
+    by_id = {it.subject_id: it for it in season_result.items}
+    merged: list[BangumiItem] = []
+    seen: set[int] = set()
+    for item in calendar_items:
+        hit = by_id.get(item.subject_id)
+        merged.append(hit if hit is not None else item)
+        seen.add(item.subject_id)
+    for sid, item in by_id.items():
+        if sid not in seen:
+            merged.append(item)
+    if not merged and degraded_reason is not None:
+        out = SeasonBrowseOut(items=[], degraded=True, reason=degraded_reason)
+    else:
+        out = _out(SeasonBrowseResult(items=tuple(merged), degraded=False, reason=None))
     await governance.record_audit(
         operation_id=uuid4().hex,
         entity="season_calendar",

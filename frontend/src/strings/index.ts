@@ -291,6 +291,7 @@ export const strings = {
     parseNameHint: 'L1 本地解析,不访问网络、不写数据库',
     parsePreview: '试跑解析',
     importDirectory: '导入目录',
+    autoScanHint: 'qB 自带 RSS 下载器等外部下载源落在本目录的文件,会由调度器定时扫描:命中已有订阅的自动归档进媒体库,其余忽略(AUTOANIME_LIBRARY_AUTOSCAN_ENABLED 可关)',
     dryRun: 'Dry run',
     startImport: '开始导入',
     runOnce: '跑一轮订阅闭环',

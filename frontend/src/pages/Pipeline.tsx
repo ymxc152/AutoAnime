@@ -324,7 +324,12 @@ function ManualOperations() {
             void submitImport()
           }}
         >
-          <Field label={strings.pipeline.importDirectory} htmlFor="pipeline-import-directory" error={importDirError}>
+          <Field
+            label={strings.pipeline.importDirectory}
+            description={strings.pipeline.autoScanHint}
+            htmlFor="pipeline-import-directory"
+            error={importDirError}
+          >
             {/* P1-D:输入框旁「浏览」打开目录选择弹窗,选中路径回填 */}
             <div className="flex items-center gap-2">
               <Input
