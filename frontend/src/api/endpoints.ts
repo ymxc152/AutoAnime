@@ -33,6 +33,7 @@ import type {
   RssSourceUpdateBody,
   SchedulerRunResponse,
   SchedulerScope,
+  MikanGroupsDto,
   SeasonBrowseOut,
   SeasonName,
   SeriesDto,
@@ -131,6 +132,12 @@ export const endpoints = {
   seasonBrowse: {
     get: (query: { year: number; season: SeasonName }) =>
       request<SeasonBrowseOut>('/api/season-browse', { query }),
+  },
+
+  /** GET /api/mikan/subtitle_groups?title= —— Mikan 字幕组 RSS 发现(选番抽屉「自动获取」;404=无命中,502=上游失败) */
+  mikan: {
+    subtitleGroups: (title: string) =>
+      request<MikanGroupsDto>('/api/mikan/subtitle_groups', { query: { title } }),
   },
 
   /** POST /api/episodes/{id}/reparse —— 12-F 集重新识别(dry_run=true 预览/false 执行) */

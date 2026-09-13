@@ -4,7 +4,7 @@
  * 「订阅 + 可选挂 RSS」(P0-B 一步订阅契约:bangumi_id 作 adopt 精确键,
  * rss_url/rss_token 同事务落 RssSource;rss_saved=false 且填了 RSS 时如实警告)。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { api, ApiError } from '../api'
@@ -12,7 +12,7 @@ import { strings, t } from '../strings'
 import { Badge, Button, Drawer, Field, Input } from './'
 import { BangumiPoster } from './AnimeCard'
 import { formatDate } from '../lib/views'
-import type { BangumiItemDto } from '../api/types'
+import type { BangumiItemDto, MikanGroupOptionDto } from '../api/types'
 
 /** 抽屉展示标题:title_cn 缺失时用 title_jp 兜底(与 AnimeCard 同规则) */
 function bangumiTitle(item: BangumiItemDto): string {
@@ -42,6 +42,40 @@ export function SubscriptionDrawer({
   const [rssToken, setRssToken] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Mikan 字幕组自动发现:打开抽屉即拉取,点选直接填 RSS(也可手动粘贴)
+  const [groups, setGroups] = useState<MikanGroupOptionDto[] | null>(null)
+  const [groupsPhase, setGroupsPhase] = useState<'loading' | 'error' | 'miss' | 'done'>('loading')
+
+  // 拉取本身不同步 setState(初值即 loading);重试入口在事件处理器里先置 loading
+  const loadGroups = (signal: AbortSignal): void => {
+    api.mikan
+      .subtitleGroups(bangumiTitle(item))
+      .then((d) => {
+        if (signal.aborted) return
+        if (d.groups.length === 0) {
+          setGroupsPhase('miss')
+        } else {
+          setGroups(d.groups)
+          setGroupsPhase('done')
+        }
+      })
+      .catch(() => {
+        if (signal.aborted) return
+        setGroupsPhase('error')
+      })
+  }
+
+  const retryGroups = (): void => {
+    setGroupsPhase('loading')
+    loadGroups(new AbortController().signal)
+  }
+
+  useEffect(() => {
+    const controller = new AbortController()
+    loadGroups(controller.signal)
+    return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- item 打开时固定,仅挂载拉取
+  }, [])
 
   const submit = async (attachRss: boolean): Promise<void> => {
     setSubmitting(true)
@@ -81,6 +115,12 @@ export function SubscriptionDrawer({
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const pickGroup = (g: MikanGroupOptionDto): void => {
+    setRssUrl(g.rss_url)
+    // 字幕组偏好为空时顺带填上(可手动改/清空)
+    if (fansub.trim() === '' && g.group_name !== '') setFansub(g.group_name)
   }
 
   return (
@@ -141,6 +181,57 @@ export function SubscriptionDrawer({
               placeholder={strings.subscriptions.fansubPlaceholder}
             />
           </Field>
+          {/* Mikan 自动发现:点选即填 RSS;失败/无命中如实提示,手动粘贴始终可用 */}
+          <div className="rounded-sm border border-line bg-surface-2 px-2 py-2" data-testid="mikan-groups">
+            <p className="text-xs font-medium text-ink">{strings.uxfix.mikanAutoFetchTitle}</p>
+            {groupsPhase === 'loading' && (
+              <p role="status" className="mt-1 text-xs text-ink-secondary">
+                {strings.common.loading}
+              </p>
+            )}
+            {(groupsPhase === 'error' || groupsPhase === 'miss') && (
+              <p role="status" className="mt-1 flex items-center justify-between gap-2 text-xs text-ink-secondary">
+                <span>
+                  {groupsPhase === 'error'
+                    ? strings.uxfix.mikanAutoFetchFailed
+                    : strings.uxfix.mikanAutoFetchEmpty}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={retryGroups}
+                >
+                  {strings.common.retry}
+                </Button>
+              </p>
+            )}
+            {groupsPhase === 'done' && groups !== null && (
+              <div className="mt-1.5 flex flex-col gap-1">
+                {groups.map((g) => {
+                  const name = g.group_name !== '' ? g.group_name : g.group_id
+                  const active = rssUrl === g.rss_url
+                  return (
+                    <button
+                      key={g.rss_url}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => pickGroup(g)}
+                      className={`flex items-center justify-between gap-2 rounded-sm border px-2 py-1.5 text-left text-xs transition-colors duration-[var(--ink-transition-fast)] ${
+                        active
+                          ? 'border-primary bg-primary/10 text-ink'
+                          : 'border-line bg-surface text-ink-secondary hover:bg-surface-2 hover:text-ink'
+                      }`}
+                    >
+                      <span className="min-w-0 truncate font-medium">{name}</span>
+                      <span className="shrink-0 text-[10px] text-ink-muted">
+                        {active ? t(strings.uxfix.mikanGroupSelected, { name }) : ''}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
           {/* RSS 地址按密钥对待(type=password):Mikan 地址常内嵌 token */}
           <Field label="RSS" description={strings.uxfix.drawerRssHint} htmlFor="season-drawer-rss">
             <Input

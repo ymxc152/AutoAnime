@@ -335,6 +335,10 @@ export interface BangumiItemDto {
   air_date: string | null
   eps: number | null
   mikan_search_url: string
+  /** Bangumi 原样平台(TV/OVA/ONA/剧场版…;可空)——特别篇过滤依据 */
+  platform: string | null
+  /** 地区码 jp/cn/kr/us(tags 推导;可空)——地区过滤依据 */
+  region: string | null
 }
 
 /**
@@ -762,4 +766,20 @@ export interface SseEvent {
   payload: Record<string, unknown>
   /** 前端接收时刻本地生成(后端不发) */
   ts: string
+}
+
+// ---------- Mikan 字幕组发现:GET /api/mikan/subtitle_groups ----------
+
+/** 一个字幕组的公开 RSS 订阅地址(可直接挂 RssSource,无 token) */
+export interface MikanGroupOptionDto {
+  group_id: string
+  group_name: string
+  rss_url: string
+}
+
+/** 发现结果:匹配到的 Mikan 番剧 + 可选字幕组列表 */
+export interface MikanGroupsDto {
+  matched_title: string
+  bangumi_id: number
+  groups: MikanGroupOptionDto[]
 }

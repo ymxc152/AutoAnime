@@ -7,7 +7,7 @@
  * Tab2「我的订阅」:既有订阅列表/表单整体迁入(添加/编辑/删除全保留;
  * 12-IA 弹窗化:添加订阅改为按钮 + 居中 Dialog,编辑仍走右侧 Drawer)。
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CirclePlus, ExternalLink, Tv } from 'lucide-react'
 import { api, ApiError } from '../api'
@@ -65,13 +65,104 @@ type SeasonScope = { kind: 'current' } | { kind: 'browse'; year: number; season:
 
 /* ---------- Tab1:季度选番 ---------- */
 
+/** 选番过滤/排序偏好(localStorage 持久化;用户可选改默认行为) */
+type RegionFilter = 'all' | 'jp' | 'cn' | 'kr' | 'us'
+type CalendarFilters = {
+  region: RegionFilter
+  showSpecials: boolean
+  showNoCn: boolean
+  sort: 'air' | 'rating'
+}
+const FILTERS_KEY = 'autoanime-calendar-filters'
+const DEFAULT_FILTERS: CalendarFilters = {
+  region: 'all',
+  showSpecials: false,
+  showNoCn: false,
+  sort: 'air',
+}
+/** 平台命中即视为"特别篇"(OVA/ONA/剧场版/MAD 等);platform 缺失视为正片不误杀 */
+function isSpecialPlatform(platform: string | null): boolean {
+  if (platform === null || platform === '') return false
+  return /ova|ona|mad|剧场版|电影|特别篇|总集篇/i.test(platform)
+}
+function loadFilters(): CalendarFilters {
+  try {
+    const raw = localStorage.getItem(FILTERS_KEY)
+    if (raw === null) return DEFAULT_FILTERS
+    const parsed = JSON.parse(raw) as Partial<CalendarFilters>
+    return { ...DEFAULT_FILTERS, ...parsed }
+  } catch {
+    return DEFAULT_FILTERS
+  }
+}
+
+/** 选番网格:搜索命中渲染卡片;无命中给专门空态(区别于"本季无番") */
+function CalendarGrid({
+  items,
+  onSelect,
+  subscribedTitles,
+}: {
+  items: BangumiItemDto[]
+  onSelect: (item: BangumiItemDto) => void
+  subscribedTitles: Set<string>
+}) {
+  if (items.length === 0) {
+    return <EmptyState title={strings.subscriptions.searchEmpty} />
+  }
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="season-grid">
+      {items.map((item) => (
+        <AnimeCard
+          key={item.subject_id}
+          item={item}
+          onSelect={onSelect}
+          subscribed={
+            (item.title_cn !== null && subscribedTitles.has(item.title_cn)) ||
+            subscribedTitles.has(item.title_jp)
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
 function SeasonBrowseTab({ onSubscribed }: { onSubscribed: () => void }) {
   const now = new Date()
-  const years = Array.from({ length: YEAR_COUNT }, (_, i) => now.getFullYear() - i)
+  const currentSeason = monthToSeason(now.getMonth())
+  // 近 6 年(含当年)× 4 季,新年在前;年内按 冬→春→夏→秋 时序
+  const yearOptions = Array.from({ length: YEAR_COUNT }, (_, i) => now.getFullYear() - i)
+  const seasonOptions: { value: string; year: number; season: SeasonName; label: string }[] =
+    yearOptions.flatMap((year) =>
+      SEASON_NAMES.map((season) => ({
+        value: `${year}:${season}`,
+        year,
+        season,
+        label: `${year}年${strings.uxfix.seasonNames[season]}`,
+      })),
+    )
   const [scope, setScope] = useState<SeasonScope>({ kind: 'current' })
-  // Select 受控值(与 scope 分离:未切历史季时仅作草稿)
-  const [yearInput, setYearInput] = useState(String(now.getFullYear()))
-  const [seasonInput, setSeasonInput] = useState<SeasonName>(monthToSeason(now.getMonth()))
+  const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState<CalendarFilters>(loadFilters)
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify(filters))
+    } catch {
+      /* 存储不可用时跳过持久化 */
+    }
+  }, [filters])
+  // 已订阅集合(标题精确匹配) → 选番卡片「已订阅」角标,防重复订阅
+  const subsFetcher = useCallback(() => api.subscriptions.list({ limit: 100 }), [])
+  const { data: subsData } = useApi(subsFetcher)
+  const subscribedTitles = new Set(
+    (subsData?.items ?? []).flatMap((sub) =>
+      [sub.title_cn, sub.title_jp].filter((t): t is string => t !== null),
+    ),
+  )
+  // 单选择器值从 scope 推导:当季 = 当前年季,历史季 = 所选年季
+  const pickerValue =
+    scope.kind === 'current'
+      ? `${now.getFullYear()}:${currentSeason}`
+      : `${scope.year}:${scope.season}`
 
   const fetcher = useCallback(
     () =>
@@ -86,51 +177,143 @@ function SeasonBrowseTab({ onSubscribed }: { onSubscribed: () => void }) {
 
   const isCurrent = scope.kind === 'current'
   const items = data?.items ?? []
+  // 搜索:标题(中/日)大小写不敏感包含;空串 = 不过滤
+  const needle = query.trim().toLowerCase()
+  const base =
+    needle === ''
+      ? items
+      : items.filter(
+          (it) =>
+            (it.title_cn ?? '').toLowerCase().includes(needle) ||
+            it.title_jp.toLowerCase().includes(needle),
+        )
+  // 过滤链:地区 → 特别篇(默认隐藏) → 无中文翻译(默认隐藏)
+  const afterRegion =
+    filters.region === 'all' ? base : base.filter((it) => it.region === filters.region)
+  const afterSpecials = filters.showSpecials
+    ? afterRegion
+    : afterRegion.filter((it) => !isSpecialPlatform(it.platform))
+  const afterNoCn = filters.showNoCn
+    ? afterSpecials
+    : afterSpecials.filter((it) => it.title_cn !== null)
+  const hiddenCount = items.length - afterNoCn.length
+  const filtered =
+    filters.sort === 'rating'
+      ? [...afterNoCn].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
+      : [...afterNoCn].sort((a, b) =>
+          (a.air_date ?? '9999').localeCompare(b.air_date ?? '9999'),
+        )
 
   return (
     <div className="flex flex-col gap-3">
-      {/* 季节切换条:当季 + 年份/季节 Select */}
+      {/* 顶部工具栏:番剧搜索(左) + 当季 + 年季单选择器(右上角) */}
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant={isCurrent ? 'primary' : 'secondary'}
-          onClick={() => setScope({ kind: 'current' })}
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={strings.subscriptions.searchPlaceholder}
+          aria-label={strings.subscriptions.searchPlaceholder}
+          className="w-full sm:w-64"
+        />
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant={isCurrent ? 'primary' : 'secondary'}
+            className="whitespace-nowrap"
+            onClick={() => setScope({ kind: 'current' })}
+          >
+            {strings.uxfix.seasonCurrent}
+          </Button>
+          <Select
+            aria-label={strings.uxfix.seasonPickerLabel}
+            data-testid="season-select"
+            className="w-40"
+            value={pickerValue}
+            onChange={(e) => {
+              const opt = seasonOptions.find((o) => o.value === e.target.value)
+              if (opt !== undefined) setScope({ kind: 'browse', year: opt.year, season: opt.season })
+            }}
+          >
+            {seasonOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      {/* 过滤行:地区标签 + 可选显示(特别篇/无中文,默认过滤) + 排序 + 计数 */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="calendar-filters">
+        {(
+          [
+            ['all', strings.subscriptions.regionAll],
+            ['jp', strings.subscriptions.regionJp],
+            ['cn', strings.subscriptions.regionCn],
+            ['kr', strings.subscriptions.regionKr],
+            ['us', strings.subscriptions.regionUs],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={filters.region === value}
+            data-testid={`region-chip-${value}`}
+            onClick={() => setFilters((f) => ({ ...f, region: value }))}
+            className={`rounded-full border px-2.5 py-1 text-xs transition-colors duration-[var(--ink-transition-fast)] ${
+              filters.region === value
+                ? 'border-primary bg-primary/10 font-medium text-ink'
+                : 'border-line bg-surface text-ink-secondary hover:bg-surface-2 hover:text-ink'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <button
+          type="button"
+          aria-pressed={filters.showSpecials}
+          data-testid="toggle-specials"
+          onClick={() => setFilters((f) => ({ ...f, showSpecials: !f.showSpecials }))}
+          className={`rounded-full border px-2.5 py-1 text-xs transition-colors duration-[var(--ink-transition-fast)] ${
+            filters.showSpecials
+              ? 'border-primary bg-primary/10 font-medium text-ink'
+              : 'border-line bg-surface text-ink-secondary hover:bg-surface-2 hover:text-ink'
+          }`}
         >
-          {strings.uxfix.seasonCurrent}
-        </Button>
+          {strings.subscriptions.showSpecials}
+        </button>
+        <button
+          type="button"
+          aria-pressed={filters.showNoCn}
+          data-testid="toggle-nocn"
+          onClick={() => setFilters((f) => ({ ...f, showNoCn: !f.showNoCn }))}
+          className={`rounded-full border px-2.5 py-1 text-xs transition-colors duration-[var(--ink-transition-fast)] ${
+            filters.showNoCn
+              ? 'border-primary bg-primary/10 font-medium text-ink'
+              : 'border-line bg-surface text-ink-secondary hover:bg-surface-2 hover:text-ink'
+          }`}
+        >
+          {strings.subscriptions.showNoCn}
+        </button>
         <Select
-          aria-label={strings.uxfix.seasonYearLabel}
-          data-testid="season-year-select"
-          className="w-28"
-          value={yearInput}
-          onChange={(e) => {
-            setYearInput(e.target.value)
-            setScope({ kind: 'browse', year: Number(e.target.value), season: seasonInput })
-          }}
+          aria-label={strings.subscriptions.sortLabel}
+          data-testid="sort-select"
+          className="ml-auto w-32"
+          value={filters.sort}
+          onChange={(e) => setFilters((f) => ({ ...f, sort: e.target.value as 'air' | 'rating' }))}
         >
-          {years.map((year) => (
-            <option key={year} value={String(year)}>
-              {year}
-            </option>
-          ))}
+          <option value="air">{strings.subscriptions.sortByAir}</option>
+          <option value="rating">{strings.subscriptions.sortByRating}</option>
         </Select>
-        <Select
-          aria-label={strings.uxfix.seasonNameLabel}
-          data-testid="season-name-select"
-          className="w-28"
-          value={seasonInput}
-          onChange={(e) => {
-            const season = e.target.value as SeasonName
-            setSeasonInput(season)
-            setScope({ kind: 'browse', year: Number(yearInput), season })
-          }}
-        >
-          {SEASON_NAMES.map((season) => (
-            <option key={season} value={season}>
-              {strings.uxfix.seasonNames[season]}
-            </option>
-          ))}
-        </Select>
+        <span className="whitespace-nowrap text-xs text-ink-secondary data-text">
+          {t(strings.subscriptions.filterCount, { n: String(filtered.length) })}
+          {hiddenCount > 0 && (
+            <span className="ml-1 text-ink-muted">
+              {t(strings.subscriptions.filterHidden, { m: String(hiddenCount) })}
+            </span>
+          )}
+        </span>
       </div>
 
       {error !== null ? (
@@ -144,18 +327,19 @@ function SeasonBrowseTab({ onSubscribed }: { onSubscribed: () => void }) {
       ) : data?.degraded ? (
         // 网关降级:items 为空,如实提示不伪装成「无番」
         <Card>
-          <p role="status" data-testid="season-degraded" className="py-2 text-sm text-ink-secondary">
-            {strings.uxfix.seasonDegraded}
-          </p>
+          <div className="flex items-center justify-between gap-2 py-1.5">
+            <p role="status" data-testid="season-degraded" className="text-sm text-ink-secondary">
+              {strings.uxfix.seasonDegraded}
+            </p>
+            <Button size="sm" variant="secondary" onClick={reload}>
+              {strings.common.retry}
+            </Button>
+          </div>
         </Card>
       ) : items.length === 0 ? (
         <EmptyState title={strings.uxfix.seasonGridEmpty} />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="season-grid">
-          {items.map((item) => (
-            <AnimeCard key={item.subject_id} item={item} onSelect={setSelected} />
-          ))}
-        </div>
+        <CalendarGrid items={filtered} onSelect={setSelected} subscribedTitles={subscribedTitles} />
       )}
 
       {selected !== null && (

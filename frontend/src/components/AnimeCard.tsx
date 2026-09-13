@@ -72,9 +72,12 @@ function monthDay(airDate: string | null): string {
 export function AnimeCard({
   item,
   onSelect,
+  subscribed = false,
 }: {
   item: BangumiItemDto
   onSelect: (item: BangumiItemDto) => void
+  /** 该番已在「我的订阅」(标题精确匹配);仅展示用途,去重正确性由后端 adopt 兜底 */
+  subscribed?: boolean
 }) {
   return (
     <div className="group relative" data-testid={`anime-card-${item.subject_id}`}>
@@ -106,9 +109,22 @@ export function AnimeCard({
             {item.eps !== null && item.eps > 0 && (
               <span className="data-text">{item.eps} {strings.library.episodes}</span>
             )}
+            {item.platform !== null && item.platform !== '' && item.platform !== 'TV' && (
+              <span className="rounded-sm border border-line px-1 text-[10px] text-ink-secondary">
+                {item.platform}
+              </span>
+            )}
           </div>
         </div>
       </button>
+      {subscribed && (
+        <span
+          data-testid={`anime-card-subscribed-${item.subject_id}`}
+          className="absolute left-1.5 top-1.5 rounded-sm bg-warning/90 px-1.5 py-0.5 text-[10px] font-medium text-ink"
+        >
+          {strings.subscriptions.badgeSubscribed}
+        </span>
+      )}
       {/* Mikan 外链:卡片兄弟节点,点击不会触发 onSelect;testid 供测试定位 */}
       <a
         href={item.mikan_search_url}

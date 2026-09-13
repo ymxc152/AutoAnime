@@ -3,6 +3,7 @@
  * 兼作契约类型的"可运行文档"。E2 合并对齐后:mock 仅作后端未启动时的演示。
  */
 import type {
+  MikanGroupsDto,
   AuditDto,
   BangumiItemDto,
   EpisodeDto,
@@ -483,6 +484,8 @@ export const mockSettings: SettingsDto = {
 export const mockCalendarItems: BangumiItemDto[] = [
   {
     subject_id: 511100,
+    platform: 'TV',
+    region: 'jp',
     title_cn: '孤独摇滚',
     title_jp: 'ぼっち・ざ・ろっく!',
     image_url: null,
@@ -493,6 +496,8 @@ export const mockCalendarItems: BangumiItemDto[] = [
   },
   {
     subject_id: 511101,
+    platform: 'TV',
+    region: 'jp',
     title_cn: '药屋魔法使的新娘',
     title_jp: '魔法使いの夜',
     image_url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22160%22 height=%22224%22%3E%3Crect width=%22160%22 height=%22224%22 fill=%22%2388a%22/%3E%3C/svg%3E',
@@ -503,6 +508,8 @@ export const mockCalendarItems: BangumiItemDto[] = [
   },
   {
     subject_id: 511102,
+    platform: 'TV',
+    region: 'jp',
     title_cn: null,
     title_jp: 'Shangri-La Frontier Season 3',
     image_url: null,
@@ -513,6 +520,8 @@ export const mockCalendarItems: BangumiItemDto[] = [
   },
   {
     subject_id: 511103,
+    platform: 'TV',
+    region: 'jp',
     title_cn: '星空列车',
     title_jp: 'ほしやてつどう',
     image_url: null,
@@ -523,6 +532,8 @@ export const mockCalendarItems: BangumiItemDto[] = [
   },
   {
     subject_id: 511104,
+    platform: 'OVA',
+    region: 'jp',
     title_cn: '幻日的夜羽',
     title_jp: '幻日のヨハネ',
     image_url: null,
@@ -533,6 +544,8 @@ export const mockCalendarItems: BangumiItemDto[] = [
   },
   {
     subject_id: 511105,
+    platform: 'TV',
+    region: 'jp',
     title_cn: '百千家的妖怪王子',
     title_jp: '百千さん家のあやかし王子',
     image_url: null,
@@ -540,6 +553,18 @@ export const mockCalendarItems: BangumiItemDto[] = [
     air_date: '2026-10-07',
     eps: 12,
     mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=momochi',
+  },
+  {
+    subject_id: 511106,
+    title_cn: '时光代理人',
+    title_jp: '時光代理人',
+    image_url: null,
+    rating: 8.2,
+    air_date: '2026-10-09',
+    eps: 12,
+    mikan_search_url: 'https://mikanani.me/Home/Search?searchstr=linkclick',
+    platform: 'WEB',
+    region: 'cn',
   },
 ]
 
@@ -555,6 +580,24 @@ export const mockSeasonBrowse: SeasonBrowseOut = {
   items: mockCalendarItems,
   degraded: false,
   reason: null,
+}
+
+/** Mikan 字幕组发现(GET /api/mikan/subtitle_groups;mock 两个字幕组选项) */
+export const mockMikanGroups: MikanGroupsDto = {
+  matched_title: '孤独摇滚!',
+  bangumi_id: 3281,
+  groups: [
+    {
+      group_id: 'LoliHouse',
+      group_name: 'LoliHouse',
+      rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3281&subgroupid=583',
+    },
+    {
+      group_id: 'SBS',
+      group_name: '喵萌奶茶屋',
+      rss_url: 'https://mikanani.me/RSS/Bangumi?bangumiId=3281&subgroupid=615',
+    },
+  ],
 }
 
 /** P1-D 目录浏览 fixture(最小 stub,交由 FolderPicker worker 扩充;path='' = 盘符根视图) */

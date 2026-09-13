@@ -10,7 +10,7 @@ import { toast } from 'sonner'
 import { SubscriptionsPage } from '../Subscriptions'
 import { renderPage } from '../../test/testUtils'
 import { api, ApiError } from '../../api'
-import { mockCalendarItems } from '../../mocks/data'
+import { mockCalendarItems, mockSubscriptions } from '../../mocks/data'
 import type { SeasonBrowseOut, SeasonName, SubscriptionDto } from '../../api/types'
 import { resetMockState } from '../../mocks/handlers'
 
@@ -21,6 +21,13 @@ function expectedDefaultSeason(): SeasonName {
   if (month >= 6 && month <= 8) return 'summer'
   if (month >= 9) return 'fall'
   return 'winter'
+}
+
+/** 与页面默认过滤档一致:有中文翻译 且 平台非 OVA/ONA 等特别篇 */
+function visibleByDefault(): typeof mockCalendarItems {
+  return mockCalendarItems.filter(
+    (it) => it.title_cn !== null && !/ova|ona|mad|剧场版|电影/i.test(it.platform ?? ''),
+  )
 }
 
 /** 切到「我的订阅」Tab(既有用例迁移入口) */
@@ -35,6 +42,13 @@ function browseOut(overrides: Partial<SeasonBrowseOut> = {}): SeasonBrowseOut {
 describe('SubscriptionsPage', () => {
   beforeEach(() => {
     resetMockState()
+    // 过滤偏好会写 localStorage(同文件用例共享),逐用例清掉防串扰
+    localStorage.removeItem('autoanime-calendar-filters')
+  })
+
+  afterEach(() => {
+    // 防个别用例的 api spy 未 restore 污染后续用例
+    vi.restoreAllMocks()
   })
 
   // ---------- 12-IA:Tab1 季度选番 ----------
@@ -44,7 +58,7 @@ describe('SubscriptionsPage', () => {
     // 默认选中:季度选番 aria-selected=true
     expect(screen.getByRole('tab', { name: '季度选番' })).toHaveAttribute('aria-selected', 'true')
     const grid = await screen.findByTestId('season-grid')
-    expect(within(grid).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(mockCalendarItems.length)
+    expect(within(grid).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(visibleByDefault().length)
     expect(screen.getByText('孤独摇滚')).toBeInTheDocument()
     // 评分与集数(mock 唯一 13 集条目 = 魔法使いの夜 7.9 分);12-UX:评分为实心 Star 图标 + 文本,不再是方块 mark 徽标
     const rating = screen.getByText('7.9 分')
@@ -74,7 +88,10 @@ describe('SubscriptionsPage', () => {
     const calendarSpy = vi.spyOn(api.seasonCalendar, 'get').mockResolvedValue(browseOut())
     renderPage(<SubscriptionsPage />)
     await screen.findByTestId('season-grid')
-    await user.selectOptions(screen.getByTestId('season-year-select'), '2025')
+    await user.selectOptions(
+      screen.getByTestId('season-select'),
+      `2025:${expectedDefaultSeason()}`,
+    )
     await waitFor(() =>
       expect(browseSpy).toHaveBeenCalledWith({ year: 2025, season: expectedDefaultSeason() }),
     )
@@ -92,9 +109,107 @@ describe('SubscriptionsPage', () => {
     )
     renderPage(<SubscriptionsPage />)
     await screen.findByTestId('season-grid')
-    await user.selectOptions(screen.getByTestId('season-year-select'), '2024')
+    await user.selectOptions(screen.getByTestId('season-select'), '2024:winter')
     const hint = await screen.findByTestId('season-degraded')
     expect(hint).toHaveTextContent('该季度数据暂时不可用')
+  })
+
+  it('12-UX:选番顶部搜索框按标题过滤卡片,无命中显示专门空态', async () => {
+    const user = userEvent.setup()
+    renderPage(<SubscriptionsPage />)
+    const grid = await screen.findByTestId('season-grid')
+    expect(within(grid).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(visibleByDefault().length)
+    // 命中:mock 中「孤独摇滚」唯一
+    await user.type(screen.getByRole('searchbox', { name: '搜索本季番剧…' }), '孤独摇滚')
+    await waitFor(() =>
+      expect(within(screen.getByTestId('season-grid')).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(1),
+    )
+    expect(screen.getByText('孤独摇滚')).toBeInTheDocument()
+    // 清空恢复
+    await user.clear(screen.getByRole('searchbox', { name: '搜索本季番剧…' }))
+    await waitFor(() =>
+      expect(within(screen.getByTestId('season-grid')).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(visibleByDefault().length),
+    )
+    // 无命中:专门空态(区别于"该季度暂无条目")
+    await user.type(screen.getByRole('searchbox', { name: '搜索本季番剧…' }), '不存在的番剧名')
+    expect(await screen.findByText('没有匹配的番剧')).toBeInTheDocument()
+    expect(screen.queryByTestId('season-grid')).not.toBeInTheDocument()
+  })
+
+  it('12-UX:默认过滤特别篇与无中文番剧,开关可显示,计数行如实', async () => {
+    const user = userEvent.setup()
+    renderPage(<SubscriptionsPage />)
+    await screen.findByTestId('season-grid')
+    // 默认:511102(无中文)与 511104(OVA)被隐藏;计数 共 5 部 · 已隐藏 2 部
+    expect(screen.queryByTestId('anime-card-511102')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('anime-card-511104')).not.toBeInTheDocument()
+    expect(screen.getByText('共 5 部')).toBeInTheDocument()
+    expect(screen.getByText(/已隐藏 2 部/)).toBeInTheDocument()
+    // 显示特别篇 → 511104(OVA)出现且带平台徽标
+    await user.click(screen.getByTestId('toggle-specials'))
+    expect(screen.getByTestId('anime-card-511104')).toBeInTheDocument()
+    expect(within(screen.getByTestId('anime-card-511104')).getByText('OVA')).toBeInTheDocument()
+    // 显示无中文翻译 → 511102 出现
+    await user.click(screen.getByTestId('toggle-nocn'))
+    expect(screen.getByTestId('anime-card-511102')).toBeInTheDocument()
+    expect(screen.getByText('共 7 部')).toBeInTheDocument()
+    // 过滤偏好持久化到 localStorage
+    const saved = JSON.parse(localStorage.getItem('autoanime-calendar-filters') ?? '{}')
+    expect(saved.showSpecials).toBe(true)
+    expect(saved.showNoCn).toBe(true)
+  })
+
+  it('12-UX:地区标签筛选(国漫只显示 region=cn 条目)', async () => {
+    const user = userEvent.setup()
+    renderPage(<SubscriptionsPage />)
+    await screen.findByTestId('season-grid')
+    await user.click(screen.getByTestId('region-chip-cn'))
+    const grid = screen.getByTestId('season-grid')
+    expect(within(grid).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(1)
+    expect(screen.getByTestId('anime-card-511106')).toBeInTheDocument()
+    expect(screen.getByText('时光代理人')).toBeInTheDocument()
+    expect(screen.getByText('共 1 部')).toBeInTheDocument()
+    // 回全部恢复
+    await user.click(screen.getByTestId('region-chip-all'))
+    expect(within(screen.getByTestId('season-grid')).getAllByTestId(/^anime-card-\d+$/)).toHaveLength(
+      visibleByDefault().length,
+    )
+  })
+
+  it('12-UX:已在订阅中的番剧,选番卡片显示「已订阅」角标', async () => {
+    vi.spyOn(api.subscriptions, 'list').mockResolvedValue({
+      items: [{ ...mockSubscriptions[0]!, title_cn: '孤独摇滚', title_jp: 'ぼっち・ざ・ろっく!' }],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    })
+    renderPage(<SubscriptionsPage />)
+    const card = await screen.findByTestId('anime-card-511100')
+    expect(await screen.findByTestId('anime-card-subscribed-511100')).toBeInTheDocument()
+    expect(within(card).getByText('已订阅')).toBeInTheDocument()
+    // 未订阅的卡片无角标
+    expect(screen.queryByTestId('anime-card-subscribed-511101')).not.toBeInTheDocument()
+  })
+
+  it('12-UX:订阅抽屉自动获取 Mikan 字幕组,点选即填 RSS(失败可重试/可手动)', async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(api.mikan, 'subtitleGroups')
+    renderPage(<SubscriptionsPage />)
+    const card = await screen.findByTestId('anime-card-511100')
+    await user.click(within(card).getByRole('button'))
+    const dialog = await screen.findByRole('dialog')
+    // 打开抽屉即拉取(mock 返回 LoliHouse/喵萌奶茶屋 两个选项)
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('孤独摇滚'))
+    const box = within(dialog).getByTestId('mikan-groups')
+    const groupBtn = await within(box).findByRole('button', { name: /喵萌奶茶屋/ })
+    // 点选后:RSS 字段被填入对应地址,主按钮可用,字幕组偏好顺带填上
+    await user.click(groupBtn)
+    expect(within(dialog).getByLabelText('RSS')).toHaveValue(
+      'https://mikanani.me/RSS/Bangumi?bangumiId=3281&subgroupid=615',
+    )
+    expect(within(dialog).getByLabelText('字幕组偏好')).toHaveValue('喵萌奶茶屋')
+    expect(within(dialog).getByRole('button', { name: '订阅并挂 RSS' })).toBeEnabled()
+    expect(within(box).getByText('已选:喵萌奶茶屋')).toBeInTheDocument()
   })
 
   it('12-IA:点卡片打开订阅抽屉(标题/详情行/三个表单字段)', async () => {

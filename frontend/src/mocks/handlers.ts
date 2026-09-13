@@ -10,6 +10,7 @@ import {
   mockAudit,
   mockFilesystemListing,
   mockMetrics,
+  mockMikanGroups,
   mockPending,
   mockRssSources,
   mockSeasonBrowse,
@@ -474,6 +475,11 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
     },
     seasonBrowse: {
       get: (_query) => delayed(clone(mockSeasonBrowse)),
+    },
+
+    mikan: {
+      // mock 不做真实标题匹配,固定返回两个字幕组选项
+      subtitleGroups: (_title: string) => delayed(clone(mockMikanGroups)),
     },
 
     // P1-D 目录浏览(最小 stub:path 缺省 = 盘符根视图)
