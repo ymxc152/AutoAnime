@@ -58,6 +58,9 @@ function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
   const active = points.filter((p) => p.llm_called > 0)
   const max = Math.max(1, ...active.map((p) => p.llm_called))
   const height = 72
+  // 顶部留白:峰值点的数值标签(y = 点位-6,9px 字形上探约 7px)不得越过 svg 上沿,
+  // 否则等比放大后字形压进卡片标题行(实测重叠 50%)
+  const topPad = 14
   // viewBox 宽度下限 280 与 min-w 匹配,避免数据点少时 SVG 被等比放大成巨图(实测修复)
   const width = Math.max(active.length * 44, 280)
   if (active.length === 0) {
@@ -71,7 +74,7 @@ function WeeklyCurve({ points }: { points: Metrics['llm_call_curve_weekly'] }) {
   const pts = active.map((p, i) => ({
     ...p,
     x: ((i + 0.5) * width) / active.length,
-    y: height - (p.llm_called / max) * (height - 14) - 4,
+    y: topPad + (1 - p.llm_called / max) * (height - topPad - 4),
   }))
   const last = pts.at(-1)
   if (last === undefined) {

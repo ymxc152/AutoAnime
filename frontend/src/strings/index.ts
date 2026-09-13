@@ -68,7 +68,7 @@ export const strings = {
 
   dashboard: {
     title: '总览',
-    manualInterventionRate: '人工介入率',
+    manualInterventionRate: '周期人工介入率',
     auditManual: '人工',
     auditTotal: '总审计',
     pendingQueue: '待确认队列',
