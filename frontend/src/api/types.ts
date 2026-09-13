@@ -207,13 +207,15 @@ export interface PendingResolveOut {
 
 export type AuditActor = 'auto' | 'manual'
 
-/** GET /api/audit 单行(= 后端 AuditOut;注意:没有 created_at,组内排序按 id) */
+/** GET /api/audit 单行(= 后端 AuditOut;created_at 为 0008 迁移后新增,旧行为 null) */
 export interface AuditDto {
   id: number
   operation_id: string
   entity: string
   entity_id: number | null
   action: string
+  /** 行写入时刻(ISO);0008 迁移前的历史行为 null */
+  created_at?: string | null
   /** 正向指令 JSON(如归档路径映射) */
   instruction: Record<string, unknown>
   /** 逆向指令 JSON(rollback 依据) */
@@ -238,6 +240,8 @@ export interface OperationGroupDto {
   actions: string[]
   first_audit_id: number
   last_audit_id: number
+  /** 组内最新行(last_audit_id)的写入时刻(ISO);历史组为 null */
+  last_created_at?: string | null
   /** 后端按组内最新 audit 行是否带 reverse 判定;false 时 UI 隐藏撤销 */
   rollbackable: boolean
 }
@@ -481,6 +485,9 @@ export interface SettingsDto {
   // --- 环境(只读) ---
   library_path: string
   download_path: string
+  /** 绝对路径(后端 resolve 后);旧后端缺省,UI 回退 library_path */
+  library_path_abs?: string
+  download_path_abs?: string
   api_host: string
   api_port: number
   api_cors_dev_origins: string[]
