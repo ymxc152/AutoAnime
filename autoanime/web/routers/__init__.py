@@ -18,6 +18,7 @@ from autoanime.web.routers.rss_sources import router as rss_sources_router
 from autoanime.web.routers.scheduler import router as scheduler_router
 from autoanime.web.routers.series import router as series_router
 from autoanime.web.routers.settings import router as settings_router
+from autoanime.web.routers.setup import router as setup_router
 from autoanime.web.routers.subscriptions import router as subscriptions_router
 
 api_router = APIRouter(prefix="/api")
@@ -32,6 +33,7 @@ api_router.include_router(audit_router)
 api_router.include_router(subscriptions_router)
 api_router.include_router(rss_sources_router)
 api_router.include_router(settings_router)
+api_router.include_router(setup_router)
 api_router.include_router(calendar_router)
 api_router.include_router(mikan_router)
 api_router.include_router(events_router)

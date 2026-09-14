@@ -26,6 +26,7 @@ import type {
   PendingRejectBody,
   PendingResolveOut,
   ReportOut,
+  CheckUpdateDto,
   RollbackResult,
   RssPollResult,
   RssSourceCreateBody,
@@ -38,6 +39,7 @@ import type {
   RssPreviewResponse,
   SeasonBrowseOut,
   SeasonName,
+  SetupStatusDto,
   SeriesDto,
   SeriesQuery,
   NotifyTestOut,
@@ -185,5 +187,12 @@ export const endpoints = {
     // 12-E:测试动作按「运行时 + DB 覆盖」的合并配置试跑,不改任何配置
     notifyTest: () => request<NotifyTestOut>('/api/settings/notify-test', { method: 'POST' }),
     qbitTest: () => request<QbitTestOut>('/api/settings/qbit-test', { method: 'POST' }),
+  },
+
+  /** /api/setup —— 首次运行设置向导(status 纯读探测 / complete 落向导标记 / checkUpdate 对比参考项目 Auto_Bangumi 新版) */
+  setup: {
+    status: () => request<SetupStatusDto>('/api/setup/status'),
+    complete: () => request<{ ok: boolean }>('/api/setup/complete', { method: 'POST' }),
+    checkUpdate: () => request<CheckUpdateDto>('/api/setup/check-update'),
   },
 }

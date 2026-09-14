@@ -5,15 +5,17 @@
  * 主内容区顶部:mock 演示警示条(mock 开启时常驻,warning 色调)
  * + SSE 断线全局警示条(reconnecting=warning,closed=danger)。
  */
-import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import {
+  ChevronRight,
   Clapperboard,
   Film,
   Inbox,
   LayoutDashboard,
   Moon,
+  RotateCcw,
   ScrollText,
   Settings as SettingsIcon,
   Sun,
@@ -21,7 +23,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { strings, t } from '../strings'
-import { isMockMode } from '../api'
+import { api, isMockMode } from '../api'
 import { useTheme } from '../hooks/useTheme'
 import { useEventStream } from '../hooks/eventStreamContext'
 import { SseStatusLine } from './SseStatusLine'
@@ -93,9 +95,36 @@ function SseBanner() {
   )
 }
 
+/* ---------- 设置向导引导(amber 提示条,挂载时探测 setup/status) ---------- */
+
+/* needed = 尚无任何订阅:在侧栏顶部给醒目入口引导去 #/setup。
+ * 有意**不强制重定向**(不绑架):向导是首次体验引导而非门禁,用户
+ * 可能只想先看看媒体库/导入功能;保持一切页面可达,由提示条承担引导。 */
+function SetupNeededBar({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Link
+      to="/setup"
+      onClick={onNavigate}
+      data-testid="setup-needed-entry"
+      role="button"
+      className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-ink transition-colors duration-[var(--ink-transition-fast)] hover:bg-warning/20"
+    >
+      <StatusDot tone="warning" size={7} />
+      <span className="min-w-0 flex-1 truncate font-medium">{strings.setup.wizardNeededHint}</span>
+      <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+    </Link>
+  )
+}
+
 /* ---------- 侧栏 ---------- */
 
-function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarBody({
+  onNavigate,
+  setupNeeded,
+}: {
+  onNavigate?: () => void
+  setupNeeded: boolean
+}) {
   const { dark, toggle } = useTheme()
   return (
     <div className="flex h-full flex-col">
@@ -113,6 +142,12 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
           <p className="truncate text-[11px] text-ink-muted">{strings.app.tagline}</p>
         </div>
       </div>
+      {/* 向导引导条:仅在尚无订阅(needed)时出现,不重定向、不挡导航 */}
+      {setupNeeded && (
+        <div className="px-4 pb-3">
+          <SetupNeededBar onNavigate={onNavigate} />
+        </div>
+      )}
       <nav className="flex-1 overflow-y-auto px-2" aria-label="主导航">
         <ul className="flex flex-col gap-0.5">
           {navItems.map((item) => (
@@ -147,6 +182,18 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
           ))}
         </ul>
       </nav>
+      {/* 重新运行向导:常驻小入口(改配置/换环境后可随时重跑;跳独立页 #/setup) */}
+      <div className="border-t border-line px-4 py-2">
+        <Link
+          to="/setup"
+          onClick={onNavigate}
+          data-testid="setup-rerun-entry"
+          className="flex items-center gap-1.5 rounded-md px-1 py-1 text-xs text-ink-muted transition-colors duration-[var(--ink-transition-fast)] hover:text-ink"
+        >
+          <RotateCcw className="h-3 w-3 shrink-0" aria-hidden />
+          {strings.setup.rerunWizard}
+        </Link>
+      </div>
       <div className="flex items-center justify-between border-t border-line px-4 py-3">
         <div className="flex flex-col gap-1">
           {isMockMode && (
@@ -170,6 +217,24 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 
 export function Layout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [setupNeeded, setSetupNeeded] = useState(false)
+
+  /* 挂载时探测向导状态(一次性;失败静默——引导条属增强体验,
+   * 探测不可用绝不影响正常使用,也不产生重定向副作用)。 */
+  useEffect(() => {
+    let alive = true
+    void api.setup
+      .status()
+      .then((status) => {
+        if (alive) setSetupNeeded(status.needed)
+      })
+      .catch(() => {
+        /* 探测失败不显示引导条 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   return (
     <div className="min-h-screen bg-bg">
@@ -192,7 +257,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <div className="flex">
         {/* 桌面侧栏 */}
         <aside className="sticky top-0 hidden h-screen w-56 shrink-0 border-r border-line bg-surface md:block">
-          <SidebarBody />
+          <SidebarBody setupNeeded={setupNeeded} />
         </aside>
 
         {/* 移动端折叠侧栏 */}
@@ -200,7 +265,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="fixed inset-0 z-40 md:hidden">
             <div className="absolute inset-0 bg-black/30" onClick={() => setMobileOpen(false)} aria-hidden />
             <aside className="absolute left-0 top-0 h-full w-60 bg-surface shadow-soft-lg">
-              <SidebarBody onNavigate={() => setMobileOpen(false)} />
+              <SidebarBody onNavigate={() => setMobileOpen(false)} setupNeeded={setupNeeded} />
             </aside>
           </div>
         )}
