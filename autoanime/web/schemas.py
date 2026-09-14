@@ -267,7 +267,7 @@ class SubscriptionUpdateIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# RSS sources（/api/rss_sources，B3）
+# RSS sources（/api/rss_sources，B3；批次三聚合源增量）
 # ---------------------------------------------------------------------------
 
 
@@ -276,16 +276,26 @@ class RssSourceOut(BaseModel):
     url: str
     # token 永不回显（SecretStr 也不序列化明文，读取端点直接不返回）。
     has_token: bool
-    season_id: int
+    # 聚合源（kind=aggregate）不绑季 → 可空；旧行/季绑定源恒有值。
+    season_id: int | None
     enabled: bool
     last_polled_at: datetime | None
+    kind: str = "season"
+    include_keywords: str | None = None
+    exclude_keywords: str | None = None
 
 
 class RssSourceCreateIn(BaseModel):
     url: str
     token: SecretStr | None = None
-    season_id: int
+    # kind=season（默认，季绑定）| aggregate（聚合源：一个 feed 混多部番，
+    # 不绑季，轮询时对全部活跃订阅逐个对齐）。
+    kind: Literal["season", "aggregate"] = "season"
+    season_id: int | None = None
     enabled: bool = True
+    # 聚合源级全局规则（分号分隔关键词，语义同 series 级；季绑定源忽略）。
+    include_keywords: str | None = None
+    exclude_keywords: str | None = None
 
     @field_validator("url")
     @classmethod
@@ -294,11 +304,23 @@ class RssSourceCreateIn(BaseModel):
             raise ValueError("url must be a non-empty string")
         return value
 
+    @model_validator(mode="after")
+    def _season_required_for_season_kind(self) -> RssSourceCreateIn:
+        # season 源必填 season_id；aggregate 源忽略 season_id（恒置空）。
+        if self.kind == "season" and self.season_id is None:
+            raise ValueError("season_id is required for season sources")
+        if self.kind == "aggregate":
+            self.season_id = None
+        return self
+
 
 class RssSourceUpdateIn(BaseModel):
     url: str | None = None
     token: SecretStr | None = None
     enabled: bool | None = None
+    # 源级规则可更新；显式 null = 清除。kind 创建后只读（不提供修改）。
+    include_keywords: str | None = None
+    exclude_keywords: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +372,9 @@ class SettingsOut(BaseModel):
     upgrade_skip_size_gb: float
     mismatch_backfill_budget: int
     naming_title_language: str
+    naming_movie_dir: bool
+    naming_specials_s00: bool
+    naming_year_suffix: bool
     rss_fetch_timeout_s: float
     rss_fetch_retries: int
     # --- 识别（requires_restart 档：LLM 连接类） ---
@@ -439,6 +464,9 @@ class SettingsUpdateIn(BaseModel):
     upgrade_skip_size_gb: float | None = None
     mismatch_backfill_budget: int | None = None
     naming_title_language: str | None = None
+    naming_movie_dir: bool | None = None
+    naming_specials_s00: bool | None = None
+    naming_year_suffix: bool | None = None
     rss_fetch_timeout_s: float | None = None
     rss_fetch_retries: int | None = None
 

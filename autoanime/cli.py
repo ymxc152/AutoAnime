@@ -38,7 +38,7 @@ from autoanime.memory.lookup import StorageMemoryStore
 from autoanime.memory.store import SqliteStorage, StorageLlmCacheStore
 from autoanime.organize import confirm_archive, mover
 from autoanime.organize.library_ingest import upsert_archived_file
-from autoanime.organize.naming import NamingInput, relative_path
+from autoanime.organize.naming import NamingInput, build_library_dst
 from autoanime.organize.poster import PosterService
 from autoanime.organize.upgrade import score_from_title
 from autoanime.pipeline.l1_local import LocalRecognizer
@@ -942,26 +942,60 @@ def _group_by_parent(files: Sequence[Path]) -> list[tuple[Path, list[Path]]]:
     return sorted(groups.items(), key=lambda item: item[0])
 
 
-def _archive_plan(file: Path, result: ParseResult, settings: Settings) -> mover.TransferPlan:
+def _archive_plan(
+    file: Path,
+    result: ParseResult,
+    settings: Settings,
+    *,
+    series: Series | None = None,
+) -> mover.TransferPlan:
     """L1 HIGH（route=archive）文件的归档计划：D17 命名 + D18 字幕跟随 + D9。
 
     复用 E4 organize 四件套中的 naming + mover（与 ArchiveService._archive_episode
-    同一原语）；手动导入没有订阅行，解析结论的 title 即展示标题（三槽同填，
-    由 ``naming_title_language`` 的回退链决定实际取用）。plan_transfer 是纯
-    决策（只 stat 源文件），dry-run 亦可安全调用。
+    同一原语）。纯手动导入没有订阅行，解析结论的 title 即展示标题（三槽同填，
+    由 ``naming_title_language`` 的回退链决定实际取用）；**命中已知订阅时**
+    （``series`` 上下文，库外扫描对齐路径传入）改用订阅记录的标题槽——两条
+    路径的目录名一致，同番不再按 L1 解析名/订阅名裂成两个目录。目标位统一
+    经 ``build_library_dst`` 计算（批次一三开关的唯一入口）。
+    plan_transfer 是纯决策（只 stat 源文件），dry-run 亦可安全调用。
     """
-    media_type = "movie" if result.segment is Segment.MOVIE else "tv"
-    naming = NamingInput(
-        title_cn=result.title,
-        title_romaji=result.title,
-        title_jp=result.title,
-        season_number=result.season or 1,
-        episode_number=result.episode or 0,
-        media_type=media_type,
+    if series is not None:
+        media_type = (
+            series.media_type.value
+            if hasattr(series.media_type, "value")
+            else str(series.media_type)
+        )
+        naming = NamingInput(
+            title_cn=series.title_cn,
+            title_romaji=series.title_romaji,
+            title_jp=series.title_jp,
+            season_number=result.season or 1,
+            episode_number=result.episode or 0,
+            media_type=media_type,
+            release_title=file.name,
+        )
+    else:
+        media_type = "movie" if result.segment is Segment.MOVIE else "tv"
+        naming = NamingInput(
+            title_cn=result.title,
+            title_romaji=result.title,
+            title_jp=result.title,
+            season_number=result.season or 1,
+            episode_number=result.episode or 0,
+            media_type=media_type,
+            release_title=file.name,
+        )
+    dst = build_library_dst(
+        settings,
+        title=naming.display_title(settings.naming_title_language),
+        # v1 无系列级年份数据：year 恒 None（按文件补年会把同番裂成两个目录）
+        year=None,
+        segment=media_type,
+        season=result.season,
+        episode=result.episode,
+        fansub=series.fansub_pref if series is not None else result.fansub,
+        extension=file.suffix.lower(),
         release_title=file.name,
-    )
-    rel = relative_path(
-        naming, language=settings.naming_title_language, extension=file.suffix.lower()
     )
     library_root = Path(settings.library_path)
     siblings = (
@@ -972,8 +1006,8 @@ def _archive_plan(file: Path, result: ParseResult, settings: Settings) -> mover.
     return mover.plan_transfer(
         file,
         library_root=library_root,
-        dst_dir=library_root / rel.parent,
-        dst_name=rel.name,
+        dst_dir=dst.parent,
+        dst_name=dst.name,
         siblings=siblings,
         copy_policy="strict" if settings.upgrade_copy_policy == "strict" else "allow",
         skip_over_bytes=int(settings.upgrade_skip_size_gb * 1024**3),
@@ -1046,6 +1080,7 @@ async def _handle_import_outcome(
     store: LoopStore,
     governance: MemoryGovernance,
     dry_run: bool,
+    series: Series | None = None,
 ) -> dict[str, object]:
     """单文件路由结果处理；返回该文件的输出明细（action 即发生的/将发生的动作）。
 
@@ -1053,6 +1088,11 @@ async def _handle_import_outcome(
     - memory/l3 路由、LOW、无法解析、archive 但给不出集号 → 落 pending_queue
       （stage="import"，context 携带识别草稿契约键），供人工处理；
     - dry-run 只规划：归档给出计划目标位（plan_transfer 纯决策），入队不写行。
+
+    ``series``：文件命中的已知订阅行（库外扫描对齐路径传入）。有绑定时
+    命名标题与库收纳 titles 都改用订阅记录的标题（按
+    ``naming_title_language`` 回退链）——归档目录与 RSS/订阅路径一致，
+    库条目按订阅标题聚合；纯手动导入（None）维持解析标题现状。
     """
     result = outcome.result
     item: dict[str, object] = {
@@ -1082,7 +1122,7 @@ async def _handle_import_outcome(
             item["pending_id"] = row.id
         return item
     assert result is not None
-    plan = _archive_plan(file, result, settings)
+    plan = _archive_plan(file, result, settings, series=series)
     item["strategy"] = plan.strategy
     item["dst"] = str(plan.dst_dir / plan.moves[0].dst_name) if plan.moves else None
     if plan.strategy == "skip":
@@ -1117,9 +1157,19 @@ async def _handle_import_outcome(
     # P0-B 库收纳：归档落盘 + audit 后 upsert series/season/episode 库条目
     # （Library 页可见性根因修复；web 端 _run_import_task 复用本函数自动生效）。
     # dry-run 在上方提前 return 绝不走到这里；失败吞在 upsert 内不拖垮导入批。
+    # 命中订阅时 titles 用订阅记录的标题槽（库条目按订阅标题聚合，与命名
+    # 标题同源）；纯手动导入维持解析标题。
+    if series is not None:
+        ingest_titles: dict[str, str | None] = {
+            slot: value
+            for slot in ("title_cn", "title_jp", "title_romaji")
+            if (value := getattr(series, slot)) is not None
+        }
+    else:
+        ingest_titles = {"title_cn": result.title}
     ingest = await upsert_archived_file(
         store,
-        titles={"title_cn": result.title},
+        titles=ingest_titles,
         media_type="movie" if result.segment is Segment.MOVIE else "tv",
         season_number=result.season,
         episode_number=result.episode,

@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     upgrade_skip_size_gb: float = 20.0
     # 归档命名标题语言（D17）：title_cn → romaji 回退，Settings 可配。
     naming_title_language: str = "title_cn"
+    # 媒体库命名开关（批次一）：只影响之后的归档，不动已归档文件
+    naming_movie_dir: bool = False
+    naming_specials_s00: bool = True
+    naming_year_suffix: bool = False
     # 错配隔离目录（D14 分支 B/C：救不动的文件移到这里等人工，不归档）。
     quarantine_path: Path = Path("./quarantine")
 

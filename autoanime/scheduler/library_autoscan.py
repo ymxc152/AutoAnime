@@ -11,6 +11,10 @@ L1 解析 + align 对齐到已有 (series, season) → 命中子集走与手动�
 的收口（``_handle_import_outcome``：archive/pending/organize 归档，尊重
 全局 dry_run）→ 未命中忽略计数。
 
+命中订阅的文件把 series 行随收口下发：归档目录跟随**订阅命名标题**
+（按 ``naming_title_language`` 回退链）——与 RSS/归档服务路径同一目录名，
+不再按 L1 解析名把同番裂成两个目录（批次一修复）。
+
 副作用边界：dry_run=true 时只匹配计数不触碰文件；命中但收口为 pending
 的文件进 pending_queue（与手动导入一致，供人工确认学习）。
 """
@@ -110,7 +114,7 @@ class LibraryAutoScanner:
             matched, ignored = await self._match(fresh, contexts, l1)
             report.matched = len(matched)
             report.ignored = ignored
-            report.matched_files = [str(f) for f, _sid, _sn in matched]
+            report.matched_files = [str(f) for f, _series, _sn in matched]
             if not matched:
                 return report
 
@@ -158,8 +162,13 @@ class LibraryAutoScanner:
 
     async def _subscription_contexts(
         self,
-    ) -> list[tuple[set[str], tuple[int, ...]]]:
-        """全部订阅的 (标题集合, 季号列表)——对齐目标。"""
+    ) -> list[tuple[set[str], tuple[int, ...], Series]]:
+        """全部订阅的 (标题集合, 季号列表, series 行)——对齐目标。
+
+        series 行随命中结果一路传给收口（``_handle_import_outcome`` 的
+        series 上下文）：归档命名标题与库收纳 titles 改用订阅记录的标题，
+        与 RSS/归档服务路径一致，同番不再按 L1 解析名裂成第二个目录。
+        """
         async with self._storage.transaction() as session:
             series_rows = (
                 (await session.execute(sa.select(Series))).scalars().all()
@@ -168,7 +177,7 @@ class LibraryAutoScanner:
         seasons_by_series: dict[int, list[int]] = {}
         for row in season_rows:
             seasons_by_series.setdefault(row.series_id, []).append(row.number)
-        contexts: list[tuple[set[str], tuple[int, ...]]] = []
+        contexts: list[tuple[set[str], tuple[int, ...], Series]] = []
         for row in series_rows:
             titles = {
                 t
@@ -177,29 +186,29 @@ class LibraryAutoScanner:
             }
             if not titles:
                 continue
-            contexts.append((titles, tuple(sorted(seasons_by_series.get(row.id, [])))))
+            contexts.append((titles, tuple(sorted(seasons_by_series.get(row.id, []))), row))
         return contexts
 
     async def _match(
         self,
         fresh: list[Path],
-        contexts: list[tuple[set[str], tuple[int, ...]]],
+        contexts: list[tuple[set[str], tuple[int, ...], Series]],
         l1: Any,
-    ) -> tuple[list[tuple[Path, Any, int]], int]:
+    ) -> tuple[list[tuple[Path, Series, int]], int]:
         """L1 解析 + align:命中已有订阅(同番同季带集号)的文件入选。"""
-        matched: list[tuple[Path, Any, int]] = []
+        matched: list[tuple[Path, Series, int]] = []
         ignored = 0
         for file in fresh:
             parse = await l1.parse(RawName(name=file.name, folder=file.parent.name))
-            hit: tuple[Path, Any, int] | None = None
+            hit: tuple[Path, Series, int] | None = None
             if parse is not None and parse.segment is Segment.EPISODE:
-                for titles, season_numbers in contexts:
+                for titles, season_numbers, series in contexts:
                     for season_number in season_numbers or (1,):
                         alignment = align_rss_entry(
                             parse, expected_titles=tuple(sorted(titles)), season_number=season_number
                         )
                         if alignment.verdict == "fast_path":
-                            hit = (file, titles, season_number)
+                            hit = (file, series, season_number)
                             break
                     if hit is not None:
                         break
@@ -210,13 +219,17 @@ class LibraryAutoScanner:
         return matched, ignored
 
     async def _ingest(
-        self, matched: list[tuple[Path, Any, int]]
+        self, matched: list[tuple[Path, Series, int]]
     ) -> tuple[int, int, int]:
-        """命中的子集走与手动导入相同的收口（archive/pending/失败计数）。"""
+        """命中的子集走与手动导入相同的收口（archive/pending/失败计数）。
+
+        文件 → 命中订阅行的映射随收口下发：归档目录跟随订阅命名标题。
+        """
 
         ingest = self._ingest_batch or _default_ingest_batch
         storage, governance = await self._ingest_dependencies()
-        files = [f for f, _titles, _sn in matched]
+        series_by_file = {file: series for file, series, _sn in matched}
+        files = list(series_by_file)
         actions = await ingest(
             files,
             settings=self._settings,
@@ -224,6 +237,7 @@ class LibraryAutoScanner:
             governance=governance,
             storage=storage,
             dry_run=False,
+            series_by_file=series_by_file,
         )
         archived = pending = failed = 0
         for file in files:
@@ -270,14 +284,20 @@ async def _default_ingest_batch(
     governance: MemoryGovernance,
     storage: Any,
     dry_run: bool,
+    series_by_file: dict[Path, Any] | None = None,
 ) -> dict[Path, str]:
-    """命中文件的全管线收口（与手动导入同一处理函数）。"""
+    """命中文件的全管线收口（与手动导入同一处理函数）。
+
+    ``series_by_file``：文件 → 命中订阅行（``_ingest`` 下发）。收口据此把
+    归档命名标题/库收纳 titles 切到订阅记录标题（与 RSS/归档服务路径一致）。
+    """
     from autoanime.cli import _build_orchestrator, _group_by_parent, _handle_import_outcome
     from autoanime.core.interfaces import RawName
 
     orchestrator, orchestrator_storage, transport = await _build_orchestrator(
         settings, metrics=True, dry_run=dry_run
     )
+    bindings = series_by_file or {}
     actions: dict[Path, str] = {}
     try:
         for parent, group in _group_by_parent(files):
@@ -299,6 +319,7 @@ async def _default_ingest_batch(
                     store=store,
                     governance=governance,
                     dry_run=dry_run,
+                    series=bindings.get(file),
                 )
                 actions[file] = str(item.get("action", "failed"))
     finally:

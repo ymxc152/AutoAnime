@@ -140,7 +140,7 @@ function PickerContent({
       setError(cause instanceof Error ? cause.message : strings.common.actionFailed)
       setLoading(false)
     }
-  }, [])
+  }, [fileMode])
 
   // 挂载即从盘符根视图加载(PickerContent 仅在 open 时挂载);
   // setState 全部落在 promise 回调里(effect 不做同步 setState,故不直接调用
@@ -164,7 +164,7 @@ function PickerContent({
     return () => {
       seqRef.current += 1
     }
-  }, [])
+  }, [fileMode])
 
   const navigate = (path: string): void => {
     setLoading(true)

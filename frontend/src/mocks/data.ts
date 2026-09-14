@@ -404,7 +404,7 @@ export const mockSubscriptions: SubscriptionDto[] = [
   },
 ]
 
-// ---- rss sources(season_id 非空:外键指向 season.id) ----
+// ---- rss sources(season 源 season_id 非空:外键指向 season.id;aggregate 聚合源不绑季) ----
 
 export const mockRssSources: RssSourceDto[] = [
   {
@@ -414,6 +414,9 @@ export const mockRssSources: RssSourceDto[] = [
     season_id: 2,
     enabled: true,
     last_polled_at: isoDaysAgo(0, 7),
+    kind: 'season',
+    include_keywords: null,
+    exclude_keywords: null,
   },
   {
     id: 2,
@@ -422,6 +425,9 @@ export const mockRssSources: RssSourceDto[] = [
     season_id: 6,
     enabled: true,
     last_polled_at: isoDaysAgo(0, 6),
+    kind: 'season',
+    include_keywords: null,
+    exclude_keywords: null,
   },
   {
     id: 3,
@@ -430,6 +436,20 @@ export const mockRssSources: RssSourceDto[] = [
     season_id: 4,
     enabled: false,
     last_polled_at: isoDaysAgo(3, 2),
+    kind: 'season',
+    include_keywords: null,
+    exclude_keywords: null,
+  },
+  {
+    id: 4,
+    url: 'https://api.m-team.cc/api/rss?token=***',
+    has_token: true,
+    season_id: null,
+    enabled: true,
+    last_polled_at: isoDaysAgo(1, 1),
+    kind: 'aggregate',
+    include_keywords: '1080p;WebRip',
+    exclude_keywords: 'Cam;TS版',
   },
 ]
 
@@ -466,6 +486,9 @@ export const mockSettings: SettingsDto = {
   upgrade_skip_size_gb: 0.5,
   mismatch_backfill_budget: 3,
   naming_title_language: 'zh',
+  naming_movie_dir: false,
+  naming_specials_s00: true,
+  naming_year_suffix: false,
   rss_fetch_timeout_s: 15,
   rss_fetch_retries: 2,
   llm_base_url: 'https://api.deepseek.com/v1',

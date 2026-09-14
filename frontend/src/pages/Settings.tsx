@@ -73,6 +73,9 @@ interface SettingsDraft {
   reference_enabled?: boolean
   scheduler_enabled?: boolean
   notify_enabled?: boolean
+  naming_movie_dir?: boolean
+  naming_specials_s00?: boolean
+  naming_year_suffix?: boolean
   // 文本 / Select
   log_level?: string
   llm_model?: string
@@ -150,6 +153,9 @@ const TAB_FIELD_KEYS: Record<TabKey, readonly string[]> = {
     'upgrade_skip_size_gb',
     'mismatch_backfill_budget',
     'naming_title_language',
+    'naming_movie_dir',
+    'naming_specials_s00',
+    'naming_year_suffix',
   ],
   scheduler: [
     'scheduler_enabled',
@@ -231,6 +237,9 @@ const BOOL_KEYS = [
   'reference_enabled',
   'scheduler_enabled',
   'notify_enabled',
+  'naming_movie_dir',
+  'naming_specials_s00',
+  'naming_year_suffix',
 ] as const
 const TEXT_KEYS = [
   'log_level',
@@ -430,8 +439,7 @@ export function SettingsPage() {
   )
 
   // ---- 展示值:编辑草稿优先,否则回显当前基线 ----
-  const boolValue = (key: 'dry_run' | 'l2_enabled' | 'llm_enabled' | 'reference_enabled' | 'scheduler_enabled' | 'notify_enabled'): boolean =>
-    edit[key] ?? base[key]
+  const boolValue = (key: (typeof BOOL_KEYS)[number]): boolean => edit[key] ?? base[key]
   const textValue = (key: 'llm_model' | 'llm_base_url' | 'downloader' | 'qbittorrent_host' | 'qbittorrent_username' | 'library_path' | 'download_path' | 'notify_telegram_chat_id' | 'upgrade_copy_policy' | 'naming_title_language' | 'log_level'): string => {
     const draft = edit[key]
     if (draft !== undefined) return draft
@@ -462,6 +470,15 @@ export function SettingsPage() {
   }
   const secretValue = (key: 'llm_api_key' | 'qbittorrent_password' | 'notify_webhook_url' | 'notify_telegram_bot_token'): string =>
     edit[key] ?? ''
+
+  // 媒体库命名(批次一)示例预览:随三开关草稿实时拼装(开启哪路就拼哪路示例)
+  const namingExamples = (
+    [
+      boolValue('naming_movie_dir') ? strings.settings.namingExampleMovie : null,
+      boolValue('naming_specials_s00') ? strings.settings.namingExampleSpecial : null,
+      boolValue('naming_year_suffix') ? strings.settings.namingExampleYear : null,
+    ] as (string | null)[]
+  ).filter((item): item is string => item !== null)
 
   /** 数字过滤:整数只留数字;浮点允许一个小数点(inputMode=numeric + 过滤,对齐 Pending 做法) */
   const setNum = (key: DraftKey, raw: string): void => {
@@ -649,11 +666,7 @@ export function SettingsPage() {
     setTokenNotice(strings.settings.apiTokenClearedNotice)
   }
 
-  const switchRow = (
-    key: 'dry_run' | 'l2_enabled' | 'llm_enabled' | 'reference_enabled' | 'scheduler_enabled' | 'notify_enabled',
-    label: string,
-    hint: string,
-  ): ReactNode => (
+  const switchRow = (key: (typeof BOOL_KEYS)[number], label: string, hint: string): ReactNode => (
     <SettingRow label={label} description={hint}>
       {/* 控件列固定宽:Input/Select 满宽贴右缘,开关小控件显式贴同一右缘(与下载器 tab 行布局一致) */}
       <div className="flex justify-end">
@@ -938,6 +951,30 @@ export function SettingsPage() {
                   onChange={(e) => patch({ naming_title_language: e.target.value })}
                   className="data-text"
                 />
+              </SettingRow>
+            </div>
+          </Card>
+          {/* 媒体库命名(批次一三开关):只影响之后的归档,不动已归档文件;
+              示例预览随开关切换拼装(Movies/、Season 00、年份后缀三路示例) */}
+          <Card title={strings.settings.namingSection}>
+            <div className="divide-y divide-line">
+              {switchRow('naming_movie_dir', strings.settings.namingMovieDir, strings.settings.namingMovieDirHint)}
+              {switchRow(
+                'naming_specials_s00',
+                strings.settings.namingSpecialsS00,
+                strings.settings.namingSpecialsHint,
+              )}
+              {switchRow(
+                'naming_year_suffix',
+                strings.settings.namingYearSuffix,
+                strings.settings.namingYearSuffixHint,
+              )}
+              <SettingRow label={strings.settings.namingExample}>
+                <div className="flex justify-end">
+                  <span data-testid="naming-example" className="data-text text-sm text-ink-secondary">
+                    {namingExamples.length > 0 ? namingExamples.join('；') : '—'}
+                  </span>
+                </div>
               </SettingRow>
             </div>
           </Card>

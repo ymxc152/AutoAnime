@@ -420,31 +420,44 @@ export interface SchedulerRunResponse {
 
 // ---------- RSS Sources:GET/POST/PATCH/DELETE /api/rss_sources ----------
 
+/** RSS 源类型:season=季绑定(Mikan 订阅) | aggregate=聚合源(一个 feed 混多部番) */
+export type RssSourceKind = 'season' | 'aggregate'
+
 /** RSS 源行(= 后端 RssSourceOut):独立 token 不回显,只回 has_token;URL 内嵌 token 按明文 URL 展示 */
 export interface RssSourceDto {
   id: number
   url: string
   has_token: boolean
-  /** 外键指向 season.id,非空 */
-  season_id: number
+  /** 外键指向 season.id;聚合源(kind=aggregate)不绑季 → null */
+  season_id: number | null
   enabled: boolean
   last_polled_at: string | null
+  kind: RssSourceKind
+  /** 聚合源级全局规则(分号分隔关键词;季绑定源为 null) */
+  include_keywords: string | null
+  exclude_keywords: string | null
 }
 
-/** POST /api/rss_sources 请求体(= 后端 RssSourceCreateIn):season_id 必填 */
+/** POST /api/rss_sources 请求体(= 后端 RssSourceCreateIn):season 源必填 season_id,aggregate 忽略 */
 export interface RssSourceCreateBody {
   url: string
-  season_id: number
+  kind?: RssSourceKind
+  season_id?: number
   token?: string
   enabled?: boolean
+  include_keywords?: string
+  exclude_keywords?: string
 }
 
-/** PATCH /api/rss_sources/{id} 请求体(= 后端 RssSourceUpdateIn):url/token/enabled 局部更新 */
+/** PATCH /api/rss_sources/{id} 请求体(= 后端 RssSourceUpdateIn):url/token/enabled/规则局部更新 */
 export interface RssSourceUpdateBody {
   url?: string
   /** 显式传 null = 清除 token */
   token?: string | null
   enabled?: boolean
+  /** 显式传 null = 清除规则 */
+  include_keywords?: string | null
+  exclude_keywords?: string | null
 }
 
 // ---------- Settings:GET/PUT /api/settings + notify-test / qbit-test ----------
@@ -490,6 +503,9 @@ export interface SettingsDto {
   upgrade_skip_size_gb: number
   mismatch_backfill_budget: number
   naming_title_language: string
+  naming_movie_dir: boolean
+  naming_specials_s00: boolean
+  naming_year_suffix: boolean
   rss_fetch_timeout_s: number
   rss_fetch_retries: number
   // --- 识别(requires_restart 档:LLM 连接类) ---
@@ -569,6 +585,9 @@ export interface SettingsUpdateBody {
   upgrade_skip_size_gb?: number
   mismatch_backfill_budget?: number
   naming_title_language?: string
+  naming_movie_dir?: boolean
+  naming_specials_s00?: boolean
+  naming_year_suffix?: boolean
   rss_fetch_timeout_s?: number
   rss_fetch_retries?: number
   /** 并发写冲突基线:携带 GET 时的 updated_at;与服务端当前值不一致后端回 409 detail=settings_changed */
@@ -616,7 +635,8 @@ export interface QbitTestOut {
  */
 export interface RssPollResult {
   source_id: number
-  season_id: number
+  /** 聚合源(kind=aggregate)不绑季 → null */
+  season_id: number | null
   /** 未到计划轮询时间被跳过(非错误) */
   skipped_not_due: boolean
   /** 源拉取失败原因(网络/超时等;轮询本身仍返回 200) */
@@ -625,6 +645,8 @@ export interface RssPollResult {
   seen: number
   rejected: number
   backlog: number
+  /** 聚合源专用:解析成功但不命中任何活跃订阅的条目数(不进待确认) */
+  ignored: number
   /** 拾取并推送下载器的新条目数 */
   picked: number
   gaps: string[]
@@ -797,6 +819,25 @@ export interface MikanGroupsDto {
   matched_title: string
   bangumi_id: number
   groups: MikanGroupOptionDto[]
+}
+
+// ---------- 初始设置向导(GET /api/setup/status 等) ----------
+
+export interface SetupStatusDto {
+  needed: boolean
+  has_subscription: boolean
+  downloader_configured: boolean
+  downloader_reachable: boolean | null
+  qb_save_path: string | null
+  paths_aligned: boolean | null
+}
+
+export interface CheckUpdateDto {
+  current: string
+  latest: string | null
+  has_update: boolean
+  changelog_url: string | null
+  error: string | null
 }
 
 // ---------- 通用 RSS 匹配预览(POST /api/pipeline/rss-preview) ----------

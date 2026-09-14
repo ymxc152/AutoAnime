@@ -22,6 +22,7 @@ import {
 } from './data'
 import type {
   AuditDto,
+  CheckUpdateDto,
   ConfirmNameOut,
   EpisodeReparseOut,
   Metrics,
@@ -41,6 +42,7 @@ import type {
   SubscriptionDto,
   RssPreviewBody,
   SubscriptionUpdateBody,
+  SetupStatusDto,
 } from '../api/types'
 
 function clone<T>(value: T): T {
@@ -377,6 +379,9 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
             season_id: sub.seasons[0]!.season_id,
             enabled: true,
             last_polled_at: null,
+            kind: 'season',
+            include_keywords: null,
+            exclude_keywords: null,
           })
         }
         return delayed(clone(sub))
@@ -407,19 +412,23 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
             throw new ApiError(422, 'url must be a non-empty string')
           })
         }
-        // 对齐后端 RssSourceCreateIn:season_id 必填(外键)
-        if (body.season_id === undefined) {
+        const kind = body.kind ?? 'season'
+        // 对齐后端 RssSourceCreateIn:season 源必填 season_id(外键);aggregate 不绑季
+        if (kind === 'season' && body.season_id === undefined) {
           return delayVoid().then(() => {
-            throw new ApiError(422, 'season_id is required')
+            throw new ApiError(422, 'season_id is required for season sources')
           })
         }
         const source: RssSourceDto = {
           id: state.nextId++,
           url: body.url,
           has_token: Boolean(body.token),
-          season_id: body.season_id,
+          season_id: kind === 'aggregate' ? null : body.season_id ?? null,
           enabled: body.enabled ?? true,
           last_polled_at: null,
+          kind,
+          include_keywords: body.include_keywords ?? null,
+          exclude_keywords: body.exclude_keywords ?? null,
         }
         state.rssSources.unshift(source)
         return delayed(clone(source))
@@ -434,6 +443,8 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         if (body.enabled !== undefined) source.enabled = body.enabled
         if (body.url !== undefined) source.url = body.url
         if (body.token !== undefined) source.has_token = body.token !== null
+        if (body.include_keywords !== undefined) source.include_keywords = body.include_keywords
+        if (body.exclude_keywords !== undefined) source.exclude_keywords = body.exclude_keywords
         return delayed(clone(source))
       },
       remove: (id) => {
@@ -463,6 +474,7 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
           seen: 3,
           rejected: 8,
           backlog: 1,
+          ignored: 0,
           picked: 2,
           gaps: [],
           reconciled: 0,
@@ -729,6 +741,29 @@ export function createMockApi(): (typeof RealEndpoints)['endpoints'] {
         return delayed({ results })
       },
       qbitTest: () => delayed({ ok: true, version: 'v2.0.9', save_path: 'C:/downloads', error: null }),
+    },
+
+    // ---- 首次运行设置向导 stub(status/complete/checkUpdate;静态形状对齐后端 DTO) ----
+    // status 固定 needed:false —— mock fixtures 自带订阅数据,向导不拦截演示动线
+    setup: {
+      status: () =>
+        delayed({
+          needed: false,
+          has_subscription: true,
+          downloader_configured: true,
+          downloader_reachable: true,
+          qb_save_path: 'C:/downloads',
+          paths_aligned: true,
+        } satisfies SetupStatusDto),
+      complete: () => delayed({ ok: true }),
+      checkUpdate: () =>
+        delayed({
+          current: '2.0.0.dev0',
+          latest: null,
+          has_update: false,
+          changelog_url: null,
+          error: null,
+        } satisfies CheckUpdateDto),
     },
   }
 }

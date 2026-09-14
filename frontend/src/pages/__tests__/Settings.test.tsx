@@ -316,6 +316,33 @@ describe('SettingsPage', () => {
     updateSpy.mockRestore()
   })
 
+  it('媒体库命名三开关(批次一):切换→dirty→payload 带字段,示例预览随开关拼装', async () => {
+    const user = userEvent.setup()
+    const updateSpy = vi.spyOn(api.settings, 'update')
+    renderPage(<SettingsPage />)
+    await gotoTab(user, '洗版')
+    // 媒体库命名 Card:基线 movie_dir=false / specials_s00=true / year=false
+    // → 示例预览只拼 Season 00 一路
+    const example = await screen.findByTestId('naming-example')
+    expect(example).toHaveTextContent('标题/Season 00/标题 - S00E01.mkv')
+    expect(example).not.toHaveTextContent('Movies/')
+    // 开关切换 → 洗版 dirty 圆点 + 示例拼入 Movies 路
+    await user.click(screen.getByRole('switch', { name: '剧场版单独目录' }))
+    expect(example).toHaveTextContent('Movies/魔法使之夜 (2026)/魔法使之夜.mkv')
+    expect(screen.getByLabelText('洗版有未保存更改')).toBeInTheDocument()
+    await user.click(screen.getByRole('switch', { name: '标题目录带年份' }))
+    // 保存 → payload 携带被改的两个开关;未动的 specials_s00 不进 body
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() =>
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ naming_movie_dir: true, naming_year_suffix: true }),
+      ),
+    )
+    const payload = updateSpy.mock.calls[0]![0] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('naming_specials_s00')
+    updateSpy.mockRestore()
+  })
+
   it('qbit-test:行内状态展示成功(含版本)/失败原因,按钮保持 Button 形态且不产生 dirty', async () => {
     const user = userEvent.setup()
     renderPage(<SettingsPage />)

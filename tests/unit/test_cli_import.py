@@ -19,8 +19,9 @@ import pytest
 
 from autoanime.cli import _handle_import_outcome, main
 from autoanime.config import Settings
-from autoanime.core.enums import Confidence, Segment
+from autoanime.core.enums import Confidence, MediaType, Segment
 from autoanime.core.interfaces import ParseResult
+from autoanime.core.models import Series
 from autoanime.memory.governance import MemoryGovernance
 from autoanime.memory.store import SqliteStorage
 from autoanime.pipeline.orchestrator import ROUTE_ARCHIVE, RouteOutcome
@@ -303,6 +304,92 @@ def test_dry_run_pending_item_writes_no_row(tmp_path: Path) -> None:
     assert item["reason"] == "l3:low"
     assert "pending_id" not in item
     assert total == 0
+
+
+# --------------------------------------- 归档命名统一（批次一遗留修复）
+
+
+def test_outcome_with_subscription_follows_subscription_title(tmp_path: Path) -> None:
+    """命中订阅（series 上下文）：目录名/库条目都跟随订阅命名标题。
+
+    L1 解析名 "Chainsmoker Cat"（= 订阅 romaji 名），订阅主标题
+    「尼古喵喵」——修复前归档到 Chainsmoker Cat/ 与 RSS 路径裂两目录；
+    修复后按 naming_title_language（title_cn）回退链落 尼古喵喵/。
+    """
+
+    async def scenario() -> dict[str, object]:
+        storage = _db(tmp_path)
+        await storage.create_all()
+        try:
+            src = tmp_path / "dl"
+            src.mkdir()
+            file = src / "Chainsmoker.Cat.S01E01.1080p.WEBRip.x264.mkv"
+            file.write_bytes(b"x")
+            series = Series(
+                title_cn="尼古喵喵",
+                title_romaji="Chainsmoker Cat",
+                media_type=MediaType.TV,
+                status="active",
+            )
+            result = ParseResult(
+                title="Chainsmoker Cat", season=1, episode=1, segment=Segment.EPISODE,
+                fansub=None, level=Confidence.HIGH, confidence=1.0,
+            )
+            return await _handle_import_outcome(
+                file, RouteOutcome(result, ROUTE_ARCHIVE),
+                settings=Settings(library_path=tmp_path / "library"),
+                store=LoopStore(storage), governance=MemoryGovernance(storage),
+                dry_run=False, series=series,
+            )
+        finally:
+            await storage.close()
+
+    item = asyncio.run(scenario())
+    assert item["action"] == "archive"
+    dst = Path(str(item["dst"]))
+    assert dst.parent.name == "Season 01"
+    assert dst.parent.parent.name == "尼古喵喵"
+    assert dst.name == "尼古喵喵 - S01E01.1080p.mkv"
+
+
+def test_outcome_subscription_title_language_fallback(tmp_path: Path) -> None:
+    """命名标题回退链：naming_title_language 槽缺失时按链兜底（jp→romaji→cn）。"""
+
+    async def scenario() -> tuple[str, list[str]]:
+        storage = _db(tmp_path)
+        await storage.create_all()
+        try:
+            src = tmp_path / "dl"
+            src.mkdir()
+            file = src / "Chainsmoker.Cat.S01E01.1080p.WEBRip.x264.mkv"
+            file.write_bytes(b"x")
+            series = Series(
+                title_cn="尼古喵喵",
+                title_romaji="Chainsmoker Cat",
+                media_type=MediaType.TV,
+                status="active",
+            )
+            result = ParseResult(
+                title="Chainsmoker Cat", season=1, episode=1, segment=Segment.EPISODE,
+                fansub=None, level=Confidence.HIGH, confidence=1.0,
+            )
+            settings = Settings(library_path=tmp_path / "library")
+            settings.naming_title_language = "title_jp"  # jp 缺 → 回退 romaji
+            item = await _handle_import_outcome(
+                file, RouteOutcome(result, ROUTE_ARCHIVE),
+                settings=settings,
+                store=LoopStore(storage), governance=MemoryGovernance(storage),
+                dry_run=False, series=series,
+            )
+            rows = await LoopStore(storage).list_series()
+            return str(item["dst"]), [r.title_cn for r in rows]
+        finally:
+            await storage.close()
+
+    dst, series_titles = asyncio.run(scenario())
+    assert Path(dst).parent.parent.name == "Chainsmoker Cat"
+    # 库条目按订阅标题槽聚合（不按解析名建新行）
+    assert series_titles == ["尼古喵喵"]
 
 
 # ------------------------------------------------- 单元：重跑幂等（R2 验收）

@@ -45,7 +45,7 @@ from autoanime.organize.expected import (
     decide_mismatch,
     title_matches,
 )
-from autoanime.organize.naming import VIDEO_SUFFIXES, NamingInput, relative_path
+from autoanime.organize.naming import VIDEO_SUFFIXES, NamingInput, build_library_dst
 from autoanime.organize.upgrade import decide_upgrade, score_from_title
 from autoanime.pipeline.orchestrator import RouteOutcome
 from autoanime.scheduler.store import LoopStore, TransitionError
@@ -365,23 +365,13 @@ class ArchiveService:
         result: ParseResult | None,
         report: ArchiveReport,
     ) -> None:
-        naming = NamingInput(
-            title_cn=series.title_cn,
-            title_romaji=series.title_romaji,
-            title_jp=series.title_jp,
-            season_number=season.number,
-            episode_number=episode.number,
-            media_type=series.media_type.value if hasattr(series.media_type, "value") else str(series.media_type),
-            release_title=video.name,
-        )
-        rel = relative_path(naming, language=self._settings.naming_title_language)
-        dst_dir = Path(self._settings.library_path) / rel.parent
+        dst = self._archive_dst(series=series, season=season, episode=episode, video=video)
         plan = await asyncio.to_thread(
             mover.plan_transfer,
             video,
             library_root=Path(self._settings.library_path),
-            dst_dir=dst_dir,
-            dst_name=rel.name,
+            dst_dir=dst.parent,
+            dst_name=dst.name,
             siblings=self._siblings(video),
             copy_policy=self._copy_policy(),
             skip_over_bytes=int(self._settings.upgrade_skip_size_gb * 1024**3),
@@ -453,23 +443,13 @@ class ArchiveService:
                 reason=f"upgrade recheck: {decision.reason}",
             )
             return
-        naming = NamingInput(
-            title_cn=series.title_cn,
-            title_romaji=series.title_romaji,
-            title_jp=series.title_jp,
-            season_number=season.number,
-            episode_number=episode.number,
-            media_type=series.media_type.value if hasattr(series.media_type, "value") else str(series.media_type),
-            release_title=video.name,
-        )
-        rel = relative_path(naming, language=self._settings.naming_title_language)
-        dst_dir = Path(self._settings.library_path) / rel.parent
+        dst = self._archive_dst(series=series, season=season, episode=episode, video=video)
         plan = await asyncio.to_thread(
             mover.plan_transfer,
             video,
             library_root=Path(self._settings.library_path),
-            dst_dir=dst_dir,
-            dst_name=rel.name,
+            dst_dir=dst.parent,
+            dst_name=dst.name,
             siblings=self._siblings(video),
             copy_policy=self._copy_policy(),
             skip_over_bytes=int(self._settings.upgrade_skip_size_gb * 1024**3),
@@ -481,7 +461,7 @@ class ArchiveService:
             return
         old_path = Path(episode.file_path) if episode.file_path else None
         executed = await asyncio.to_thread(
-            mover.replace_archive_file, old_path or Path(rel.name), plan,
+            mover.replace_archive_file, old_path or Path(dst.name), plan,
         )
         if executed.error is not None or not executed.dst_paths:
             # 失败回滚：旧文件保留（mover 已清理新文件），release 记 rejected
@@ -674,6 +654,46 @@ class ArchiveService:
         return False
 
     # ------------------------------------------------------------ helpers
+
+    def _archive_dst(
+        self,
+        *,
+        series: Series,
+        season: Season,
+        episode: Episode,
+        video: Path,
+    ) -> Path:
+        """归档目标位（批次一收敛：唯一经 build_library_dst 计算）。
+
+        标题按 ``naming_title_language`` 从订阅记录回退（与 RSS/库外扫描
+        路径同一命名标题，同番不再裂目录）；v1 无系列级年份数据，
+        year 恒传 None（按集补 air_date 年会把同番裂成带/不带年份两个目录）。
+        """
+        media_type = (
+            series.media_type.value
+            if hasattr(series.media_type, "value")
+            else str(series.media_type)
+        )
+        naming = NamingInput(
+            title_cn=series.title_cn,
+            title_romaji=series.title_romaji,
+            title_jp=series.title_jp,
+            season_number=season.number,
+            episode_number=episode.number,
+            media_type=media_type,
+            release_title=video.name,
+        )
+        return build_library_dst(
+            self._settings,
+            title=naming.display_title(self._settings.naming_title_language),
+            year=None,
+            segment=media_type,
+            season=season.number,
+            episode=episode.number,
+            fansub=series.fansub_pref,
+            extension=".mkv",
+            release_title=video.name,
+        )
 
     @staticmethod
     def _covers_expected(result: ParseResult | None, expected: ExpectedContext) -> bool:
