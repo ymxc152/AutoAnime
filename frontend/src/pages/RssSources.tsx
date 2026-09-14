@@ -198,6 +198,120 @@ function AddSourceDialog({
   )
 }
 
+/**
+ * 添加聚合源弹窗(批次三):一个 feed 混多部番的通用源,不绑季;
+ * 轮询时对全部活跃订阅逐条对齐,命中才进下载链路。
+ * URL/令牌 + 全局 include/exclude 关键词规则(先于 series 级规则)。
+ */
+function AddAggregateDialog({
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onDone: () => void
+}) {
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [includeKeywords, setIncludeKeywords] = useState('')
+  const [excludeKeywords, setExcludeKeywords] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (): Promise<void> => {
+    if (url.trim() === '') {
+      setError(strings.rssSources.urlRequired)
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await api.rssSources.create({
+        url: url.trim(),
+        kind: 'aggregate',
+        token: token === '' ? undefined : token,
+        include_keywords: includeKeywords.trim() === '' ? undefined : includeKeywords.trim(),
+        exclude_keywords: excludeKeywords.trim() === '' ? undefined : excludeKeywords.trim(),
+      })
+      setUrl('')
+      setToken('')
+      setIncludeKeywords('')
+      setExcludeKeywords('')
+      onDone()
+      onOpenChange(false)
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : strings.common.actionFailed)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="inline-flex items-center gap-1.5">
+            <Rss aria-hidden className="h-3.5 w-3.5 text-ink-muted" />
+            {strings.rssSources.aggregateTitle}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-ink-secondary">{strings.rssSources.aggregateHint}</p>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submit()
+          }}
+        >
+          <Field label={strings.rssSources.url} error={error} htmlFor="rss-agg-url">
+            <Input
+              id="rss-agg-url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              invalid={error !== null}
+              className="data-text"
+            />
+          </Field>
+          <Field label={strings.rssSources.token} description={strings.rssSources.tokenHint} htmlFor="rss-agg-token">
+            <Input
+              id="rss-agg-token"
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </Field>
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-medium text-ink">{strings.rssSources.globalRules}</p>
+            <p className="text-xs text-ink-secondary">{strings.rssSources.keywordsHint}</p>
+          </div>
+          <Field label={strings.rssSources.includeKeywords} htmlFor="rss-agg-include">
+            <Input
+              id="rss-agg-include"
+              value={includeKeywords}
+              onChange={(e) => setIncludeKeywords(e.target.value)}
+              className="data-text"
+            />
+          </Field>
+          <Field label={strings.rssSources.excludeKeywords} htmlFor="rss-agg-exclude">
+            <Input
+              id="rss-agg-exclude"
+              value={excludeKeywords}
+              onChange={(e) => setExcludeKeywords(e.target.value)}
+              className="data-text"
+            />
+          </Field>
+          <div>
+            <Button type="submit" variant="primary" loading={submitting}>
+              {strings.rssSources.addSubmit}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function EditSourceDrawer({
   source,
   onDone,
@@ -323,6 +437,8 @@ export function RssSourcesPage() {
   const [editingSource, setEditingSource] = useState<RssSourceDto | null>(null)
   // 12-IA 弹窗化:添加源弹窗开关
   const [adding, setAdding] = useState(false)
+  // 批次三:添加聚合源弹窗开关(一个 feed 混多部番,不绑季)
+  const [addingAggregate, setAddingAggregate] = useState(false)
   // 启停/移除失败不再静默(A2):复用页面级 role="alert" 错误条
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -426,12 +542,33 @@ export function RssSourcesPage() {
     {
       key: 'season',
       header: strings.rssSources.season,
-      // 能解析到订阅季则显示番名+季号;解析不到的旧数据回显原 season id
+      // 批次三:类型徽标(season=季绑定 / aggregate=聚合);聚合源不绑季,
+      // 副行展示全局规则摘要(悬停看全量);解析不到的旧数据回显原 season id
       render: (row) => {
+        if (row.kind === 'aggregate') {
+          const rules = [row.include_keywords, row.exclude_keywords]
+            .filter((rule): rule is string => Boolean(rule && rule.trim() !== ''))
+            .join(' / ')
+          return (
+            <span className="flex flex-col items-start gap-1">
+              <Badge tone="info" mark>
+                {strings.rssSources.aggregateBadge}
+              </Badge>
+              {rules !== '' && (
+                <span className="data-text max-w-48 truncate text-xs text-ink-muted" title={rules}>
+                  {rules}
+                </span>
+              )}
+            </span>
+          )
+        }
         const match = seasonOptions.find((option) => option.id === row.season_id)
         return (
-          <span className="data-text text-sm text-ink">
-            {match !== undefined ? match.label : row.season_id}
+          <span className="flex items-center gap-1.5">
+            <Badge tone="neutral">{strings.rssSources.seasonBadge}</Badge>
+            <span className="data-text text-sm text-ink">
+              {match !== undefined ? match.label : row.season_id}
+            </span>
           </span>
         )
       },
@@ -509,14 +646,21 @@ export function RssSourcesPage() {
 
   return (
     <>
-      {/* 12-IA 弹窗化:标题行右侧「添加源」主按钮(原常驻表单卡移入 Dialog) */}
+      {/* 12-IA 弹窗化:标题行右侧「添加源」主按钮(原常驻表单卡移入 Dialog);
+          批次三:追加「添加聚合源」次按钮(不绑季的通用源) */}
       <PageTitle
         title={strings.rssSources.title}
         actions={
-          <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
-            <Rss aria-hidden className="h-3.5 w-3.5" />
-            {strings.common.add}
-          </Button>
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setAddingAggregate(true)}>
+              <Rss aria-hidden className="h-3.5 w-3.5" />
+              {strings.rssSources.addAggregate}
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+              <Rss aria-hidden className="h-3.5 w-3.5" />
+              {strings.common.add}
+            </Button>
+          </>
         }
       />
 
@@ -569,6 +713,14 @@ export function RssSourcesPage() {
         onOpenChange={setAdding}
         onDone={reload}
         seasonOptions={seasonOptions}
+      />
+
+      {/* 批次三:添加聚合源弹窗;key 随开关重挂载 → 重开不留旧输入/旧报错 */}
+      <AddAggregateDialog
+        key={addingAggregate ? 'agg-open' : 'agg-closed'}
+        open={addingAggregate}
+        onOpenChange={setAddingAggregate}
+        onDone={reload}
       />
 
       {editingSource !== null && (

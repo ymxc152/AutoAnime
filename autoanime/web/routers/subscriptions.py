@@ -3,10 +3,15 @@
 v1 边界：调度状态（schedule_state/AIRING 降频）随 E4 落地；订阅的持久
 载体在 v1 即 series 行（status=active）+ 预生成的季/集行，本端点只做
 CRUD 与预生成集表，不做调度。
+
+P0-B 别名富化：创建时带 ``bangumi_id`` 则拉一次 Bangumi subject 别名
+（infobox「别名」）写入 ``title_aliases``（source=bangumi），供 RSS 对齐
+的 expected_titles 跨语言命中。失败只 warn 不阻塞订阅创建。
 """
 
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -14,7 +19,16 @@ from fastapi import APIRouter, HTTPException
 from autoanime.core.enums import EpisodeState, MediaType
 from autoanime.core.events import EventCategory
 from autoanime.core.models import Episode, Season, Series
-from autoanime.web.deps import ApiStoreDep, BusDep, GovernanceDep, PaginationDep
+from autoanime.memory.alias import AliasService
+from autoanime.memory.store import SqliteStorage
+from autoanime.web.deps import (
+    ApiStoreDep,
+    BangumiCalendarDep,
+    BusDep,
+    GovernanceDep,
+    PaginationDep,
+    StorageDep,
+)
 from autoanime.web.learning import publish
 from autoanime.web.queries import ApiStore
 from autoanime.web.schemas import (
@@ -23,6 +37,8 @@ from autoanime.web.schemas import (
     SubscriptionOut,
     SubscriptionUpdateIn,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -83,6 +99,57 @@ async def _get_subscription(store: ApiStore, series_id: int) -> SubscriptionOut:
     return items[0]
 
 
+async def _enrich_subject_aliases(
+    body: SubscriptionCreateIn,
+    *,
+    storage: SqliteStorage,
+    bangumi: object,
+    series_id: int,
+) -> None:
+    """订阅创建后拉一次 Bangumi subject 别名写入 title_aliases（best-effort）。
+
+    ``body.bangumi_id`` 非空时触发（P0-B 契约：bgm subject id）；别名拉取
+    或写库**任何失败都只 warn + 跳过**——别名富化是增益，绝不阻塞订阅
+    创建（bgm 被墙/超时是常态路径）。canonical 取订阅标题（bangumi 的
+    name_cn/name 通常即中文名）。
+    """
+    raw_id = (body.bangumi_id or "").strip()
+    if not raw_id:
+        return
+    try:
+        subject_id = int(raw_id)
+    except ValueError:
+        logger.warning(
+            "subscription %s: bangumi_id %r is not numeric; alias fetch skipped",
+            series_id, body.bangumi_id,
+        )
+        return
+    canonical = next(
+        (
+            title
+            for title in (body.title_cn, body.title_jp, body.title_romaji)
+            if title
+        ),
+        None,
+    )
+    if canonical is None:
+        return
+    fetch = getattr(bangumi, "fetch_subject_aliases", None)
+    if not callable(fetch):
+        return
+    try:
+        aliases = await fetch(subject_id)
+        if aliases:
+            await AliasService(storage).upsert_title_aliases(
+                canonical, aliases, source="bangumi"
+            )
+    except Exception as exc:  # noqa: BLE001 — 富化失败永不阻塞订阅
+        logger.warning(
+            "subscription %s: alias enrichment failed (%s); skipped",
+            series_id, type(exc).__name__,
+        )
+
+
 @router.get("", response_model=Page[SubscriptionOut])
 async def list_subscriptions(
     store: ApiStoreDep, pagination: PaginationDep
@@ -98,13 +165,17 @@ async def create_subscription(
     store: ApiStoreDep,
     governance: GovernanceDep,
     bus: BusDep,
+    storage: StorageDep,
+    bangumi: BangumiCalendarDep,
 ) -> SubscriptionOut:
     """新建订阅：Series + 当季 Season + 预生成 N 条 MISSING 集行（一个事务）。
 
     P0-B adopt：bangumi_id（精确）/ 标题 shape 命中已有 Series 时收编——
     置回 active、只补缺失集号 MISSING（import 归档的 ORGANIZED 行保留，
     消「先导入后订阅整季幻影 MISSING」）。rss_url 提供时同一事务挂
-    RssSource（token 只落库不回显，响应只给 rss_saved 布尔）。
+    RssSource（token 只落库不响应回显，响应只给 rss_saved 布尔）。
+    创建成功后按 bangumi_id 拉一次 subject 别名写入 title_aliases
+    （best-effort，失败不阻塞）。
     """
     season = Season(number=body.season_number)
     episodes = [
@@ -159,6 +230,10 @@ async def create_subscription(
     out = await _get_subscription(store, created.id)
     out.rss_saved = upserted.rss_saved
     out.adopted = upserted.adopted
+    # P0-B 别名富化：在订阅已确定创建之后 best-effort 执行（永不阻塞/回滚）。
+    await _enrich_subject_aliases(
+        body, storage=storage, bangumi=bangumi, series_id=created.id
+    )
     return out
 
 

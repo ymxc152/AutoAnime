@@ -220,13 +220,20 @@ class AuditLog(Base):
 
 
 class RssSource(Base):
-    """``rss_sources`` 表（审核 B3，E2 增量）：RSS 订阅源，挂 season。
+    """``rss_sources`` 表（审核 B3，E2 增量；批次三聚合源增量）。
 
     Mikan 订阅粒度是季度 subject，多季番剧 = 多条 RSS 源，故外键指向
     ``season.id`` 而非 series。``token`` 是 RSS 私有令牌（如 Mikan 的
     ``?token=``）：DB 侧仅存字符串（单用户本地库），API schema 层以
     ``SecretStr`` 承载且任何读取端点都不回显（只回 ``has_token``）。
     ``last_polled_at`` 由调度器（E4）写，本表建表即可用。
+
+    批次三（聚合 RSS）：
+    - ``kind``：``season``（季绑定源，现状语义）| ``aggregate``（聚合源，
+      一个 feed 混多部番，轮询时对全部活跃订阅逐个对齐）；
+    - ``season_id`` 放宽为可空（聚合源不绑季）；
+    - ``include_keywords``/``exclude_keywords``：聚合源级全局规则（分号
+      分隔关键词，语义同 series 级规则），命中在 series 级规则**之前**。
     """
 
     __tablename__ = "rss_sources"
@@ -235,9 +242,12 @@ class RssSource(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     url: Mapped[str] = mapped_column(String)
     token: Mapped[str | None] = mapped_column(String, nullable=True)
-    season_id: Mapped[int] = mapped_column(ForeignKey("season.id"), nullable=False)
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("season.id"), nullable=True)
     enabled: Mapped[bool] = mapped_column(default=True)
     last_polled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    kind: Mapped[str] = mapped_column(String, default="season")
+    include_keywords: Mapped[str | None] = mapped_column(String, nullable=True)
+    exclude_keywords: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class ParseEvents(Base):

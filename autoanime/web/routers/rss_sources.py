@@ -32,6 +32,9 @@ def _source_out(row: RssSource) -> RssSourceOut:
         season_id=row.season_id,
         enabled=row.enabled,
         last_polled_at=row.last_polled_at,
+        kind=row.kind if row.kind else "season",
+        include_keywords=row.include_keywords,
+        exclude_keywords=row.exclude_keywords,
     )
 
 
@@ -57,15 +60,25 @@ async def create_rss_source(
     governance: GovernanceDep,
     bus: BusDep,
 ) -> RssSourceOut:
-    if not await store.season_exists(body.season_id):
-        raise HTTPException(
-            status_code=404, detail=f"season {body.season_id} not found"
-        )
+    # 路由层校验（批次三）：season 源必填 season_id（外键存在性）；
+    # aggregate 源不绑季（schema 层已把 season_id 置空）。
+    if body.kind == "season":
+        if body.season_id is None:
+            raise HTTPException(
+                status_code=422, detail="season_id is required for season sources"
+            )
+        if not await store.season_exists(body.season_id):
+            raise HTTPException(
+                status_code=404, detail=f"season {body.season_id} not found"
+            )
     row = RssSource(
         url=body.url,
         token=body.token.get_secret_value() if body.token is not None else None,
         season_id=body.season_id,
         enabled=body.enabled,
+        kind=body.kind,
+        include_keywords=body.include_keywords,
+        exclude_keywords=body.exclude_keywords,
     )
     saved = await store.add_rss_source(row)
     audit = await governance.record_audit(
@@ -73,7 +86,11 @@ async def create_rss_source(
         entity="rss_sources",
         entity_id=saved.id,
         action="rss_source_created",
-        instruction={"season_id": saved.season_id, "enabled": saved.enabled},
+        instruction={
+            "season_id": saved.season_id,
+            "enabled": saved.enabled,
+            "kind": saved.kind,
+        },
     )
     await publish(
         bus,
@@ -105,6 +122,11 @@ async def update_rss_source(
         token_secret = supplied["token"]
         # 显式传 null = 清除 token；传值 = 更新。
         fields["token"] = None if token_secret is None else str(token_secret)
+    # 源级规则（批次三）：显式 null = 清除；kind 不支持修改（创建后只读）。
+    for rule_field in ("include_keywords", "exclude_keywords"):
+        if rule_field in supplied:
+            value = supplied[rule_field]
+            fields[rule_field] = None if value is None else str(value).strip() or None
     updated = await store.update_rss_source(source_id, fields)
     if updated is None:
         raise HTTPException(status_code=404, detail=f"rss source {source_id} not found")
@@ -201,6 +223,7 @@ async def poll_rss_source(
             "seen": outcome.seen,
             "rejected": outcome.rejected,
             "backlog": outcome.backlog,
+            "ignored": outcome.ignored,
             "picked": outcome.picked,
             "gaps": list(outcome.gaps),
             "reconciled": reconcile.reconciled,
@@ -225,6 +248,7 @@ async def poll_rss_source(
                 "seen": outcome.seen,
                 "rejected": outcome.rejected,
                 "backlog": outcome.backlog,
+                "ignored": outcome.ignored,
                 "picked": outcome.picked,
             },
         )

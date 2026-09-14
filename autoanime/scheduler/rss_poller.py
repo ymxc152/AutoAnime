@@ -50,19 +50,31 @@ from autoanime.scheduler.store import LoopStore, TransitionError
 
 logger = logging.getLogger(__name__)
 
+RSS_SOURCE_KIND_SEASON = "season"
+RSS_SOURCE_KIND_AGGREGATE = "aggregate"
+
+
+def source_kind(source: RssSource) -> str:
+    """源类型（纯函数）：kind 列为空/未知值按季绑定源处理（旧行兼容）。"""
+    kind = (getattr(source, "kind", None) or "").strip().lower()
+    return kind if kind == RSS_SOURCE_KIND_AGGREGATE else RSS_SOURCE_KIND_SEASON
+
 
 @dataclass
 class SourceOutcome:
     """单源处理小计（CLI rerun / 报表 / 通知共用；处理过程中累加）。"""
 
     source_id: int
-    season_id: int
+    # 聚合源（kind=aggregate）不绑季 → None（批次三）。
+    season_id: int | None
     skipped_not_due: bool = False
     fetch_error: str | None = None
     entries_total: int = 0
     seen: int = 0
     rejected: int = 0
     backlog: int = 0
+    # 聚合源专用：L1 解析成功但不命中任何活跃订阅的条目（不落库不进待确认）。
+    ignored: int = 0
     picked: int = 0
     gaps: tuple[int, ...] = ()
 
@@ -94,6 +106,16 @@ class _Candidate:
     score: float
 
 
+@dataclass(frozen=True)
+class _AggregateTarget:
+    """聚合源对齐目标：一个活跃订阅季（series × season + expected）。"""
+
+    season: Any
+    series: Any
+    episodes: list[Episode]
+    expected: ExpectedContext
+
+
 class RssPoller:
     """订阅轮询器：所有状态进库，进程内不持可变内存态。
 
@@ -117,6 +139,7 @@ class RssPoller:
         sleeper: Callable[[float], Awaitable[None]] | None = None,
         rng: random.Random | None = None,
         save_path: str | None = None,
+        alias_service: Any | None = None,
     ) -> None:
         self._store = store
         self._orchestrator = orchestrator
@@ -135,6 +158,10 @@ class RssPoller:
         self._rss_token = rss_token
         self._sleeper = sleeper if sleeper is not None else asyncio.sleep
         self._rng = rng or random.Random()
+        # 别名富化（P0-B）：AliasService 或鸭子类型兼容对象（提供
+        # alias_titles_for）。测试可注入 fake；未注入时从 store 底层
+        # storage 惰性解析（拿不到 = expected 不并别名，现状语义）。
+        self._alias_service = alias_service
 
     # ------------------------------------------------------------------ entry
 
@@ -151,6 +178,9 @@ class RssPoller:
         return RssPollReport(outcomes=tuple(outcomes), errors=tuple(errors))
 
     async def poll_source(self, source: RssSource, *, now: datetime) -> SourceOutcome:
+        # 批次三分流：聚合源（kind=aggregate）不绑季，走全订阅对齐链路。
+        if source_kind(source) == RSS_SOURCE_KIND_AGGREGATE:
+            return await self._poll_aggregate_source(source, now=now)
         binding = await self._store.season_series(source.season_id)
         if binding is None:
             return SourceOutcome(
@@ -188,6 +218,9 @@ class RssPoller:
             fansub_pref=series.fansub_pref,
             include_keywords=series.include_keywords,
             exclude_keywords=series.exclude_keywords,
+            extra_titles=await self._alias_titles(
+                (series.title_cn, series.title_jp, series.title_romaji)
+            ),
         )
         context = ParseContext(
             known_series=series.id,
@@ -224,6 +257,243 @@ class RssPoller:
                 {"season_id": season.id, "gap": list(gap.aired_missing)},
             )
         return outcome
+
+    # ------------------------------------------------------------- aggregate
+
+    async def _poll_aggregate_source(
+        self, source: RssSource, *, now: datetime
+    ) -> SourceOutcome:
+        """聚合源轮询（批次三）：一个 feed 混多部番 → 全订阅逐个对齐。
+
+        与季绑定源的分工：无 season 绑定（cadence 按季降频不适用，幂等由
+        episode 状态机 + torrent_hash 唯一约束兜底）。逐条目 L1 解析后对
+        全部活跃订阅（series × season 构造 expected，含别名）做
+        ``align_rss_entry``：命中 → 该 series/season 的既有候选链（源级
+        include/exclude 先于 series 级规则）；未命中 → ignored 计数（不落
+        库不进待确认）；源级规则拒绝 → rejected（不落库：无 season 绑定
+        载体，下轮 seen 前置检查靠 source_url 命中不了，重取种代价可接受）。
+        """
+        outcome = SourceOutcome(source_id=source.id, season_id=None)
+        try:
+            async with self._client_factory() as client:
+                page = await self._fetch_with_retry(client, source)
+                if page is None:
+                    outcome.fetch_error = "unreachable after retries"
+                    return outcome
+                outcome.entries_total = len(page.entries)
+                targets = await self._aggregate_targets()
+                await self._process_aggregate_entries(
+                    page, client=client, source=source, targets=targets,
+                    now=now, outcome=outcome,
+                )
+        finally:
+            await self._store.mark_polled(source.id, now)
+        if outcome.picked:
+            await self._publish(
+                EventCategory.DOWNLOAD,
+                "download.picked",
+                {"source_id": source.id, "picked": outcome.picked},
+            )
+        return outcome
+
+    async def _aggregate_targets(self) -> list[_AggregateTarget]:
+        """全部活跃订阅 → 对齐目标（series × season，含别名 expected）。"""
+        targets: list[_AggregateTarget] = []
+        for series in await self._store.list_series():
+            if (series.status or "active") != "active":
+                continue
+            base_titles = (series.title_cn, series.title_jp, series.title_romaji)
+            alias_titles = await self._alias_titles(base_titles)
+            for season in await self._store.seasons_for_series(series.id):
+                episodes = await self._store.episodes_for_season(season.id)
+                targets.append(
+                    _AggregateTarget(
+                        season=season,
+                        series=series,
+                        episodes=episodes,
+                        expected=ExpectedContext(
+                            series_id=series.id,
+                            season_number=season.number,
+                            episode_number=0,  # per-entry 覆盖
+                            title_cn=series.title_cn,
+                            title_jp=series.title_jp,
+                            title_romaji=series.title_romaji,
+                            fansub_pref=series.fansub_pref,
+                            include_keywords=series.include_keywords,
+                            exclude_keywords=series.exclude_keywords,
+                            extra_titles=alias_titles,
+                        ),
+                    )
+                )
+        return targets
+
+    async def _process_aggregate_entries(
+        self,
+        page: FeedPage,
+        *,
+        client: httpx.AsyncClient,
+        source: RssSource,
+        targets: list[_AggregateTarget],
+        now: datetime,
+        outcome: SourceOutcome,
+    ) -> None:
+        """聚合源逐条目：seen → 源级规则 → 全订阅对齐 → 择优提交。"""
+        candidates: dict[int, dict[int, list[_Candidate]]] = {}  # season_id → ep → []
+        rejects: list[tuple[RssEntry, str, bytes, int | None]] = []  # + season_id
+        batch_hashes: set[str] = set()
+        for entry in page.entries:
+            verdict = await self._handle_aggregate_entry(
+                entry,
+                client=client,
+                source=source,
+                targets=targets,
+                candidates=candidates,
+                rejects=rejects,
+                batch_hashes=batch_hashes,
+            )
+            if verdict == "seen":
+                outcome.seen += 1
+            elif verdict == "rejected":
+                outcome.rejected += 1
+            elif verdict == "backlog":
+                outcome.backlog += 1
+            elif verdict == "ignored":
+                outcome.ignored += 1
+        for entry, reason, data, season_id in rejects:
+            await self._record_reject(entry, reason, data, source, season_id=season_id)
+        for season_id, per_season in candidates.items():
+            target = next((t for t in targets if t.season.id == season_id), None)
+            if target is None:
+                continue
+            outcome.picked += await self._resolve_candidates(
+                per_season,
+                target.episodes,
+                source,
+                now,
+                season_id=season_id,
+            )
+
+    async def _handle_aggregate_entry(
+        self,
+        entry: RssEntry,
+        *,
+        client: httpx.AsyncClient,
+        source: RssSource,
+        targets: list[_AggregateTarget],
+        candidates: dict[int, dict[int, list[_Candidate]]],
+        rejects: list[tuple[RssEntry, str, bytes, int | None]],
+        batch_hashes: set[str],
+    ) -> str:
+        """聚合源单条目：seen / rejected / backlog / ignored / candidate。"""
+        if (
+            await self._store.find_release_by_source_url(entry.guid) is not None
+            or await self._store.find_release_by_source_url(entry.torrent_url) is not None
+        ):
+            return "seen"
+        # 源级全局规则先于一切对齐（聚合源级 include 白名单/exclude 黑名单）。
+        source_rule_reason = rule_reject_reason(
+            entry.title,
+            include_keywords=source.include_keywords,
+            exclude_keywords=source.exclude_keywords,
+        )
+        if source_rule_reason is not None:
+            # 未取种即拒绝：无 infohash/无 season 载体 → 只计数不落库。
+            rejects.append((entry, f"source_rule: {source_rule_reason}", b"", None))
+            return "rejected"
+        try:
+            data = await fetch_torrent(client, entry.torrent_url)
+            infohash = torrent_info_hash(data)
+        except Exception as exc:  # noqa: BLE001 — 取种/解析失败按 backlog 重试
+            logger.info("torrent fetch failed for %s: %s", entry.guid, type(exc).__name__)
+            return "backlog"
+        if infohash in batch_hashes or await self._store.find_release_by_hash(infohash) is not None:
+            return "seen"
+        batch_hashes.add(infohash)
+
+        parse = await self._parse(entry.title, ParseContext())
+        if parse is None:
+            return "backlog"  # FlexGet backlog 语义：记忆飞轮学习后可能解析得出
+        # 全部活跃订阅逐个对齐；首个人次命中即收口（确定性）。标题解析出
+        # 季号时优先尝试同季目标（同番多季 feed 混排时防误挂前季）。
+        ordered = targets
+        if parse.season is not None:
+            ordered = [
+                *(t for t in targets if t.season.number == parse.season),
+                *(t for t in targets if t.season.number != parse.season),
+            ]
+        for target in ordered:
+            alignment = align_rss_entry(
+                parse,
+                expected_titles=target.expected.titles(),
+                season_number=target.expected.season_number,
+            )
+            if alignment.verdict == "conflict":
+                continue
+            if alignment.verdict == "unparsed":
+                return "backlog"
+            if parse.segment.value != "episode" or alignment.parsed_episode is None:
+                # SEASON_PACK/MOVIE/无集数：与季绑定源同口径确定性拒绝。
+                rejects.append(
+                    (entry, f"segment_not_supported: {parse.segment.value}", data, target.season.id)
+                )
+                return "rejected"
+            # series 级规则叠加在源级之后（与选番抽屉「匹配预览」同一套）。
+            rule_reason = rule_reject_reason(
+                entry.title,
+                include_keywords=target.expected.include_keywords,
+                exclude_keywords=target.expected.exclude_keywords,
+            )
+            if rule_reason is not None:
+                rejects.append((entry, rule_reason, data, target.season.id))
+                return "rejected"
+            candidates.setdefault(target.season.id, {}).setdefault(
+                alignment.parsed_episode, []
+            ).append(
+                _Candidate(
+                    entry=entry,
+                    infohash=infohash,
+                    data=data,
+                    parse=parse,
+                    score=score_from_title(
+                        entry.title,
+                        fansub=parse.fansub,
+                        fansub_pref=target.expected.fansub_pref,
+                        seeders=None,  # RSS 不带做种数：0 分参与不剔除（D15）
+                    ),
+                )
+            )
+            return "candidate"
+        # 解析成功但不属于任何活跃订阅：ignored（不落库、不进待确认）。
+        return "ignored"
+
+    # ------------------------------------------------------------------ alias
+
+    async def _alias_titles(self, titles: tuple[str | None, ...]) -> tuple[str, ...]:
+        """订阅三标题之外的别名（title_aliases 查回）；失败/缺席返回空。
+
+        别名富化是增益：服务缺席（fake store/未注入且底层 storage 不可达）
+        或查询异常一律静默回空，绝不影响轮询主流程。
+        """
+        service = self._alias_service
+        if service is None:
+            storage = getattr(self._store, "_storage", None)
+            if storage is None:
+                return ()
+            try:
+                from autoanime.memory.alias import AliasService
+
+                service = AliasService(storage)
+                self._alias_service = service
+            except Exception:  # noqa: BLE001 — 富化永不致命
+                return ()
+        lookup = getattr(service, "alias_titles_for", None)
+        if not callable(lookup):
+            return ()
+        try:
+            return await lookup(titles)
+        except Exception:  # noqa: BLE001 — 富化永不致命
+            logger.warning("alias titles lookup failed; expected without aliases")
+            return ()
 
     # ------------------------------------------------------------------ fetch
 
@@ -287,7 +557,9 @@ class RssPoller:
                 outcome.backlog += 1
         for entry, reason, data in rejects:
             await self._record_reject(entry, reason, data, source)
-        outcome.picked = await self._resolve_candidates(candidates, episodes, source, now)
+        outcome.picked = await self._resolve_candidates(
+            candidates, episodes, source, now, season_id=source.season_id
+        )
 
     async def _handle_entry(
         self,
@@ -377,18 +649,27 @@ class RssPoller:
         episodes: list[Episode],
         source: RssSource,
         now: datetime,
+        *,
+        season_id: int | None = None,
     ) -> int:
-        """同集候选择优 + 分状态决策 + 提交网关（幂等收口在 store）。"""
+        """同集候选择优 + 分状态决策 + 提交网关（幂等收口在 store）。
+
+        ``season_id``：episode_not_in_season 拒绝记录的归属季（季绑定源 =
+        source.season_id；聚合源 = 命中目标的 season id）。
+        """
+        target_season_id = season_id if season_id is not None else source.season_id
         episode_by_number = {row.number: row for row in episodes}
         picked = 0
         for number, group in candidates.items():
             group.sort(key=lambda c: c.score, reverse=True)
             episode = episode_by_number.get(number)
             if episode is None:
+                if target_season_id is None:
+                    continue  # 聚合源未绑季且无 episode 载体 → 无处落库，跳过
                 for candidate in group:
                     await self._store.create_release(
                         ReleaseRecord(
-                            season_id=source.season_id,
+                            season_id=target_season_id,
                             torrent_hash=candidate.infohash,
                             fansub=candidate.parse.fansub,
                             size=candidate.entry.size,
@@ -445,14 +726,26 @@ class RssPoller:
         )
 
     async def _record_reject(
-        self, entry: RssEntry, reason: str, data: bytes, source: RssSource
+        self,
+        entry: RssEntry,
+        reason: str,
+        data: bytes,
+        source: RssSource,
+        *,
+        season_id: int | None = None,
     ) -> None:
+        """拒绝落库（聚合源：命中目标的 season id；源级规则拒绝不落库）。"""
+        target_season_id = season_id if season_id is not None else source.season_id
+        if target_season_id is None or not data:
+            # ck_release_record_target 要求 season/episode 二选一；聚合源
+            # 未绑定 season（或未取种的源级前置拒绝）没有落库载体 → 只计数。
+            return
         infohash = torrent_info_hash(data)  # reject 只在有 hash 时才走到这里
         if await self._store.find_release_by_hash(infohash) is not None:
             return
         await self._store.create_release(
             ReleaseRecord(
-                season_id=source.season_id,
+                season_id=target_season_id,
                 torrent_hash=infohash,
                 decision=Decision.REJECTED,
                 reason=reason,

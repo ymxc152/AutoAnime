@@ -22,6 +22,7 @@ function pollFixture(): RssPollResult {
     seen: 3,
     rejected: 8,
     backlog: 1,
+    ignored: 0,
     picked: 2,
     gaps: [],
     reconciled: 0,
@@ -40,7 +41,25 @@ describe('RssSourcesPage', () => {
     expect(
       await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***'),
     ).toBeInTheDocument()
-    expect(screen.getAllByRole('switch').length).toBe(3)
+    expect(screen.getAllByRole('switch').length).toBe(4)
+  })
+
+  it('批次三:类型徽标——聚合源显示「聚合」+ 全局规则摘要,季绑定源显示「季绑定」+ 番名季号', async () => {
+    renderPage(<RssSourcesPage />)
+    const aggRow = (await screen.findByTitle('https://api.m-team.cc/api/rss?token=***')).closest(
+      'tr',
+    ) as HTMLElement
+    expect(within(aggRow).getByText('聚合')).toBeInTheDocument()
+    // 全局规则摘要(悬停 title 有全量;单元格内截断展示)
+    expect(within(aggRow).getByText('1080p;WebRip / Cam;TS版')).toBeInTheDocument()
+    const seasonRow = (
+      await screen.findByTitle('https://mikanani.me/RSS/MyBangumi?token=***')
+    ).closest('tr') as HTMLElement
+    expect(within(seasonRow).getByText('季绑定')).toBeInTheDocument()
+    expect(within(seasonRow).getByText(/药屋少女的呢喃 · 第 2 季\(ID 2\)/)).toBeInTheDocument()
+    // 聚合源不显示季绑定徽标,反之亦然
+    expect(within(aggRow).queryByText('季绑定')).not.toBeInTheDocument()
+    expect(within(seasonRow).queryByText('聚合')).not.toBeInTheDocument()
   })
 
   it('12-C:URL 域名加粗、后缀路径弱化(host 定位修复后真正生效)', async () => {
@@ -67,9 +86,8 @@ describe('RssSourcesPage', () => {
   it('移除需二次确认', async () => {
     const user = userEvent.setup()
     renderPage(<RssSourcesPage />)
-    await screen.findByTitle('https://bangumi.moe/rss/moe/6556')
-    const removeButtons = screen.getAllByRole('button', { name: '移除' })
-    await user.click(removeButtons[removeButtons.length - 1]!)
+    const row = (await screen.findByTitle('https://bangumi.moe/rss/moe/6556')).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '移除' }))
     expect(await screen.findByRole('button', { name: '确认' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认' }))
     await waitFor(() =>
@@ -104,9 +122,8 @@ describe('RssSourcesPage', () => {
       .spyOn(api.rssSources, 'remove')
       .mockRejectedValueOnce(new ApiError(409, 'source in use'))
     renderPage(<RssSourcesPage />)
-    await screen.findByTitle('https://bangumi.moe/rss/moe/6556')
-    const removeButtons = screen.getAllByRole('button', { name: '移除' })
-    await user.click(removeButtons[removeButtons.length - 1]!)
+    const row = (await screen.findByTitle('https://bangumi.moe/rss/moe/6556')).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '移除' }))
     await user.click(await screen.findByRole('button', { name: '确认' }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('source in use')
@@ -202,6 +219,9 @@ describe('RssSourcesPage', () => {
       season_id: 999,
       enabled: true,
       last_polled_at: null,
+      kind: 'season',
+      include_keywords: null,
+      exclude_keywords: null,
     }
     const listSpy = vi
       .spyOn(api.rssSources, 'list')
@@ -327,5 +347,65 @@ describe('RssSourcesPage', () => {
     expect(successSpy).not.toHaveBeenCalled()
     warningSpy.mockRestore()
     successSpy.mockRestore()
+  })
+
+  // ---- 批次三:聚合源 ----
+
+  it('批次三:点「添加聚合源」打开弹窗(URL/令牌/全局规则字段齐全,无关联季下拉)', async () => {
+    const user = userEvent.setup()
+    renderPage(<RssSourcesPage />)
+    await screen.findByTitle('https://api.m-team.cc/api/rss?token=***')
+    await user.click(screen.getByRole('button', { name: '添加聚合源' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: '添加聚合源' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('地址')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('令牌(可选)')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('包含关键词')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('排除关键词')).toBeInTheDocument()
+    // 聚合源不绑季:没有「关联季」选择
+    expect(within(dialog).queryByLabelText('关联季')).not.toBeInTheDocument()
+  })
+
+  it('批次三:聚合源创建以 kind=aggregate 提交,含全局规则;成功后弹窗关闭且列表刷新', async () => {
+    const user = userEvent.setup()
+    const createSpy = vi.spyOn(api.rssSources, 'create')
+    renderPage(<RssSourcesPage />)
+    await screen.findByTitle('https://api.m-team.cc/api/rss?token=***')
+    await user.click(screen.getByRole('button', { name: '添加聚合源' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('地址'), 'https://example.com/agg/rss')
+    await user.type(within(dialog).getByLabelText('包含关键词'), '1080p')
+    await user.type(within(dialog).getByLabelText('排除关键词'), 'Cam')
+    await user.click(within(dialog).getByRole('button', { name: '添加' }))
+    await waitFor(() =>
+      expect(createSpy).toHaveBeenCalledWith({
+        url: 'https://example.com/agg/rss',
+        kind: 'aggregate',
+        token: undefined,
+        include_keywords: '1080p',
+        exclude_keywords: 'Cam',
+      }),
+    )
+    // mock handler 落库后列表刷新出现新行
+    expect(await screen.findByTitle('https://example.com/agg/rss')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    createSpy.mockRestore()
+  })
+
+  it('批次三:聚合源空地址提交显示校验错误(不调用 create)', async () => {
+    const user = userEvent.setup()
+    const createSpy = vi.spyOn(api.rssSources, 'create')
+    renderPage(<RssSourcesPage />)
+    await screen.findByTitle('https://api.m-team.cc/api/rss?token=***')
+    await user.click(screen.getByRole('button', { name: '添加聚合源' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '添加' }))
+    expect(
+      await within(dialog).findByText('请填写源地址', {
+        selector: 'p.text-sm.font-medium.text-danger',
+      }),
+    ).toBeInTheDocument()
+    expect(createSpy).not.toHaveBeenCalled()
+    createSpy.mockRestore()
   })
 })

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -50,6 +51,9 @@ NEGATIVE_TTL_S = 10 * 60.0
 
 SEASON_PAGE_LIMIT = 50
 """降级链第 2 档翻页每页条数（v0 search 的 limit）。"""
+
+SUBJECT_TTL_S = 24 * 3600.0
+"""subject 详情（别名提取用）缓存 TTL：infobox 别名近乎不变，缓存一天。"""
 
 MAX_SEASON_PAGES = 100
 """翻页上限（5000 条为界，防全库翻页拖死；超限返回已过滤的部分结果）。"""
@@ -217,6 +221,84 @@ def map_calendar_response(payload: object) -> tuple[BangumiItem, ...]:
     return tuple(items)
 
 
+# --- subject 别名提取（别名富化：跨语言标题命中 expected_titles） ----------
+
+#: str 形式的 infobox value 的分隔符（Bangumi 惯例：逗号/顿号/斜杠/分号混用）
+_ALIAS_SEPARATORS_RE = re.compile(r"[,，/、;；]")
+
+
+def extract_subject_aliases(payload: object) -> tuple[str, ...]:
+    """``GET /v0/subjects/{id}`` 响应 → 别名元组（纯函数，供测试）。
+
+    从 infobox 提取「别名」条的各值：``value`` 可能是 ``str``（逗号/顿号/
+    斜杠/分号分隔）、``list[str]`` 或 ``list[{v: str}]``。去重（casefold
+    归一比较、保留首个原样）、剔除与主名（``name``/``name_cn``）相同的
+    项。payload 不是 dict 或 infobox 缺失/无「别名」条 → 空元组（subject
+    本来就可能没填别名，不算失败）。
+    """
+    if not isinstance(payload, dict):
+        return ()
+    mains = {
+        str(payload.get(key) or "").strip().casefold()
+        for key in ("name", "name_cn")
+    }
+    mains.discard("")
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for entry in payload.get("infobox") or []:
+        if not isinstance(entry, dict) or entry.get("key") != "别名":
+            continue
+        value = entry.get("value")
+        raw_values: list[str] = []
+        if isinstance(value, str):
+            raw_values = [value]
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    raw_values.append(item)
+                elif isinstance(item, dict) and isinstance(item.get("v"), str):
+                    raw_values.append(item["v"])
+        for raw in raw_values:
+            for piece in _ALIAS_SEPARATORS_RE.split(raw):
+                alias = piece.strip()
+                if not alias:
+                    continue
+                folded = alias.casefold()
+                if folded in seen or folded in mains:
+                    continue
+                seen.add(folded)
+                aliases.append(alias)
+    return tuple(aliases)
+
+
+async def fetch_subject_aliases(
+    client: httpx.AsyncClient, subject_id: int
+) -> tuple[str, ...]:
+    """拉 ``GET /v0/subjects/{id}`` 并提取 infobox「别名」（轻量网络出口）。
+
+    与 ``BangumiCalendarGateway._request_json`` 同失败语义：网络/HTTP/
+    JSON/载荷形状失败抛 ``BangumiFetchError``（文本只含 host 与摘要）。
+    别名缺失返回空元组。请求带 Bangumi 官方要求的可识别 UA。
+    """
+    host = httpx.URL(BANGUMI_BASE_URL).host or "api.bgm.tv"
+    try:
+        response = await client.get(
+            f"{BANGUMI_BASE_URL}/v0/subjects/{subject_id}",
+            headers={"User-Agent": USER_AGENT},
+        )
+    except httpx.HTTPError as exc:
+        raise BangumiFetchError(host, type(exc).__name__) from None
+    if not (200 <= response.status_code < 300):
+        raise BangumiFetchError(host, f"http {response.status_code}")
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        raise BangumiFetchError(host, "invalid json") from None
+    if not isinstance(payload, dict):
+        raise BangumiFetchError(host, "unexpected subject payload shape")
+    return extract_subject_aliases(payload)
+
+
 def _in_month_range(date_str: str | None, start: str, end: str) -> bool:
     """条目日期（``YYYY-MM-DD`` 前缀比对）是否落在闭区间内。"""
     if not date_str:
@@ -355,6 +437,29 @@ class BangumiCalendarGateway:
         result = await self._fetch_season_inner(year, season)
         self._cache_set(key, result, NEGATIVE_TTL_S if result.degraded else SEASON_TTL_S)
         return result
+
+    async def fetch_subject_aliases(self, subject_id: int) -> tuple[str, ...]:
+        """subject 别名（缓存 24h、失败负缓存 10min）；复用网关 client 与频控。
+
+        订阅创建路径（P0-B）用：拉 ``/v0/subjects/{id}`` 提取 infobox
+        「别名」。失败语义同 ``fetch_calendar``：抛 ``BangumiFetchError``
+        （负缓存防 bgm 故障时订阅创建路径反复外呼）。
+        """
+        key = ("subject-aliases", subject_id)
+        cached = self._cache_get(key)
+        if isinstance(cached, BangumiFetchError):
+            raise cached
+        if isinstance(cached, tuple):
+            return cached
+        await self._throttle()
+        try:
+            client = await self._ensure_client()
+            aliases = await fetch_subject_aliases(client, subject_id)
+        except BangumiFetchError as exc:
+            self._cache_set(key, exc, NEGATIVE_TTL_S)
+            raise
+        self._cache_set(key, aliases, SUBJECT_TTL_S)
+        return aliases
 
     # --- 降级链 ---------------------------------------------------------------
 

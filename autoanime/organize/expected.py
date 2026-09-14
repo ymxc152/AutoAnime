@@ -53,11 +53,20 @@ class ExpectedContext:
     # 通用 RSS 规则（分号分隔关键词）;RSS 轮询侧候选前过滤
     include_keywords: str | None = None
     exclude_keywords: str | None = None
+    # 别名富化（P0-B）：订阅三标题之外的跨语言别名（title_aliases 查回）。
+    # 归一后并入剧名命中判定——feed 标题只含别名（如 romaji）也能对齐。
+    extra_titles: tuple[str, ...] = ()
     torrent_hash: str | None = None
     release_record_id: int | None = None
 
     def titles(self) -> tuple[str, ...]:
-        return tuple(t for t in (self.title_cn, self.title_jp, self.title_romaji) if t)
+        base = tuple(
+            t for t in (self.title_cn, self.title_jp, self.title_romaji) if t
+        )
+        for extra in self.extra_titles:
+            if extra and extra not in base:
+                base = (*base, extra)
+        return base
 
 
 @dataclass(frozen=True)
