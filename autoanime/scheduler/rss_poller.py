@@ -776,13 +776,21 @@ class RssPoller:
             add = self._gateway.add_torrent_bytes
             await add(candidate.data, save_path=self._save_path)
         except GatewayError as exc:
+            # 409 Conflict = qB 判定同内容任务已存在(私有站私改种子 hash 不同
+            # 但内容相同也触发):已有文件场景,下载目录里的副本由库外自动扫描
+            # 命中订阅后归档,release 如实标 FAILED 指向该出口。
+            reason = (
+                "already in downloader (409 conflict); file will be picked up by library autoscan"
+                if "409" in str(exc) or "Conflict" in str(exc)
+                else f"gateway: {exc}"
+            )
             logger.warning("gateway add failed for %s: %s", candidate.infohash, exc)
             await self._store.transition_release(
                 record.id,
                 ReleaseStatus.FAILED,
                 now=now,
                 decision=Decision.REJECTED,
-                reason=f"gateway: {exc}",
+                reason=reason,
             )
             return False
         await self._store.transition_release(
