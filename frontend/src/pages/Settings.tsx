@@ -351,6 +351,8 @@ export function SettingsPage() {
   // qbit 测试结果行内展示(ok=success 色 / fail=danger 色;不再走 toast 吞按钮反馈)
   const [qbitTestResult, setQbitTestResult] = useState<{ ok: boolean; text: string } | null>(null)
   const [qbSavePath, setQbSavePath] = useState('')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [updateResult, setUpdateResult] = useState<{ text: string; url: string | null } | null>(null)
 
   const patch = (partial: SettingsDraft): void => {
     setEdit((prev) => ({ ...prev, ...partial }))
@@ -585,6 +587,31 @@ export function SettingsPage() {
   }
 
   /** qBittorrent 连接测试(不改 dirty:只外呼,不写配置;结果走行内状态文本,不走 toast) */
+  const runCheckUpdate = async (): Promise<void> => {
+    setCheckingUpdate(true)
+    setUpdateResult(null)
+    try {
+      const d = await api.setup.checkUpdate()
+      if (d.error !== null) {
+        setUpdateResult({ text: `${strings.common.loadFailed}: ${d.error}`, url: null })
+      } else if (d.has_update) {
+        setUpdateResult({
+          text: `${strings.settings.newVersionFound}: ${d.latest}`,
+          url: d.changelog_url,
+        })
+      } else {
+        setUpdateResult({ text: strings.settings.upToDate, url: null })
+      }
+    } catch (cause) {
+      setUpdateResult({
+        text: cause instanceof ApiError ? cause.message : strings.common.actionFailed,
+        url: null,
+      })
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
   const runQbitTest = async (): Promise<void> => {
     setQbitTesting(true)
     setQbitTestResult(null)
@@ -1057,7 +1084,37 @@ export function SettingsPage() {
 
         {/* ---- 环境(只读 + API Token 本端注入,保持现状) ---- */}
         <TabsContent value="env">
-          <Card title={strings.settings.environmentSection}>
+          <Card
+            title={strings.settings.environmentSection}
+            actions={
+              <div className="flex flex-col items-end gap-1">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={checkingUpdate}
+                  onClick={() => void runCheckUpdate()}
+                >
+                  {checkingUpdate ? strings.settings.checkingUpdate : strings.settings.checkUpdate}
+                </Button>
+                {updateResult !== null && (
+                  <p role="status" className="text-xs text-ink-secondary">
+                    {updateResult.url !== null ? (
+                      <a
+                        href={updateResult.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-primary hover:text-primary-hover"
+                      >
+                        {updateResult.text} ↗
+                      </a>
+                    ) : (
+                      updateResult.text
+                    )}
+                  </p>
+                )}
+              </div>
+            }
+          >
             {qbSavePath !== '' && qbSavePath !== (edit.download_path ?? base.download_path ?? '').trim() && (
               <p
                 role="status"
