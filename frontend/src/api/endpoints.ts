@@ -3,7 +3,7 @@
  * 对齐后的方法清单同时作为「前端声明的端点契约」真源,
  * 供离线集成冒烟逐条核对(存在/方法/形状)。
  */
-import { request } from './client'
+import { getApiToken, request } from './client'
 import type {
   AuditDto,
   AuditQuery,
@@ -68,7 +68,11 @@ export const endpoints = {
     list: (query: SeriesQuery = {}) => request<Page<SeriesDto>>('/api/series', { query }),
     /** GET /api/series/{id}/poster —— 本地库海报直读(404 = 无海报,前端降级);
      *  注意:<img> 无法携带 X-API-Token 头,配置 token 时此端点会 401 → 前端降级 */
-    posterUrl: (id: number) => `/api/series/${id}/poster`,
+    posterUrl: (id: number) => {
+      // <img> 无法带 X-API-Token 头:token 模式下与 SSE 同语义经 query 传递(B7)。
+      const token = getApiToken()
+      return `/api/series/${id}/poster${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    },
   },
 
   /** /api/pending —— 待确认队列(确认/纠正/拒绝,响应 PendingResolveOut) */
