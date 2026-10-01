@@ -195,6 +195,10 @@ def encode_setting_value(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+#: app_settings 里的已知非 Settings 标记(不进合并、不打 unknown 警告)
+_NON_SETTINGS_KEYS = frozenset({"wizard_done"})
+
+
 def parse_db_overrides(rows: Mapping[str, str]) -> dict[str, Any]:
     """app_settings 行 → 字段值：按 Settings 注解逐项校验，非法行跳过。
 
@@ -204,6 +208,8 @@ def parse_db_overrides(rows: Mapping[str, str]) -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
     for key, raw in rows.items():
+        if key in _NON_SETTINGS_KEYS:
+            continue  # 已知非配置标记(如 wizard_done):静默跳过,不打警告
         field = Settings.model_fields.get(key)
         if field is None:
             logger.warning("app_settings: ignoring unknown key %r", key)
