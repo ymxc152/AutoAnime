@@ -260,6 +260,8 @@ def settings_out(
         naming_movie_dir=_val("naming_movie_dir"),
         naming_specials_s00=_val("naming_specials_s00"),
         naming_year_suffix=_val("naming_year_suffix"),
+        library_autoscan_enabled=settings.library_autoscan_enabled,
+        library_autoscan_interval_min=settings.library_autoscan_interval_min,
         rss_fetch_timeout_s=_val("rss_fetch_timeout_s"),
         rss_fetch_retries=_val("rss_fetch_retries"),
         llm_base_url=_val("llm_base_url"),

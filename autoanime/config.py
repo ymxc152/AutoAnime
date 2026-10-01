@@ -150,7 +150,14 @@ class Settings(BaseSettings):
         "pending.backlog",
     ]
 
-    model_config = SettingsConfigDict(env_prefix="AUTOANIME_", extra="ignore")
+    # env_file 读取 .env(README/DEPLOY 承诺的"密钥只放 .env"语义):
+    # pydantic-settings 默认只读进程环境变量,不加载 .env 文件——start 脚本
+    # 也未注入,此前 .env 里的密钥实际从未生效(启用审计发现)。显式声明后
+    # .env 生效;优先级 进程env > .env > toml > 默认(DB 覆盖仍最高,在
+    # apply_db_overrides)。extra 字段(如 TMDB_V4_READ_TOKEN)静默忽略。
+    model_config = SettingsConfigDict(
+        env_prefix="AUTOANIME_", env_file=".env", extra="ignore"
+    )
 
 
 def load_settings(path: Path | None = None, overrides: Mapping[str, str] | None = None) -> Settings:

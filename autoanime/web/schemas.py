@@ -375,6 +375,8 @@ class SettingsOut(BaseModel):
     naming_movie_dir: bool
     naming_specials_s00: bool
     naming_year_suffix: bool
+    library_autoscan_enabled: bool
+    library_autoscan_interval_min: int
     rss_fetch_timeout_s: float
     rss_fetch_retries: int
     # --- 识别（requires_restart 档：LLM 连接类） ---
