@@ -28,7 +28,6 @@ from autoanime.memory.alias import AliasService
 from autoanime.memory.store import SqliteStorage
 from autoanime.scheduler.rss_poller import RssPoller, source_kind
 from autoanime.scheduler.store import LoopStore
-from autoanime.web.queries import ApiStore
 
 _OPEN_STORAGES: list[SqliteStorage] = []
 
@@ -276,7 +275,9 @@ async def test_aggregate_series_level_rules_stack_after_source_rules() -> None:
         source_kwargs={"include_keywords": "1080p"},
     )
     store2 = rig2.store
-    series_a = (await store2.season_series(rig2.season_a_id))[1]
+    binding = await store2.season_series(rig2.season_a_id)
+    assert binding is not None
+    series_a = binding[1]
     from autoanime.web.queries import ApiStore
 
     api_store = ApiStore(rig2.storage)
@@ -328,7 +329,9 @@ async def test_aggregate_paused_subscription_not_polled() -> None:
         {title: _parse_result("葬送的芙莉莲", 1)},
         [("guid-b", title, "b.torrent")],
     )
-    series_b = (await rig.store.season_series(rig.season_b_id))[1]
+    binding = await rig.store.season_series(rig.season_b_id)
+    assert binding is not None
+    series_b = binding[1]
     series_b.status = "paused"
     await rig.storage.add(series_b)
     outcome = await rig.poller.poll_source(await rig.source(), now=NOW)

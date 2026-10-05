@@ -355,7 +355,7 @@ def test_outcome_with_subscription_follows_subscription_title(tmp_path: Path) ->
 def test_outcome_subscription_title_language_fallback(tmp_path: Path) -> None:
     """命名标题回退链：naming_title_language 槽缺失时按链兜底（jp→romaji→cn）。"""
 
-    async def scenario() -> tuple[str, list[str]]:
+    async def scenario() -> tuple[str, list[str | None]]:
         storage = _db(tmp_path)
         await storage.create_all()
         try:

@@ -102,7 +102,7 @@ class AliasService:
         await self._store.put_alias_map(mapping, source)
         return len(mapping)
 
-    async def alias_titles_for(self, titles: Iterable[str]) -> tuple[str, ...]:
+    async def alias_titles_for(self, titles: Iterable[str | None]) -> tuple[str, ...]:
         """查回可并入 expected_titles 的别名标题（按 canonical 形状反查）。
 
         给定一个 series 的标题（订阅三标题），取 ``title_aliases`` 中

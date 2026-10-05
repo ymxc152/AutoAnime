@@ -151,7 +151,7 @@ class QbittorrentGateway:
         client: Any = self._get_client()
 
         def _read() -> str:
-            prefs = client.app_preferences  # 属性式 dict(同步取自缓存会话)
+            prefs: Any = client.app_preferences  # 属性式 dict(同步取自缓存会话)
             if callable(prefs):
                 prefs = prefs()
             return str((prefs or {}).get("save_path", "") or "")

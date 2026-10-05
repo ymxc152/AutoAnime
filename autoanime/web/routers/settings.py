@@ -356,7 +356,12 @@ async def update_settings(
             raise HTTPException(
                 status_code=422, detail="library_path and download_path must differ"
             )
-        if lib_abs is not None and Path(lib_abs).anchor and Path(dl_abs).anchor:
+        if (
+            lib_abs is not None
+            and dl_abs is not None
+            and Path(lib_abs).anchor
+            and Path(dl_abs).anchor
+        ):
             path_cross_drive = Path(lib_abs).anchor != Path(dl_abs).anchor
     applied: dict[str, SettingEffect] = {}
     scheduler_touched = False

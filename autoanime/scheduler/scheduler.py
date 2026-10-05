@@ -430,9 +430,7 @@ class SubscriptionScheduler:
     async def _run_library_autoscan(self) -> None:
         if self._components.autoscan is None:
             return
-        report = await self._components.autoscan.scan_and_ingest(
-            now=self._clock().now() if hasattr(self, "_clock") else __import__("autoanime.scheduler.clock", fromlist=["SystemClock"]).SystemClock().now()
-        )
+        report = await self._components.autoscan.scan_and_ingest(now=SystemClock().now())
         if report.fresh:
             logger.info(
                 "library autoscan: fresh=%s matched=%s archived=%s pending=%s",

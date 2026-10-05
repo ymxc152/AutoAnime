@@ -51,7 +51,7 @@ class _StubGateway:
         if self._season_result is not None:
             return self._season_result
         if self._calendar_error is not None:
-            return SeasonBrowseResult(items=[], degraded=True, reason=self._calendar_error.detail)
+            return SeasonBrowseResult(items=(), degraded=True, reason=self._calendar_error.detail)
         return SeasonBrowseResult(items=self._calendar_items, degraded=False, reason=None)
 
     async def aclose(self) -> None:

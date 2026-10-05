@@ -92,7 +92,7 @@ class RssPollReport:
 
     @property
     def all_gaps(self) -> dict[int, tuple[int, ...]]:
-        return {o.season_id: o.gaps for o in self.outcomes if o.gaps}
+        return {o.season_id: o.gaps for o in self.outcomes if o.gaps and o.season_id is not None}
 
 
 @dataclass(frozen=True)
@@ -181,6 +181,11 @@ class RssPoller:
         # 批次三分流：聚合源（kind=aggregate）不绑季，走全订阅对齐链路。
         if source_kind(source) == RSS_SOURCE_KIND_AGGREGATE:
             return await self._poll_aggregate_source(source, now=now)
+        if source.season_id is None:
+            # season 源绑定为空属数据异常（聚合源已在上方提前返回）。
+            return SourceOutcome(
+                source_id=source.id, season_id=None, fetch_error="season/series missing",
+            )
         binding = await self._store.season_series(source.season_id)
         if binding is None:
             return SourceOutcome(
@@ -486,11 +491,12 @@ class RssPoller:
                 self._alias_service = service
             except Exception:  # noqa: BLE001 — 富化永不致命
                 return ()
-        lookup = getattr(service, "alias_titles_for", None)
+        lookup: Any = getattr(service, "alias_titles_for", None)
         if not callable(lookup):
             return ()
+        fn: Any = lookup  # callable() 收窄会把 Any 压成 (...)->object，重绑 Any 保 await
         try:
-            return await lookup(titles)
+            return await fn(titles)
         except Exception:  # noqa: BLE001 — 富化永不致命
             logger.warning("alias titles lookup failed; expected without aliases")
             return ()

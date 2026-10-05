@@ -12,6 +12,7 @@ P0-B 别名富化：创建时带 ``bangumi_id`` 则拉一次 Bangumi subject 别
 from __future__ import annotations
 
 import logging
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -134,11 +135,12 @@ async def _enrich_subject_aliases(
     )
     if canonical is None:
         return
-    fetch = getattr(bangumi, "fetch_subject_aliases", None)
+    fetch: Any = getattr(bangumi, "fetch_subject_aliases", None)
     if not callable(fetch):
         return
+    fn: Any = fetch  # callable() 收窄会把 Any 压成 (...)->object，重绑 Any 保 await
     try:
-        aliases = await fetch(subject_id)
+        aliases = await fn(subject_id)
         if aliases:
             await AliasService(storage).upsert_title_aliases(
                 canonical, aliases, source="bangumi"

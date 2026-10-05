@@ -140,10 +140,14 @@ async def test_gateway_fetch_subject_aliases_caches_and_negative_caches() -> Non
         return httpx.Response(200, json=SUBJECT_JSON)
 
     now = 0.0
+
+    async def _no_sleep(_d: float) -> None:
+        return None
+
     gateway = BangumiCalendarGateway(
         transport=httpx.MockTransport(handler),
         clock=lambda: now,
-        sleeper=lambda _d: None,
+        sleeper=_no_sleep,
         qps=0.0,
     )
     first = await gateway.fetch_subject_aliases(3281)

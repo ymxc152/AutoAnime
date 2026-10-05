@@ -22,7 +22,7 @@ L1 解析 + align 对齐到已有 (series, season) → 命中子集走与手动�
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -60,7 +60,7 @@ class AutoScanReport:
 
 
 #: 收口函数签名（默认 cli._handle_import_outcome；测试注入 fake）
-IngestBatchFn = Callable[..., dict[Path, str]]
+IngestBatchFn = Callable[..., Awaitable[dict[Path, str]]]
 
 
 class LibraryAutoScanner:
@@ -323,6 +323,7 @@ async def _default_ingest_batch(
                 )
                 actions[file] = str(item.get("action", "failed"))
     finally:
-        if transport is not None and hasattr(transport, "aclose"):
-            await transport.aclose()
+        aclose = getattr(transport, "aclose", None)
+        if aclose is not None:
+            await aclose()
     return actions

@@ -14,6 +14,8 @@ alembic 批处理模式 ``batch_alter_table`` 重建表（先 add_column 探测�
 
 from __future__ import annotations
 
+from typing import Any
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -23,7 +25,7 @@ branch_labels = None
 depends_on = None
 
 
-def _columns(table: str) -> dict[str, dict[str, object]]:
+def _columns(table: str) -> dict[str, Any]:
     inspector = sa.inspect(op.get_bind())
     return {column["name"]: column for column in inspector.get_columns(table)}
 

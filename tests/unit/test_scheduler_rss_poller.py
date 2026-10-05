@@ -403,9 +403,12 @@ async def test_poll_applies_exclude_rule() -> None:
         {good: _parse_result("孤独摇滚", 1), bad: _parse_result("孤独摇滚", 2)},
         [("guid-a", good, "a.torrent"), ("guid-b", bad, "b.torrent")],
     )
-    season, series = await rig.store.season_series(rig.season_id)
+    binding = await rig.store.season_series(rig.season_id)
+    assert binding is not None
+    season, series = binding
     async with rig.storage.transaction() as session:
         row = await session.get(Series, series.id)
+        assert row is not None
         row.exclude_keywords = "内嵌广告"
     outcome = await rig.poller.poll_source(await rig.source(), now=NOW)
     assert outcome.rejected == 1
@@ -420,9 +423,12 @@ async def test_poll_applies_include_rule_as_whitelist() -> None:
         {a: _parse_result("孤独摇滚", 1), b: _parse_result("孤独摇滚", 2)},
         [("guid-a", a, "a.torrent"), ("guid-b", b, "b.torrent")],
     )
-    season, series = await rig.store.season_series(rig.season_id)
+    binding = await rig.store.season_series(rig.season_id)
+    assert binding is not None
+    season, series = binding
     async with rig.storage.transaction() as session:
         row = await session.get(Series, series.id)
+        assert row is not None
         row.include_keywords = "简中；B-Global"
     outcome = await rig.poller.poll_source(await rig.source(), now=NOW)
     assert outcome.rejected == 2
