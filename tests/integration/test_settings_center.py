@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -116,7 +117,8 @@ async def test_put_outside_whitelist_is_422(client) -> None:
     c, _, _ = client
     resp = await c.put("/api/settings", json={"api_port": 1})
     assert resp.status_code == 422
-    resp = await c.put("/api/settings", json={"library_path": "/tmp"})
+    # 相对路径在所有平台都过不了绝对路径校验（"/tmp" 仅在 POSIX 算绝对）
+    resp = await c.put("/api/settings", json={"library_path": "../outside"})
     assert resp.status_code == 422
 
 
@@ -516,20 +518,22 @@ def test_asgi_scheduler_rebuild_on_scheduler_tier_put(
 # ---------------------------------------------------------------------------
 
 
-async def test_put_paths_updates_immediately_and_persists(client) -> None:
+async def test_put_paths_updates_immediately_and_persists(client, tmp_path) -> None:
     c, settings, _mp = client
+    lib = str(tmp_path / "library")
+    dl = str(tmp_path / "downloads")
     resp = await c.put(
         "/api/settings",
-        json={"library_path": "D:/media/library", "download_path": "D:/media/downloads"},
+        json={"library_path": lib, "download_path": dl},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["applied"]["library_path"] == "immediate"
     assert body["applied"]["download_path"] == "immediate"
     # 运行时实例立即生效;GET 回显新值
-    assert str(settings.library_path) == "D:/media/library"
+    assert str(settings.library_path) == lib
     after = await c.get("/api/settings")
-    assert after.json()["library_path"] == "D:/media/library"
+    assert after.json()["library_path"] == lib
     assert after.json()["library_path_abs"].endswith("library")
 
 
@@ -540,16 +544,21 @@ async def test_put_paths_relative_is_422(client) -> None:
     assert "absolute" in resp.json()["detail"]
 
 
-async def test_put_paths_same_dir_is_422(client) -> None:
+async def test_put_paths_same_dir_is_422(client, tmp_path) -> None:
     c, _, _ = client
+    same = str(tmp_path / "same")
     resp = await c.put(
         "/api/settings",
-        json={"library_path": "D:/media/same", "download_path": "D:/media/same"},
+        json={"library_path": same, "download_path": same},
     )
     assert resp.status_code == 422
     assert "must differ" in resp.json()["detail"]
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("win"),
+    reason="跨盘警告是盘符 anchor 语义，POSIX 绝对路径无盘符无法构造",
+)
 async def test_put_paths_cross_drive_warns(client) -> None:
     c, _, _ = client
     resp = await c.put(
@@ -559,13 +568,15 @@ async def test_put_paths_cross_drive_warns(client) -> None:
     assert resp.status_code == 200
     assert any("copy" in w for w in resp.json()["warnings"])
 
-async def test_put_paths_null_clears_override_and_falls_back(client) -> None:
-    c, settings, _mp = client
-    resp = await c.put(chr(47)+'api/settings', json={'library_path': 'D:/media/library', 'download_path': 'D:/media/downloads'})
-    assert resp.status_code == 200
-    resp = await c.put(chr(47)+'api/settings', json={'library_path': None})
+async def test_put_paths_null_clears_override_and_falls_back(client, tmp_path) -> None:
+    c, _, _ = client
+    lib = str(tmp_path / "library")
+    dl = str(tmp_path / "downloads")
+    resp = await c.put("/api/settings", json={"library_path": lib, "download_path": dl})
     assert resp.status_code == 200, resp.text
-    after = await c.get(chr(47)+'api/settings')
+    resp = await c.put("/api/settings", json={"library_path": None})
+    assert resp.status_code == 200, resp.text
+    after = await c.get("/api/settings")
     assert after.status_code == 200
-    assert after.json()['library_path'] == 'library'
-    assert after.json()['library_path_abs'].endswith('library')
+    assert after.json()["library_path"] == "library"
+    assert after.json()["library_path_abs"].endswith("library")
